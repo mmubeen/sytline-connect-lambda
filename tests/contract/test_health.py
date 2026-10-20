@@ -38,58 +38,17 @@ def test_unknown_action():
     assert out["ok"] is False and out["errors"][0]["code"] == "UNKNOWN_ACTION"
 
 
-def test_dry_run_never_opens_sql_and_default_stage_list_is_unchanged(monkeypatch):
-    import syteline.sql as sqlmod
-
-    def boom(*a, **k):
-        raise AssertionError("SQL must not be touched by health")
-
-    monkeypatch.setattr(sqlmod.SqlClient, "_open", boom)
-    monkeypatch.setenv("SYTELINE_WSDL", "http://127.0.0.1:9/x?wsdl")
-    monkeypatch.setenv("SYTELINE_SQL_HOST", "127.0.0.1")
-    monkeypatch.setenv("SYTELINE_SQL_PORT", "9")
-    out = lf.lambda_handler({"action": "health", "dry_run": True, "check_sql": True}, None)
-    assert "sql" not in [s["stage"] for s in out["stages"]]
-    monkeypatch.setenv("SYTELINE_USER", "u")
-    monkeypatch.setenv("SYTELINE_PASS", "p")
-    out = lf.lambda_handler({}, None)
-    assert [s["stage"] for s in out["stages"]] == ["dns", "tcp"]  # SQL configured, but not requested
-
-
-def test_sql_stage_is_opt_in_non_dry_tcp_only(monkeypatch):
-    import socket
-
-    from syteline import health
-
-    monkeypatch.setenv("SYTELINE_WSDL", "http://127.0.0.1:9/x?wsdl")
-    monkeypatch.setenv("SYTELINE_USER", "u")
-    monkeypatch.setenv("SYTELINE_PASS", "p")
-    monkeypatch.setenv("SYTELINE_SQL_HOST", "sqlhost")
-    monkeypatch.setenv("SYTELINE_SQL_PORT", "14330")
-    seen = []
-
-    class Conn:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(0, 0, 0, "", ("10.0.0.1", 80))])
-    monkeypatch.setattr(socket, "create_connection", lambda addr, timeout=None: seen.append(addr) or Conn())
-
-    class Svc:
-        def CreateSessionToken(self, *a):
-            return "tok"
-
-    class Client:
-        service = Svc()
-
+def test_dry_run_never_creates_a_session_and_check_sql_has_no_effect(monkeypatch):
     import zeep
 
-    monkeypatch.setattr(zeep, "Client", lambda *a, **k: Client())
-    out = health.run_health({"check_sql": True})
-    assert [s["stage"] for s in out["stages"]] == ["dns", "tcp", "wsdl", "token", "sql"] and out["ok"]
-    assert ("sqlhost", 14330) in seen
-    out = health.run_health({})
-    assert [s["stage"] for s in out["stages"]] == ["dns", "tcp", "wsdl", "token"]
+    def boom(*a, **k):
+        raise AssertionError("dry run must not create a SOAP client / log in")
+
+    monkeypatch.setattr(zeep, "Client", boom)
+    monkeypatch.setenv("SYTELINE_WSDL", "http://127.0.0.1:9/x?wsdl")
+    out = lf.lambda_handler({"action": "health", "dry_run": True, "check_sql": True}, None)
+    assert [s["stage"] for s in out["stages"]][:3] == ["load", "dns", "tcp"]
+    monkeypatch.setenv("SYTELINE_USER", "u")
+    monkeypatch.setenv("SYTELINE_PASS", "p")
+    out = lf.lambda_handler({"check_sql": True}, None)
+    assert [s["stage"] for s in out["stages"]] == ["dns", "tcp"]  # unchanged; no sql stage exists

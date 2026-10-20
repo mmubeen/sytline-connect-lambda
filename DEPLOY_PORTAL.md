@@ -1,6 +1,6 @@
 # Deploying the direct-invoke function via the AWS Console (no SAM)
 
-> This covers only the direct-invoke function (`health`, `add_note`, `get_notes`). The private order API, worker, sweeper and job table are defined in `scr/template.yaml` (deploy with SAM); see README.md. The function needs the `python-tds` dependency in the layer, runs in the private subnets that route to the plant, and keeps `SYTELINE_LIVE_WRITES=false` unless an approved test window.
+> This covers only the direct-invoke function (`health`, `add_note`, `get_notes`). The private order API, worker, sweeper and job table are defined in `scr/template.yaml` (deploy with SAM); see README.md. The function runs in the private subnets that route to the plant (outbound HTTP port 80 to the web service only; no database access) and keeps `SYTELINE_LIVE_WRITES=false` unless an approved test window.
 
 ## 1. What gets deployed
 
@@ -8,7 +8,7 @@
 |---|---|
 | Secrets Manager secret `sytline/connect` | Holds `SYTELINE_PASS` (and optionally other keys) |
 | IAM execution role `sytline-connect-role` | Logs + read the secret (+ VPC ENI access if in a VPC) |
-| Lambda layer `sytline-connect-deps` | `zeep`, `lxml`, `requests`, `python-tds` built for Linux |
+| Lambda layer `sytline-connect-deps` | `zeep`, `lxml`, `requests` built for Linux |
 | Lambda function `sytline-connect` | `scr/lambda_function.py` + `scr/syteline/`, handler `lambda_function.lambda_handler` |
 | (Optional) VPC config | Only if SyteLine is private |
 

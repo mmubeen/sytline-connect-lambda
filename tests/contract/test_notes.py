@@ -1,10 +1,12 @@
 import lambda_function as lf
-from fakes import FakeSql
+from fakes import FakeSoap
 
 
 def setup(monkeypatch):
-    s = FakeSql(records={("co", "100"): "rp-co", ("job", "5000"): "rp-job"})
-    monkeypatch.setattr(lf, "_sql_factory", lambda: s)
+    s = FakeSoap()
+    s.add_record("SLCos", CoNum="100")
+    s.add_record("CCTJobs", Job="5000")
+    monkeypatch.setattr(lf, "_client_factory", lambda: s)
     return s
 
 
@@ -34,7 +36,7 @@ def test_since_filter(monkeypatch, live_writes):
 def test_not_found_writes_nothing(monkeypatch, live_writes):
     s = setup(monkeypatch)
     out = call(action="add_note", record_type="co", record_key="999", text="x")
-    assert out["errors"][0]["code"] == "NOT_FOUND" and s.writes == []
+    assert out["errors"][0]["code"] == "NOT_FOUND" and s.writes() == []
     assert call(action="get_notes", record_type="job", record_key="nope")["errors"][0]["code"] == "NOT_FOUND"
 
 
@@ -48,4 +50,4 @@ def test_live_writes_disabled_error_for_add_note_only(monkeypatch):
     s = setup(monkeypatch)
     assert call(action="add_note", record_type="co", record_key="100", text="x")["errors"][0]["code"] == "LIVE_WRITES_DISABLED"
     assert call(action="get_notes", record_type="co", record_key="100")["ok"] is True
-    assert s.writes == []
+    assert s.writes() == []

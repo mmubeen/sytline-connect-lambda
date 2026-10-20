@@ -1,9 +1,9 @@
 # Data Model: SyteLine ERP Integration
 
-## UploadJob (DynamoDB, `pk = JOB#<job_id>`)
+## Upload (DynamoDB, `pk = UPLOAD#<upload_id>`)
 | Field | Type | Notes |
 |---|---|---|
-| job_id | string (UUID) | returned to the caller |
+| upload_id | string (UUID) | the tracking ID returned to the caller; distinct from a SyteLine production job number |
 | request_ref | string | 1–128 chars, caller supplied, unique |
 | payload_hash | string | SHA-256 of the canonical request, detects ref reuse with a different body |
 | request | map | the confirmed order as accepted (retained even if ERP/DB is down, FR-015) |
@@ -27,7 +27,7 @@ accepted ──sweeper re-drives──► accepted (no write can have happened)
 `needs_reconciliation` is terminal for automation: only a person, through an explicit operator action outside this service, closes it (`succeeded`/`failed`) or authorizes a new submission. No transition replays an upload automatically.
 
 ## RequestIndex (`pk = REF#<request_ref>`)
-`{request_ref, job_id, payload_hash}` written atomically with the job (TransactWrite, condition `attribute_not_exists`).
+`{request_ref, upload_id, payload_hash}` written atomically with the upload (TransactWrite, condition `attribute_not_exists`).
 
 ## ConfirmedOrderRequest (API body)
 - `request_ref` (required, 1–128)
@@ -43,10 +43,10 @@ Validation reports all problems together (FR-002).
 ## ERP records (owned by SyteLine)
 | Entity | Path | Key |
 |---|---|---|
-| Customer (read) | SQL `custaddr` | cust_num, cust_seq |
-| Customer Order | SOAP IDO `SLCos` (required CoNum, OrderDate, Stat) | CoNum from `NextCoSp` |
-| CO line | SOAP IDO `CCT_Coitems` (+ `UserDefinedFields` teardown) | CoNum + CoLine |
-| Job (one per line) | SOAP IDO `CCTJobs` (required Job, OrdType, Whse) | Job from `NextWOSp` |
-| Notes | SQL `CreateSpecificNoteSp`, `SpecificNotes`/`ObjectNotes` | SpecificNoteToken; `ObjectNotes.RefRowPointer` → record `RowPointer` |
+| Customer (read only) | Web service: customer-address collection (name confirmed by discovery), bill-to row | cust_num, cust_seq |
+| Customer Order | Web service IDO `SLCos` (required CoNum, OrderDate, Stat) | CoNum from method `NextCoSp` |
+| CO line | Web service IDO `CCT_Coitems` (+ teardown, see research open item 4) | CoNum + CoLine |
+| Job (one per line) | Web service IDO `CCTJobs` (required Job, OrdType, Whse) | Job from method `NextWOSp` |
+| Notes | Web service: method `CreateSpecificNoteSp` (write); collections `SpecificNotes` and `ObjectNotes` (read) | SpecificNoteToken; `ObjectNotes.RefRowPointer` → record `RowPointer` |
 
 Relationships: CO 1—n lines; line 1—1 job; customer 1—n COs.

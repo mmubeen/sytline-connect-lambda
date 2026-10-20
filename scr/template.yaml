@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: SyteLine ERP integration - private order-upload API, worker, status, sweeper, health/notes
+Description: SyteLine ERP integration (web service only) - private order-upload API, worker, status, sweeper, health/notes
 
 Parameters:
   SytelineWsdl:
@@ -10,17 +10,10 @@ Parameters:
     Type: String
   SytelineSecretArn:
     Type: String
-    Description: Secrets Manager secret (JSON) with SYTELINE_PASS, SYTELINE_SQL_USER, SYTELINE_SQL_PASS
+    Description: Secrets Manager secret (JSON) with SYTELINE_PASS
   SytelineConfig:
     Type: String
     Default: CCT
-  SqlHost:
-    Type: String
-  SqlPort:
-    Type: String
-    Description: Verified SQL listener port (confirm with Chromalloy IT; do not assume 1433)
-  SqlDatabase:
-    Type: String
   DefaultWhse:
     Type: String
     Default: ""
@@ -37,15 +30,29 @@ Parameters:
     Description: execute-api interface VPC endpoint (vpce-...) through which approved clients call the API
   WorkerSecurityGroupIds:
     Type: CommaDelimitedList
-    Description: Security groups for the worker/health functions (outbound to SOAP port 80 and the SQL port)
+    Description: Security groups for the worker/health functions (outbound to the web service on HTTP port 80)
   WorkerSubnetIds:
     Type: CommaDelimitedList
     Description: Private subnets with a route to the plant network over the VPN
+  WorkerVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC of the worker subnets (for the DynamoDB and Secrets Manager VPC endpoints)
+  WorkerRouteTableIds:
+    Type: CommaDelimitedList
+    Description: Route tables of the worker subnets (DynamoDB gateway endpoint)
+  CreateVpcEndpoints:
+    Type: String
+    Default: "true"
+    AllowedValues: ["false", "true"]
+    Description: Set "false" if the VPC already reaches DynamoDB and Secrets Manager (endpoints or NAT)
   UseFipsEndpoints:
     Type: String
     Default: "true"
     AllowedValues: ["false", "true"]
     Description: Use FIPS AWS service endpoints (GovCloud)
+
+Conditions:
+  MakeEndpoints: !Equals [!Ref CreateVpcEndpoints, "true"]
 
 Globals:
   Function:
@@ -58,6 +65,26 @@ Globals:
         AWS_USE_FIPS_ENDPOINT: !Ref UseFipsEndpoints
 
 Resources:
+  DynamoDbEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: MakeEndpoints
+    Properties:
+      VpcId: !Ref WorkerVpcId
+      VpcEndpointType: Gateway
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.dynamodb
+      RouteTableIds: !Ref WorkerRouteTableIds
+
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: MakeEndpoints
+    Properties:
+      VpcId: !Ref WorkerVpcId
+      VpcEndpointType: Interface
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+      SubnetIds: !Ref WorkerSubnetIds
+      SecurityGroupIds: !Ref WorkerSecurityGroupIds
+      PrivateDnsEnabled: true
+
   JobsTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -142,9 +169,6 @@ Resources:
           SYTELINE_USER: !Ref SytelineUser
           SYTELINE_CONFIG: !Ref SytelineConfig
           SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
-          SYTELINE_SQL_HOST: !Ref SqlHost
-          SYTELINE_SQL_PORT: !Ref SqlPort
-          SYTELINE_SQL_DB: !Ref SqlDatabase
           SYTELINE_DEFAULT_WHSE: !Ref DefaultWhse
           SYTELINE_DEFAULT_ORDTYPE: !Ref DefaultOrdType
           SYTELINE_LIVE_WRITES: !Ref LiveWrites
@@ -192,9 +216,6 @@ Resources:
           SYTELINE_USER: !Ref SytelineUser
           SYTELINE_CONFIG: !Ref SytelineConfig
           SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
-          SYTELINE_SQL_HOST: !Ref SqlHost
-          SYTELINE_SQL_PORT: !Ref SqlPort
-          SYTELINE_SQL_DB: !Ref SqlDatabase
           SYTELINE_LIVE_WRITES: !Ref LiveWrites
       Policies:
         - Statement:

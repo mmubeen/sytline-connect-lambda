@@ -2,7 +2,7 @@
 
 import pytest
 
-from fakes import FakeSoap, FakeSql
+from fakes import FakeSoap
 from syteline import pipeline
 
 CFG = {"SYTELINE_DEFAULT_WHSE": "M", "SYTELINE_DEFAULT_ORDTYPE": "J"}
@@ -19,85 +19,83 @@ def _on(live_writes):
     pass
 
 
-def go(soap, n=2, sql=None):
-    return pipeline.run_upload(req(n), sql or FakeSql(customers=CUST), soap, CFG), soap
+def go(scenarios=None, n=2, **kw):
+    soap = FakeSoap(scenarios, customers=CUST, **kw)
+    return pipeline.run_upload(req(n), soap, CFG), soap
 
 
-def assert_no_delete_no_retry(soap, max_inserts):
-    assert all(c[0] != "delete" for c in soap.calls) and not hasattr(soap, "delete")
-    inserts = [c for c in soap.calls if c[0] == "insert"]
-    assert len(inserts) == len(set(enumerate(inserts))) and len(inserts) <= max_inserts
+def attempts(soap, kind, name):
+    return len([c for c in soap.calls if c == (kind, name)])
 
 
 def test_first_insert_rejected_and_readback_proves_absent_is_failed():
-    out, soap = go(FakeSoap({("insert", "SLCos", 1): "reject"}))
+    out, soap = go({("insert", "SLCos", 1): "reject"})
     assert out["state"] == "failed" and out["code"] == "ERP_REJECTED" and out["step"] == "create_co"
-    assert soap.count("SLCos") == 0
-    assert [c for c in soap.calls if c[0] == "insert"] == [("insert", "SLCos")]  # one attempt only
+    assert soap.count("SLCos") == 0 and attempts(soap, "insert", "SLCos") == 1  # one attempt only
 
 
 def test_first_insert_rejected_but_readback_fails_is_needs_reconciliation():
-    out, soap = go(FakeSoap({("insert", "SLCos", 1): "reject"}, read_fail=True))
+    out, _ = go({("insert", "SLCos", 1): "reject"}, readback_fail=True)
     assert out["state"] == "needs_reconciliation" and out["possibly_written"] == [{"kind": "co", "key": "100"}]
 
 
 def test_first_insert_not_even_connected_is_failed():
-    out, _ = go(FakeSoap({("insert", "SLCos", 1): "unreachable"}))
+    out, _ = go({("insert", "SLCos", 1): "unreachable"})
     assert out["state"] == "failed" and out["code"] == "ERP_UNREACHABLE"
 
 
 def test_timeout_after_insert_is_never_failed_even_if_row_is_visible():
-    out, soap = go(FakeSoap({("insert", "SLCos", 1): "timeout_after"}))
+    out, soap = go({("insert", "SLCos", 1): "timeout_after"})
     assert out["state"] == "needs_reconciliation" and out["code"] == "UNCERTAIN_OUTCOME"
     assert soap.count("SLCos") == 1 and out["possibly_written"] == [{"kind": "co", "key": "100"}]
-    assert_no_delete_no_retry(soap, 1)
+    assert attempts(soap, "insert", "SLCos") == 1 and not hasattr(soap, "delete")
 
 
 def test_timeout_before_storing_still_needs_reconciliation():
-    out, soap = go(FakeSoap({("insert", "SLCos", 1): "timeout_before"}))
+    out, _ = go({("insert", "SLCos", 1): "timeout_before"})
     assert out["state"] == "needs_reconciliation"  # a timeout never proves the row is absent
 
 
 def test_timeout_on_later_line_lists_everything_that_may_exist():
-    out, soap = go(FakeSoap({("insert", "CCT_Coitems", 2): "timeout_after"}))
+    out, soap = go({("insert", "CCT_Coitems", 2): "timeout_after"})
     assert out["state"] == "needs_reconciliation" and out["step"] == "create_line_2"
     assert out["possibly_written"] == [
         {"kind": "co", "key": "100"}, {"kind": "line", "key": "100/1"}, {"kind": "job", "key": "5000"},
         {"kind": "line", "key": "100/2"}]
-    assert_no_delete_no_retry(soap, 4)
+    assert len([c for c in soap.calls if c[0] == "insert"]) == 4  # nothing retried
 
 
 def test_rejection_after_earlier_rows_is_needs_reconciliation_not_failed():
-    out, soap = go(FakeSoap({("insert", "CCTJobs", 1): "reject"}))
+    out, soap = go({("insert", "CCTJobs", 1): "reject"})
     assert out["state"] == "needs_reconciliation" and out["code"] == "ERP_REJECTED"
     assert soap.count("SLCos") == 1 and soap.count("CCT_Coitems") == 1  # left in place for a person
 
 
 def test_unreachable_after_earlier_rows_is_needs_reconciliation():
-    out, _ = go(FakeSoap({("insert", "CCT_Coitems", 1): "unreachable"}))
+    out, _ = go({("insert", "CCT_Coitems", 1): "unreachable"})
     assert out["state"] == "needs_reconciliation" and out["possibly_written"] == [{"kind": "co", "key": "100"}]
 
 
 def test_readback_failure_is_needs_reconciliation_with_all_records():
-    out, _ = go(FakeSoap(read_fail=True), n=1)
-    assert out["state"] == "needs_reconciliation" and out["step"] == "read_back"
-    assert len(out["possibly_written"]) == 3
+    out, _ = go(n=1, readback_fail=True)
+    assert out["state"] == "needs_reconciliation" and out["step"] == "read_back" and len(out["possibly_written"]) == 3
 
 
 @pytest.mark.parametrize("corrupt", [{("CCT_Coitems", "QtyOrdered"): "99"}, {("CCT_Coitems", "Item"): "WRONG"},
                                      {("SLCos", "CustNum"): "OTHER"}])
 def test_readback_mismatch_is_needs_reconciliation(corrupt):
-    out, _ = go(FakeSoap(corrupt=corrupt), n=1)
+    out, _ = go(n=1, corrupt=corrupt)
     assert out["state"] == "needs_reconciliation" and out["code"] == "READBACK_MISMATCH"
 
 
-def test_number_allocation_failure_before_rows_is_failed_after_rows_is_parked():
-    class SqlBoom(FakeSql):
-        def execute_write(self, sql, params=()):
-            if "nextwosp" in sql.lower():
-                from syteline.errors import ErpUncertain
-                raise ErpUncertain("lost connection")
-            return super().execute_write(sql, params)
+def test_number_allocation_failure_before_any_row_is_failed():
+    for scenario in ("timeout_before", "timeout_after", "reject", "unreachable"):
+        out, soap = go({("invoke", "NextCoSp", 1): scenario})
+        assert out["state"] == "failed" and out["step"] == "number_co", scenario
+        assert soap.count("SLCos") == 0
 
-    out, soap = go(FakeSoap(), sql=SqlBoom(customers=CUST))
-    assert out["state"] == "needs_reconciliation" and out["step"] == "number_job_1"  # CO row already exists
+
+def test_number_allocation_failure_after_rows_exist_is_needs_reconciliation():
+    out, _ = go({("invoke", "NextWOSp", 1): "timeout_before"})
+    assert out["state"] == "needs_reconciliation" and out["step"] == "number_job_1"
+    assert out["possibly_written"] == [{"kind": "co", "key": "100"}]  # the CO row exists

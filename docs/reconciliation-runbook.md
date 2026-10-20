@@ -6,7 +6,7 @@ written, read-back failure or mismatch, or a worker that stopped mid-upload). Th
 deletes ERP rows and never retries these automatically.**
 
 ## 1. Read the job
-`GET /upload-jobs/{id}` returns `failure` (`code`, `message`, `step`) and `possibly_written`, a list of
+`GET /upload-jobs/{id}` (the `id` is the upload ID) returns `failure` (`code`, `message`, `step`) and `possibly_written`, a list of
 `{kind, key}` entries: `co` (CO number), `line` (`<CO>/<line>`), `job` (job number).
 
 | code | meaning |

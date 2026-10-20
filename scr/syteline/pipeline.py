@@ -1,8 +1,9 @@
 """
-The upload sequence from the instruction sheet, section 4 (see research.md R5/R6):
+The upload sequence (instruction sheet section 4, adapted to FR-018: web service only; see
+research.md R5/R6):
 
-  resolve customer (SQL) -> [live-writes gate] -> NextCoSp (SQL) -> insert SLCos (SOAP)
-  -> per line: NextWoSp (SQL) -> insert CCT_Coitems -> insert CCTJobs -> read back and verify.
+  resolve customer (read) -> [live-writes gate] -> NextCoSp (method call) -> insert SLCos
+  -> per line: NextWOSp (method call) -> insert CCT_Coitems -> insert CCTJobs -> read back and verify.
 
 Outcome classification (FR-004):
   failed                 - nothing can have been written (or the ERP rejected the very first row and
@@ -12,27 +13,21 @@ Outcome classification (FR-004):
                            mismatch. No delete, no retry, ever.
   succeeded              - every row verified by read-back.
 
-ASSUMPTIONS (confirm read-only with task T031): the property names written to SLCos / CCT_Coitems /
-CCTJobs and the way the teardown value is stored (here: property `Teardown` on CCT_Coitems).
+ASSUMPTIONS (confirm with discovery task T013): the web-service names in idos.py, the property names
+written to SLCos / CCT_Coitems / CCTJobs and the way the teardown value is stored (here: property
+`Teardown` on CCT_Coitems). Verified only against fakes.
 """
 
 import logging
 
-from . import config, errors, resolver
-from .errors import (ErpRejected, ErpUncertain, ErpUnreachable, IntegrationError, LiveWritesDisabled)
+from . import config, errors, idos, resolver
+from .errors import (ErpError, ErpRejected, ErpUncertain, ErpUnreachable, IntegrationError, LiveWritesDisabled)
 from .validation import today
 
 log = logging.getLogger(__name__)
 
 MIN_REMAINING_MS = 5000
-CO_IDO, LINE_IDO, JOB_IDO = "SLCos", "CCT_Coitems", "CCTJobs"
-
-NEXT_CO_SQL = ("DECLARE @Key LongList, @Infobar Infobar; "
-               "EXEC dbo.NextCoSp NULL, NULL, 10, @Key OUTPUT, @Infobar OUTPUT; "
-               "SELECT @Key AS [Key], @Infobar AS Infobar")
-NEXT_JOB_SQL = ("DECLARE @Key JobType, @Infobar InfobarType; "
-                "EXEC dbo.NextWoSp NULL, NULL, 10, @Key OUTPUT, @Infobar OUTPUT; "
-                "SELECT @Key AS [Key], @Infobar AS Infobar")
+CO_IDO, LINE_IDO, JOB_IDO = idos.CO_IDO, idos.LINE_IDO, idos.JOB_IDO
 
 
 def _q(v):
@@ -47,8 +42,8 @@ class _Stop(Exception):
 
 
 class Upload:
-    def __init__(self, request, sql, soap, cfg, remaining_ms=None, on_progress=None):
-        self.req, self.sql, self.soap, self.cfg = request, sql, soap, cfg
+    def __init__(self, request, soap, cfg, remaining_ms=None, on_progress=None):
+        self.req, self.soap, self.cfg = request, soap, cfg
         self.remaining_ms = remaining_ms or (lambda: 10 ** 9)
         self.on_progress = on_progress
         self.possibly = []  # [{"kind","key"}]
@@ -77,21 +72,22 @@ class Upload:
                         else self._failed(errors.TIME_BUDGET_EXHAUSTED, msg, step))
 
     # -- steps ---------------------------------------------------------------------------
-    def _allocate(self, sql_text, kind, step):
+    def _allocate(self, method, kind, step):
+        """Allocate a CO/job number by calling SyteLine's routine through the web service."""
         self._time(step)
         try:
-            rows = self.sql.execute_write(sql_text)
+            out = self.soap.invoke(method[0], method[1], [])
         except LiveWritesDisabled:
             raise _Stop(self._failed(errors.LIVE_WRITES_DISABLED, "live ERP writes are disabled", step))
-        except (ErpUnreachable, ErpUncertain) as exc:
-            # a number may have been consumed but no ERP row exists yet unless earlier rows were written
-            out = self._park if self.possibly else self._failed
-            raise _Stop(out(errors.ERP_UNREACHABLE, f"{kind} number allocation failed: {exc}", step))
-        key = str(rows[0].get("Key", "")).strip() if rows else ""
+        except ErpError as exc:
+            # a number may have been consumed but no ERP row exists unless earlier rows were written
+            code = errors.ERP_REJECTED if isinstance(exc, ErpRejected) else errors.ERP_UNREACHABLE
+            out_fn = self._park if self.possibly else self._failed
+            raise _Stop(out_fn(code, f"{kind} number allocation failed: {exc}", step))
+        key = str(out[0]).strip() if out else ""
         if not key:
-            info = rows[0].get("Infobar") if rows else None
-            out = self._park if self.possibly else self._failed
-            raise _Stop(out(errors.ERP_REJECTED, f"{kind} number allocation returned no number ({info})", step))
+            out_fn = self._park if self.possibly else self._failed
+            raise _Stop(out_fn(errors.ERP_REJECTED, f"{kind} number allocation returned no number", step))
         return key
 
     def _insert(self, ido, values, kind, key, step):
@@ -164,17 +160,17 @@ class Upload:
         try:
             step = "resolve_customer"
             try:
-                self.customer = resolver.resolve_customer(self.sql, req["customer"])
+                self.customer = resolver.resolve_customer(self.soap, req["customer"])
             except IntegrationError as exc:
                 raise _Stop(self._failed(exc.err["code"], exc.err["message"], step))
-            except (ErpUnreachable, ErpUncertain) as exc:
+            except ErpError as exc:
                 raise _Stop(self._failed(errors.ERP_UNREACHABLE, str(exc), step))
 
             if not config.live_writes_enabled():  # allocating numbers is a write too (FR-016)
                 raise _Stop(self._failed(errors.LIVE_WRITES_DISABLED,
                                          "live ERP writes are disabled; nothing was written", "live_writes_check"))
 
-            self.co_num = self._allocate(NEXT_CO_SQL, "CO", "number_co")
+            self.co_num = self._allocate(idos.next_co(), "CO", "number_co")
             self._insert(CO_IDO, {
                 "CoNum": self.co_num, "CustNum": self.customer["cust_num"], "CustSeq": self.customer["cust_seq"],
                 "OrderDate": req.get("order_date") or today(), "Stat": "O",
@@ -183,7 +179,7 @@ class Upload:
             whse = req.get("warehouse") or self.cfg.get("SYTELINE_DEFAULT_WHSE", "")
             ordtype = req.get("order_type") or self.cfg.get("SYTELINE_DEFAULT_ORDTYPE", "")
             for i, ln in enumerate(req["lines"], start=1):
-                job = self._allocate(NEXT_JOB_SQL, "job", f"number_job_{i}")
+                job = self._allocate(idos.next_job(), "job", f"number_job_{i}")
                 vals = {"CoNum": self.co_num, "CoLine": i, "Item": ln["item"], "UM": ln["uom"],
                         "QtyOrdered": ln["quantity"]}
                 for src, dst in (("due_date", "DueDate"), ("price", "Price"), ("teardown", "Teardown")):
@@ -203,5 +199,5 @@ class Upload:
             return stop.outcome
 
 
-def run_upload(request, sql, soap, cfg, remaining_ms=None, on_progress=None):
-    return Upload(request, sql, soap, cfg, remaining_ms, on_progress).run()
+def run_upload(request, soap, cfg, remaining_ms=None, on_progress=None):
+    return Upload(request, soap, cfg, remaining_ms, on_progress).run()

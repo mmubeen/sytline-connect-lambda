@@ -15,11 +15,6 @@ def load_config(skip_secret=False):
         "SYTELINE_CONFIG": os.environ.get("SYTELINE_CONFIG", "") or "CCT",
         "SYTELINE_DEFAULT_WHSE": os.environ.get("SYTELINE_DEFAULT_WHSE", ""),
         "SYTELINE_DEFAULT_ORDTYPE": os.environ.get("SYTELINE_DEFAULT_ORDTYPE", ""),
-        "SYTELINE_SQL_HOST": os.environ.get("SYTELINE_SQL_HOST", ""),
-        "SYTELINE_SQL_PORT": os.environ.get("SYTELINE_SQL_PORT", ""),  # no default: verify with IT
-        "SYTELINE_SQL_DB": os.environ.get("SYTELINE_SQL_DB", ""),
-        "SYTELINE_SQL_USER": os.environ.get("SYTELINE_SQL_USER", ""),
-        "SYTELINE_SQL_PASS": os.environ.get("SYTELINE_SQL_PASS", ""),
     }
     arn = os.environ.get("SYTELINE_SECRET_ARN")
     if arn and not skip_secret:
@@ -43,10 +38,6 @@ def jobs_table():
 
 def worker_function_name():
     return os.environ.get("WORKER_FUNCTION_NAME", "")
-
-
-def sql_configured(cfg):
-    return bool(cfg.get("SYTELINE_SQL_HOST") and cfg.get("SYTELINE_SQL_PORT"))
 
 
 def timeout():

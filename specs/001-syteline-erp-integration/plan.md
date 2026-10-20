@@ -1,36 +1,36 @@
 # Implementation Plan: SyteLine ERP Integration
 
-**Branch**: `001-syteline-erp-integration` | **Date**: 2026-10-20 (revised after clarification) | **Spec**: [spec.md](spec.md)
+**Branch**: `001-syteline-erp-integration` | **Date**: 2026-10-20 (revised: web service only, FR-018) | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `/specs/001-syteline-erp-integration/spec.md`, as clarified against `docs/Instruction Sheet AWS GovCloud API Gateway to On-Premises Sy.docx`.
+**Input**: Feature specification from `/specs/001-syteline-erp-integration/spec.md`, as clarified against `docs/Instruction Sheet AWS GovCloud API Gateway to On-Premises Sy.docx` and the direction that all database interaction goes through the SyteLine web service.
 
 ## Summary
 
-A private, asynchronous order-upload service in front of SyteLine. A private REST API (IAM-authenticated) accepts an operator-confirmed order, durably records it and returns a job ID; a background worker Lambda (in the VPC with a route to the plant) runs the documented pipeline: resolve the customer over SQL (`custaddr`), allocate numbers with `NextCoSp`/`NextWOSp` over SQL, insert the CO (`SLCos`), lines (`CCT_Coitems` + teardown in `UserDefinedFields`) and jobs (`CCTJobs`) over SOAP IDO, then **read back** to verify. Any uncertainty after a row may have been written ends in `needs_reconciliation` — no automatic delete or retry. Live ERP writes are disabled unless explicitly enabled for an approved test. The existing `health` check, `add_note` and `get_notes` remain as directly invoked actions. See [research.md](research.md) for decisions and the instruction-sheet mapping.
+A private, asynchronous order-upload service in front of SyteLine. A private REST API (IAM-authenticated) accepts an operator-confirmed order, durably records it and returns a upload ID; a background worker Lambda (in the VPC, with a route to the plant on HTTP port 80) runs the pipeline **entirely through the SyteLine web service (IDO SOAP)**: resolve the customer with a read-only collection query, allocate CO/job numbers by calling `NextCoSp`/`NextWOSp` as web-service methods, insert the CO, its lines and its jobs, then **read back** to verify. Any uncertainty after a row may have been written ends in `needs_reconciliation` (no automatic delete or retry). Live ERP writes (number allocation, inserts, note creation) are disabled unless explicitly enabled for an approved test. There is **no SQL connection, SQL driver or database credential** anywhere (FR-018). The `health` check, `add_note` and `get_notes` stay as directly invoked actions. See [research.md](research.md).
 
 ## Technical Context
 
 **Language/Version**: Python 3.13 (Lambda)
 
-**Primary Dependencies**: zeep, lxml, requests, urllib3 (SOAP, existing); `python-tds` (pure-Python SQL Server client, new); boto3 (DynamoDB, Lambda invoke, Secrets Manager)
+**Primary Dependencies**: zeep, lxml, requests, urllib3 (SOAP); boto3 (DynamoDB, Lambda invoke, Secrets Manager). No SQL client.
 
-**Storage**: DynamoDB single table for upload jobs and request-reference index; SyteLine remains the system of record
+**Storage**: DynamoDB single table for upload jobs and request-reference index; SyteLine is the system of record
 
-**Testing**: pytest with fake SOAP/SQL/DynamoDB; no live ERP calls without owner approval (FR-016)
+**Testing**: pytest with fake SOAP/DynamoDB/Lambda; no live ERP calls without owner approval (FR-016)
 
-**Target Platform**: AWS GovCloud Lambda in private VPC subnets; API Gateway REST API (Private endpoint); Site-to-Site VPN to plant (Palo Alto)
+**Target Platform**: AWS GovCloud Lambda in private VPC subnets; API Gateway REST API (Private endpoint); Site-to-Site VPN to the plant (Palo Alto)
 
 **Project Type**: serverless service (API + worker + status + sweeper handlers sharing one package)
 
-**Performance Goals**: job ID within 5 s; upload complete within 60 s for 95% (SC-001); status reads < 1 s
+**Performance Goals**: upload ID within 5 s; upload complete within 60 s for 95% (SC-001); status reads < 1 s
 
-**Constraints**: SOAP is HTTP port 80 (not HTTPS); SQL port unverified (configurable, no 1433 default); credentials only from Secrets Manager; no ERP writes unless `SYTELINE_LIVE_WRITES=true`; worker never auto-replays an uncertain upload
+**Constraints**: all ERP access via the web service (HTTP port 80, not HTTPS); credentials only from Secrets Manager; no ERP writes unless `SYTELINE_LIVE_WRITES=true`; worker never auto-replays an uncertain upload; web-service operation, method and collection names are unconfirmed until read-only discovery (T031)
 
 **Scale/Scope**: tens of orders/hour; worker reserved concurrency 1 (serializes ERP writes)
 
 ## Constitution Check
 
-`.specify/memory/constitution.md` is still the unfilled template, so no ratified gates exist. Applied the spec's own rules instead (FR-004/005/010/016/017). **Result: PASS (no violations).** Recommend `/speckit-constitution`. Post-design re-check: PASS — the added components (job table, worker, sweeper, SQL access) are each demanded by the instruction sheet or a clarified requirement.
+`.specify/memory/constitution.md` is still the unfilled template, so no ratified gates exist. Applied the spec's own rules instead (FR-004/005/010/016/017/018). **Result: PASS (no violations).** Recommend `/speckit-constitution`. Post-design re-check: PASS — removing SQL reduces moving parts and network rules; the worker, sweeper and job table remain required by FR-001/FR-015.
 
 ## Project Structure
 
@@ -52,42 +52,48 @@ specs/001-syteline-erp-integration/
 
 ```text
 scr/
-├── lambda_function.py        # direct-invoke dispatcher: health, add_note, get_notes (existing, unchanged contract)
+├── lambda_function.py        # direct-invoke dispatcher: health, add_note, get_notes
 ├── handlers/
 │   ├── intake.py             # API Gateway POST /confirmed-orders
 │   ├── status.py             # API Gateway GET /upload-jobs/{id}
 │   ├── worker.py             # runs the upload pipeline for one job
 │   └── sweeper.py            # scheduled: re-drive `accepted`, park stale `running`
 ├── syteline/
-│   ├── config.py             # + SQL settings, live-writes flag
+│   ├── config.py             # env + Secrets Manager; live-writes flag (no SQL settings)
 │   ├── errors.py
-│   ├── health.py             # + optional sql tcp stage (never in dry run)
-│   ├── client.py             # SOAP IDO: load, insert (diffgram row-result parsing), read-back; no delete
-│   ├── sql.py                # python-tds connection + stored procedure / query helpers
-│   ├── resolver.py           # customer details → exactly one custaddr match
-│   ├── validation.py         # order request validation (customer details, uploaded_by, lines, teardown)
+│   ├── health.py             # staged connectivity check, unchanged stages (no sql stage)
+│   ├── idos.py               # ONE place for web-service names: IDOs/collections, method names, filter-quote helper
+│   ├── client.py             # SOAP IDO: load (read), insert (write), invoke (method call, write); diffgram row-error parsing; no delete
+│   ├── resolver.py           # customer details → exactly one match via a read-only collection query
+│   ├── validation.py         # order request validation
 │   ├── jobs.py               # DynamoDB job store + state machine + request_ref index
-│   ├── pipeline.py           # the upload sequence + uncertainty classification (replaces orders.py)
-│   └── notes.py              # via SQL (CreateSpecificNoteSp + queries in sql/), live-write gated
-├── requirements.txt          # + python-tds
-└── template.yaml             # API (private REST, IAM, resource policy), 4 functions, table, schedule, VPC
+│   ├── pipeline.py           # the upload sequence + uncertainty classification
+│   └── notes.py              # via web service: CreateSpecificNoteSp method + SpecificNotes/ObjectNotes reads
+├── requirements.txt          # zeep, lxml, requests, urllib3
+└── template.yaml             # API (private REST, IAM, resource policy), 5 functions, table, schedule, VPC
 tests/
 ├── unit/  contract/  integration/   # integration = read-only/network checks + approved live tests only
 ```
 
-**Structure Decision**: One package, several thin handlers. `lambda_function.py` keeps the direct-invoke contract so existing health usage is unaffected. The worker is separate from the intake so the API returns quickly and ERP slowness never blocks acceptance.
+**Structure Decision**: One package, several thin handlers. `idos.py` isolates every web-service name that is still unconfirmed, so the discovery task (T031) changes one file plus the client's payload shapes. `lambda_function.py` keeps the direct-invoke contract so existing health usage is unaffected.
 
-### Changes required to the existing implementation
+### Changes required to the existing implementation (built before FR-018)
 
 | Existing | Change |
 |---|---|
-| `orders.py` (delete-based compensation, `SLCoitems`/`SLJobs`, IDO numbering) | Replace with `pipeline.py`: SQL numbering, `CCT_Coitems`/`CCTJobs`, read-back, no deletes, `needs_reconciliation` |
-| `idempotency.py` (auto-retry of stale claims) | Replace with `jobs.py`: state machine; stale `running` → `needs_reconciliation`; only `accepted` is re-driven |
-| `client.py` (`delete`, IDO `next_number`) | Remove both; add diffgram row-level result parsing and `read_back` |
-| `lambda_function.py` `create_order` action | Remove; order creation is the API/worker path |
-| `notes.py` (guessed IDO method) | Use SQL stored procedure and the queries in `sql/NotesExampleQueries.txt`; gate writes on live-writes flag |
-| `health.py` | Add optional `sql` TCP stage (not in dry run) |
-| `tests/fakes.py` | Add fake SQL; remove delete semantics; add diffgram-rejection scenarios |
+| `scr/syteline/sql.py`, `python-tds` in `requirements.txt` | Delete |
+| `config.py`: `SYTELINE_SQL_*` settings, `sql_configured()` | Remove (keep `live_writes_enabled()`, `jobs_table()`, `worker_function_name()`) |
+| `client.py` | Add `invoke(ido, method, params)` for web-service method calls, gated by live writes (every call may write); `load` stays read-only; keep no-delete |
+| `resolver.py` (SQL `custaddr` query) | Query the customer-address collection through `client.load` using the lookup rule in research.md R5 step 1 (first-word prefix filter, capped, then normalized comparison in code); escape filter values; exactly one distinct customer |
+| `pipeline.py` (SQL numbering via `sql.execute_write`) | Allocate numbers with `client.invoke(...NextCoSp/NextWOSp...)`; same step order, gate and classification |
+| `notes.py` (SQL) | `add_note`: `load` the record's `RowPointer`, then `client.invoke(... CreateSpecificNoteSp ...)`; `get_notes`: `load` `ObjectNotes` + `SpecificNotes` |
+| `health.py` | Remove the opt-in `sql` stage and the `check_sql` event flag |
+| `lambda_function.py`, `handlers/worker.py` | Build the SOAP client only; drop the SQL factory/`close` |
+| `tests/fakes.py` | Remove `FakeSql`; `FakeSoap` gains `invoke` (numbers, notes) and collection queries (customers, record row pointers, notes) |
+| Tests | Rewrite `test_resolver`, `test_pipeline`, `test_uncertainty`, `test_notes` (unit + contract), `test_no_secrets`, health tests, `test_config`; delete SQL-specific tests |
+| `tests/integration/test_readonly_checks.py` | Replace the SQL port/SELECT checks with a read-only web-service query |
+| `scr/template.yaml`, `.env.example`, README, DEPLOY_PORTAL | Remove `SqlHost`/`SqlPort`/`SqlDatabase` and `SYTELINE_SQL_*`; secret holds only the ERP password; add VPC endpoints (or a documented NAT path) so the worker in private subnets can reach DynamoDB and Secrets Manager |
+| Tracking ID | Rename the internal `job_id`/`JOB#` to `upload_id`/`UPLOAD#` in `jobs.py`, the handlers and tests to match the contract |
 
 ## Complexity Tracking
 

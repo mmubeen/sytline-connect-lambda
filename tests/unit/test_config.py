@@ -42,21 +42,6 @@ def test_live_writes_default_off_and_exact_values(monkeypatch):
         assert config.live_writes_enabled() is expected
 
 
-def test_sql_port_has_no_default(monkeypatch):
-    cfg = config.load_config()
-    assert cfg["SYTELINE_SQL_PORT"] == "" and not config.sql_configured(cfg)
-    monkeypatch.setenv("SYTELINE_SQL_HOST", "h")
-    assert not config.sql_configured(config.load_config())
-    monkeypatch.setenv("SYTELINE_SQL_PORT", "14330")
-    assert config.sql_configured(config.load_config())
-
-
-def test_sql_client_refuses_writes_when_disabled():
-    from syteline.errors import LiveWritesDisabled
-    from syteline.sql import SqlClient
-
-    opened = []
-    c = SqlClient({}, connect=lambda cfg: opened.append(1))
-    with pytest.raises(LiveWritesDisabled):
-        c.execute_write("EXEC x")
-    assert opened == []  # refused before any connection was opened
+def test_no_sql_settings_are_loaded():
+    assert not [k for k in config.load_config() if k.startswith("SYTELINE_SQL")]
+    assert not hasattr(config, "sql_configured")

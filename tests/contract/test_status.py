@@ -9,11 +9,11 @@ def mk(monkeypatch):
     store = JobStore(FakeJobsTable())
     monkeypatch.setattr(status, "_store_factory", lambda: store)
     job, _ = store.create_job({"request_ref": "r"}, "h", "jdoe", "arn")
-    return store, job["job_id"]
+    return store, job["upload_id"]
 
 
-def get(job_id):
-    r = status.handler({"pathParameters": {"id": job_id}}, None)
+def get(upload_id):
+    r = status.handler({"pathParameters": {"id": upload_id}}, None)
     return r["statusCode"], json.loads(r["body"])
 
 

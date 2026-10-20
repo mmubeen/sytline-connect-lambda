@@ -1,132 +1,153 @@
-"""In-memory fakes: SOAP IDO client, SQL client, DynamoDB job table, Lambda invoker."""
+"""In-memory fakes: web-service (SOAP IDO) client, DynamoDB job table, Lambda invoker."""
 
 import itertools
+import re
 
-from syteline import config
+from syteline import config, idos
 from syteline.errors import ErpRejected, ErpUncertain, ErpUnreachable, LiveWritesDisabled
 
 
-class FakeSoap:
-    """Implements the SoapIdoClient surface (load / insert / read_back). There is NO delete.
+def _unquote(v):
+    v = v.strip()
+    return v[1:-1].replace("''", "'") if v.startswith("'") else v
 
-    scenarios: {(op, ido, nth): action} where action is
-      "reject"            -> ErpRejected, row NOT stored (row-level rejection inside an HTTP 200)
-      "timeout_after"     -> row stored, then ErpUncertain (timeout after the insert was accepted)
-      "timeout_before"    -> row NOT stored, ErpUncertain
-      "unreachable"       -> ErpUnreachable (definitely not sent)
-    nth is the 1-based count of inserts into that IDO. read_fail makes load raise ErpUnreachable.
-    corrupt: {(ido, prop): value} alters what read-back returns (read-back mismatch).
+
+def _like_to_regex(pattern):
+    out = ""
+    i = 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == "[" and pattern[i:i + 3] in ("[%]", "[_]", "[[]"):
+            out += re.escape(pattern[i + 1]); i += 3; continue
+        out += ".*" if c == "%" else re.escape(c)
+        i += 1
+    return "^" + out + "$"
+
+
+def _match(row, cond):
+    m = re.match(r"^(\w+)\s+(=|>=|LIKE)\s+(.*)$", cond.strip())
+    assert m, f"unsupported filter condition: {cond}"
+    prop, op, raw = m.groups()
+    have = str(row.get(prop, "")).strip()
+    want = _unquote(raw)
+    if op == "=":
+        return have.upper() == want.upper()
+    if op == ">=":
+        return have >= want
+    return re.match(_like_to_regex(want), have, re.I) is not None
+
+
+class FakeSoap:
+    """Implements the SoapIdoClient surface: load / insert / invoke / read_back. There is NO delete.
+
+    scenarios: {("insert", ido, nth) | ("invoke", method, nth): action}; nth is 1-based per name.
+    action:
+      "reject"          -> ErpRejected, nothing stored/executed
+      "timeout_after"   -> executed/stored, then ErpUncertain
+      "timeout_before"  -> not executed, ErpUncertain
+      "unreachable"     -> ErpUnreachable (definitely not sent)
+    read_fail makes every load raise ErpUnreachable; readback_fail only the non-customer loads; corrupt={(ido, prop): value} alters read-back values.
     """
 
-    def __init__(self, scenarios=None, read_fail=False, corrupt=None, enforce_live_gate=True):
+    def __init__(self, scenarios=None, read_fail=False, corrupt=None, customers=None, enforce_live_gate=True,
+                 readback_fail=False):
         self.rows = {}
         self.scenarios = dict(scenarios or {})
         self.read_fail = read_fail
+        self.readback_fail = readback_fail  # fail every read except the customer lookup
         self.corrupt = dict(corrupt or {})
         self.calls = []
         self._count = {}
         self._rp = itertools.count(1)
+        self._co = itertools.count(100)
+        self._job = itertools.count(5000)
+        self._token = itertools.count(1)
         self._gate = enforce_live_gate
+        for c in customers or []:
+            self.rows.setdefault(idos.customer_ido(), []).append({
+                "CustNum": c["cust_num"], "CustSeq": c.get("cust_seq", 0), "Name": c.get("name", ""),
+                "Addr_1": c.get("address1", ""), "City": c.get("city", ""), "State": c.get("state", ""),
+                "Zip": c.get("postal_code", "")})
 
-    def insert(self, ido, values):
-        self.calls.append(("insert", ido))
+    # -- helpers ---------------------------------------------------------------------
+    def add_record(self, ido, **values):
+        row = dict(values, RowPointer=f"rp-{next(self._rp)}")
+        self.rows.setdefault(ido, []).append(row)
+        return row
+
+    def _gate_check(self):
         if self._gate and not config.live_writes_enabled():
             raise LiveWritesDisabled("live writes disabled")
-        n = self._count[ido] = self._count.get(ido, 0) + 1
-        action = self.scenarios.get(("insert", ido, n))
+
+    def _scenario(self, op, name):
+        n = self._count[(op, name)] = self._count.get((op, name), 0) + 1
+        return self.scenarios.get((op, name, n))
+
+    # -- surface ---------------------------------------------------------------------
+    def insert(self, ido, values):
+        self._gate_check()  # refused before it counts as a write
+        self.calls.append(("insert", ido))
+        action = self._scenario("insert", ido)
         if action == "reject":
             raise ErpRejected(f"{ido} row rejected by ERP")
         if action == "timeout_before":
             raise ErpUncertain("timeout")
         if action == "unreachable":
             raise ErpUnreachable("connect failed")
-        row = dict(values, RowPointer=f"rp-{next(self._rp)}")
-        self.rows.setdefault(ido, []).append(row)
+        row = self.add_record(ido, **values)
         if action == "timeout_after":
             raise ErpUncertain("timeout after insert")
         return row
 
-    def load(self, ido, properties, filter_=""):
+    def invoke(self, ido, method, params):
+        self._gate_check()  # refused before it counts as a write
+        self.calls.append(("invoke", method))
+        action = self._scenario("invoke", method)
+        if action == "reject":
+            raise ErpRejected(f"{method} rejected")
+        if action == "timeout_before":
+            raise ErpUncertain("timeout")
+        if action == "unreachable":
+            raise ErpUnreachable("connect failed")
+        if method == idos.NEXT_CO_METHOD:
+            out = [str(next(self._co))]
+        elif method == idos.NEXT_JOB_METHOD:
+            out = [str(next(self._job))]
+        elif method == idos.CREATE_NOTE_METHOD:
+            _obj, rp, desc, text, flag = params
+            token = next(self._token)
+            self.rows.setdefault(idos.NOTE_IDO, []).append({
+                "SpecificNoteToken": str(token), "NoteContent": text, "NoteDesc": desc,
+                "CreateDate": "2026-10-20", "CreatedBy": "svc"})
+            self.rows.setdefault(idos.OBJECT_NOTE_IDO, []).append({
+                "SpecificNoteToken": str(token), "RefRowPointer": rp, "NhNoteFlag": str(flag)})
+            out = []
+        else:
+            raise ErpRejected(f"unknown method {method}")
+        if action == "timeout_after":
+            raise ErpUncertain("timeout after execution")
+        return out
+
+    def load(self, ido, properties, filter_="", record_cap=0):
         self.calls.append(("load", ido))
-        if self.read_fail:
-            raise ErpUnreachable("read-back failed")
+        if self.read_fail or (self.readback_fail and ido != idos.customer_ido()):
+            raise ErpUnreachable("read failed")
         rows = [dict(r) for r in self.rows.get(ido, [])]
-        if "=" in filter_:
-            key, val = filter_.split("=", 1)
-            key, val = key.strip(), val.strip().strip("'")
-            rows = [r for r in rows if str(r.get(key)) == val]
+        for cond in [c for c in re.split(r"\s+AND\s+", filter_) if c.strip()] if filter_ else []:
+            rows = [r for r in rows if _match(r, cond)]
         for (c_ido, prop), value in self.corrupt.items():
             if c_ido == ido:
                 for r in rows:
                     r[prop] = value
-        return rows
+        return rows[:record_cap] if record_cap else rows
 
     read_back = load
 
     def count(self, ido):
         return len(self.rows.get(ido, []))
 
-
-class FakeSql:
-    """Implements SqlClient.query / execute_write for the statements the code uses."""
-
-    def __init__(self, customers=None, records=None, notes=None, connect_fail=False):
-        self.customers = list(customers or [])  # rows from custaddr
-        self.records = dict(records or {})  # {("co","100"): "rowpointer"}
-        self.notes = list(notes or [])  # dicts as returned by the notes query
-        self.allocations = []
-        self.writes = []
-        self.queries = []
-        self.connect_fail = connect_fail
-        self._co = itertools.count(100)
-        self._job = itertools.count(5000)
-
-    def query(self, sql, params=()):
-        import re
-
-        self.queries.append((sql, tuple(params)))
-        if self.connect_fail:
-            raise ErpUnreachable("SQL connection failed")
-        low = sql.lower()
-        if "from custaddr" in low:
-            cols = re.findall(r"UPPER\(LTRIM\(RTRIM\(([^)]+)\)\)\) = %s", sql)
-            out = []
-            for c in self.customers:
-                if all(str(c.get(col.strip("[]"), "")).strip().upper() == p for col, p in zip(cols, params)):
-                    out.append({"cust_num": c["cust_num"], "cust_seq": c.get("cust_seq", 0)})
-            return out
-        if "from specificnotes" in low:
-            rp = params[0]
-            rows = [dict(n) for n in self.notes if n["RefRowPointer"] == rp]
-            if len(params) > 1:
-                rows = [r for r in rows if r["CreateDate"] >= params[1]]
-            return rows
-        m = re.search(r"select rowpointer from (\w+) where", low)
-        if m:
-            for (t, k), rp in self.records.items():
-                if t == m.group(1) and k == params[0]:
-                    return [{"RowPointer": rp}]
-            return []
-        raise AssertionError(f"unexpected query: {sql}")
-
-    def execute_write(self, sql, params=()):
-        if not config.live_writes_enabled():
-            raise LiveWritesDisabled("live writes disabled")
-        low = sql.lower()
-        self.writes.append((sql, tuple(params)))
-        if "nextcosp" in low:
-            self.allocations.append("co")
-            return [{"Key": str(next(self._co)), "Infobar": None}]
-        if "nextwosp" in low:
-            self.allocations.append("job")
-            return [{"Key": str(next(self._job)), "Infobar": None}]
-        if "createspecificnotesp" in low:
-            obj, rp, desc, text, internal = params
-            self.notes.append({"SpecificNoteToken": len(self.notes) + 1, "RefRowPointer": rp,
-                               "NoteContent": text, "NoteDesc": desc, "CreateDate": "2026-10-20",
-                               "CreatedBy": "svc", "NhNoteFlag": internal})
-            return []
-        raise AssertionError(f"unexpected write: {sql}")
+    def writes(self):
+        return [c for c in self.calls if c[0] in ("insert", "invoke")]
 
 
 class FakeClientError(Exception):

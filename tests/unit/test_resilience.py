@@ -103,3 +103,35 @@ def test_no_delete_operation_exists():
 def test_parse_rows_handles_dataset_shape():
     xml = "<DataSet><SLCos><CoNum>5</CoNum><Stat>O</Stat></SLCos><SLCos><CoNum>6</CoNum><Stat>C</Stat></SLCos></DataSet>"
     assert parse_rows(xml) == [{"CoNum": "5", "Stat": "O"}, {"CoNum": "6", "Stat": "C"}]
+
+
+class CallSvc(Svc):
+    def __init__(self, call=()):
+        super().__init__()
+        self.call_results = list(call)
+
+    def CallMethod(self, token, *a):
+        return self._next(self.call_results)
+
+
+def test_invoke_refused_when_live_writes_off():
+    svc = CallSvc(call=[["100"]])
+    with pytest.raises(LiveWritesDisabled):
+        client(svc).invoke("SLCos", "NextCoSp", [])
+    assert svc.call_results == [["100"]]  # CallMethod never called
+
+
+def test_invoke_returns_output_values(live_writes):
+    assert client(CallSvc(call=[["100", ""]])).invoke("SLCos", "NextCoSp", []) == ["100", ""]
+
+
+def test_invoke_fault_is_rejected(live_writes):
+    with pytest.raises(ErpRejected):
+        client(CallSvc(call=[Fault("no such method")])).invoke("SLCos", "NextCoSp", [])
+
+
+def test_invoke_timeout_is_uncertain_connect_failure_is_not(live_writes):
+    with pytest.raises(ErpUncertain):
+        client(CallSvc(call=[TimeoutError("read timed out")])).invoke("SLCos", "NextCoSp", [])
+    with pytest.raises(ErpUnreachable):
+        client(CallSvc(call=[ConnectionError("Failed to establish a new connection")])).invoke("SLCos", "NextCoSp", [])

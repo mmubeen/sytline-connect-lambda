@@ -33,11 +33,11 @@ def test_202_records_job_and_invokes_worker_async(env):
     r = intake.handler(event(body()), None)
     out = json.loads(r["body"])
     assert r["statusCode"] == 202 and out["state"] == "accepted" and out["duplicate"] is False
-    job = store.get_job(out["job_id"])
+    job = store.get_job(out["upload_id"])
     assert job["uploaded_by"] == "jdoe" and job["caller_identity"] == "arn:aws:iam::1:user/app"
     assert job["request"]["customer"] == {"name": "ACME"}
     fn, mode, payload = lam.invocations[0]
-    assert (fn, mode) == ("worker-fn", "Event") and json.loads(payload) == {"job_id": out["job_id"]}
+    assert (fn, mode) == ("worker-fn", "Event") and json.loads(payload) == {"upload_id": out["upload_id"]}
 
 
 def test_200_duplicate_same_body_does_not_reinvoke(env):
@@ -45,7 +45,7 @@ def test_200_duplicate_same_body_does_not_reinvoke(env):
     first = json.loads(intake.handler(event(body()), None)["body"])
     r = intake.handler(event(body()), None)
     out = json.loads(r["body"])
-    assert r["statusCode"] == 200 and out["duplicate"] is True and out["job_id"] == first["job_id"]
+    assert r["statusCode"] == 200 and out["duplicate"] is True and out["upload_id"] == first["upload_id"]
     assert len(lam.invocations) == 1
 
 
@@ -73,7 +73,7 @@ def test_invoke_failure_leaves_job_accepted_and_still_202(env, monkeypatch):
     monkeypatch.setattr(intake, "_lambda_factory", lambda: FakeLambda(fail=True))
     r = intake.handler(event(body()), None)
     out = json.loads(r["body"])
-    assert r["statusCode"] == 202 and store.get_job(out["job_id"])["state"] == "accepted"
+    assert r["statusCode"] == 202 and store.get_job(out["upload_id"])["state"] == "accepted"
 
 
 def test_503_when_job_store_is_down_and_nothing_is_acknowledged(env, monkeypatch):

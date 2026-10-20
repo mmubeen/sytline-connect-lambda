@@ -1,16 +1,19 @@
-"""add_note / get_notes on CO and job records, over SQL (see research.md R10).
+"""add_note / get_notes on CO and job records, through the web service only (FR-018; research R10).
 
-Reads follow the joins in sql/NotesExampleQueries.txt. add_note calls CreateSpecificNoteSp, which
-creates the note and attaches it to the row; it is a write and is gated by SYTELINE_LIVE_WRITES.
+add_note: load the record's RowPointer, then call CreateSpecificNoteSp as a web-service method (it
+creates AND attaches the note; a write, gated by SYTELINE_LIVE_WRITES).
+get_notes: read ObjectNotes (RefRowPointer = the record's RowPointer) and SpecificNotes (joined on
+SpecificNoteToken), optionally CreateDate >= since.
 
-ASSUMPTION: the SQL transport (the instruction sheet does not mention notes).
+ASSUMPTIONS (confirm with discovery task T013): which IDO exposes the method (idos.py) and the
+property names; verified only against fakes.
 """
 
-from . import errors
-from .errors import (ErpUncertain, ErpUnreachable, LiveWritesDisabled, error, failure)
+from . import errors, idos
+from .errors import (ErpRejected, ErpUncertain, ErpUnreachable, LiveWritesDisabled, error, failure)
 
-# record_type -> (table, key column, ObjectName used by the note procedures)
-RECORDS = {"co": ("co", "co_num", "co"), "job": ("job", "job", "job")}
+# record_type -> (IDO that holds the row, key property, ObjectName used by the note routines)
+RECORDS = {"co": (idos.CO_IDO, "CoNum", "co"), "job": (idos.JOB_IDO, "Job", "job")}
 
 
 def validate_note_request(event, need_text):
@@ -30,50 +33,47 @@ def validate_note_request(event, need_text):
     return errs
 
 
-def _row_pointer(sql, record_type, record_key):
-    table, column, _ = RECORDS[record_type]
-    rows = sql.query(f"SELECT RowPointer FROM {table} WHERE {column} = %s", (record_key,))
+def _row_pointer(soap, record_type, record_key):
+    ido, key_prop, _ = RECORDS[record_type]
+    rows = soap.load(ido, ["RowPointer", key_prop], idos.filter_eq(key_prop, record_key))
     return rows[0]["RowPointer"] if rows else None
 
 
-def add_note(sql, record_type, record_key, text, internal=True):
-    rp = _row_pointer(sql, record_type, record_key)
+def add_note(soap, record_type, record_key, text, internal=True):
+    rp = _row_pointer(soap, record_type, record_key)
     if rp is None:
         return failure("add_note", error(errors.NOT_FOUND, f"{record_type} {record_key} not found"))
+    ido, method = idos.create_note()
     try:
-        sql.execute_write(
-            "DECLARE @Infobar Infobar; "
-            "EXEC dbo.CreateSpecificNoteSp %s, %s, %s, %s, %s, @Infobar OUTPUT; SELECT @Infobar AS Infobar",
-            (RECORDS[record_type][2], rp, text[:60], text, 1 if internal else 0))
+        # params: ObjectName, RowPointer, NoteDesc, NoteText, InternalFlag
+        soap.invoke(ido, method, [RECORDS[record_type][2], rp, text[:60], text, 1 if internal else 0])
     except LiveWritesDisabled:
         return failure("add_note", error(errors.LIVE_WRITES_DISABLED, "live ERP writes are disabled"))
     except ErpUncertain as exc:  # the note may exist; do not retry blindly
         return failure("add_note", error(errors.UNCERTAIN_OUTCOME, str(exc)))
+    except ErpRejected as exc:
+        return failure("add_note", error(errors.ERP_REJECTED, str(exc)))
     except ErpUnreachable as exc:
         return failure("add_note", error(errors.ERP_UNREACHABLE, str(exc)))
     return {"ok": True, "action": "add_note"}
 
 
-_NOTES_SQL = (
-    "SELECT sn.SpecificNoteToken, sn.NoteContent, sn.NoteDesc, sn.CreateDate, sn.CreatedBy, "
-    "ObjectNotes.NoteFlag AS NhNoteFlag, ObjectNotes.RefRowPointer "
-    "FROM SpecificNotes sn "
-    "INNER JOIN ObjectNotes ON sn.SpecificNoteToken = ObjectNotes.SpecificNoteToken "
-    "WHERE ObjectNotes.RefRowPointer = %s")
-
-
-def get_notes(sql, record_type, record_key, since=None):
-    rp = _row_pointer(sql, record_type, record_key)
+def get_notes(soap, record_type, record_key, since=None):
+    rp = _row_pointer(soap, record_type, record_key)
     if rp is None:
         return failure("get_notes", error(errors.NOT_FOUND, f"{record_type} {record_key} not found"))
-    query, params = _NOTES_SQL, [rp]
-    if since:
-        query += " AND sn.CreateDate >= %s"
-        params.append(since)
-    rows = sql.query(query + " ORDER BY sn.SpecificNoteToken", tuple(params))
-    return {"ok": True, "action": "get_notes", "notes": [{
-        "token": int(float(r["SpecificNoteToken"])) if r.get("SpecificNoteToken") is not None else None,
-        "text": r.get("NoteContent") or r.get("DerContent") or "",
-        "internal": str(r.get("NhNoteFlag", "")) in ("1", "True", "true"),
-        "created_at": str(r.get("CreateDate", "")), "created_by": r.get("CreatedBy", ""),
-    } for r in rows]}
+    links = soap.load(idos.OBJECT_NOTE_IDO, ["SpecificNoteToken", "NhNoteFlag"],
+                      idos.filter_eq("RefRowPointer", rp))
+    out = []
+    for link in sorted(links, key=lambda r: int(float(r["SpecificNoteToken"]))):
+        token = link["SpecificNoteToken"]
+        cond = f"SpecificNoteToken = {token}" if str(token).replace(".", "", 1).isdigit() else idos.filter_eq(
+            "SpecificNoteToken", token)
+        if since:
+            cond += f" AND CreateDate >= {idos.quote(since)}"
+        for n in soap.load(idos.NOTE_IDO, ["SpecificNoteToken", "NoteContent", "NoteDesc", "CreateDate",
+                                           "CreatedBy"], cond):
+            out.append({"token": int(float(token)), "text": n.get("NoteContent", ""),
+                        "internal": str(link.get("NhNoteFlag", "")) in ("1", "True", "true"),
+                        "created_at": str(n.get("CreateDate", "")), "created_by": n.get("CreatedBy", "")})
+    return {"ok": True, "action": "get_notes", "notes": out}

@@ -15,7 +15,7 @@ def _store():
 
 
 def _view(job):
-    out = {"job_id": job["job_id"], "request_ref": job["request_ref"], "uploaded_by": job["uploaded_by"],
+    out = {"upload_id": job["upload_id"], "request_ref": job["request_ref"], "uploaded_by": job["uploaded_by"],
            "state": job["state"], "created_at": job["created_at"], "updated_at": job["updated_at"]}
     rec = job.get("erp_records") or {}
     if job["state"] == "succeeded":
@@ -30,10 +30,10 @@ def _view(job):
 
 def handler(event, context):
     started = time.monotonic()
-    job_id = ((event.get("pathParameters") or {}).get("id") or "").strip()
-    job = _store().get_job(job_id) if job_id else None
+    upload_id = ((event.get("pathParameters") or {}).get("id") or "").strip()
+    job = _store().get_job(upload_id) if upload_id else None
     if job is None:
-        log_event("get_status", started, outcome="404", job_id=job_id)
+        log_event("get_status", started, outcome="404", upload_id=upload_id)
         return response(404, {"errors": [errors.error(errors.NOT_FOUND, "no such upload job")]})
-    log_event("get_status", started, outcome="200", job_id=job_id, state=job["state"])
+    log_event("get_status", started, outcome="200", upload_id=upload_id, state=job["state"])
     return response(200, _view(job))

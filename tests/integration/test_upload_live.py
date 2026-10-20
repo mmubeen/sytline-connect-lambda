@@ -29,8 +29,8 @@ def test_single_approved_order():
             "customer": {"name": os.environ["LIVE_CUSTOMER_NAME"]},
             "lines": [{"item": os.environ["LIVE_ITEM"], "quantity": 1, "uom": os.environ.get("LIVE_UOM", "EA")}]}
     r = intake.handler({"body": json.dumps(body), "requestContext": {"identity": {"userArn": "live-test"}}}, None)
-    job_id = json.loads(r["body"])["job_id"]
-    worker.handler({"job_id": job_id}, None)
-    out = json.loads(status.handler({"pathParameters": {"id": job_id}}, None)["body"])
+    upload_id = json.loads(r["body"])["upload_id"]
+    worker.handler({"upload_id": upload_id}, None)
+    out = json.loads(status.handler({"pathParameters": {"id": upload_id}}, None)["body"])
     print("RECONCILE THIS:", json.dumps(out, indent=2))
     assert out["state"] in ("succeeded", "needs_reconciliation", "failed")

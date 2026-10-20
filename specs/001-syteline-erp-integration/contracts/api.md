@@ -3,7 +3,7 @@
 API Gateway REST API, endpoint type **Private**, reachable only through the approved `execute-api` VPC endpoint (resource policy on `aws:SourceVpce`). Authorization: `AWS_IAM` on every route. Lambda proxy integration. All bodies JSON.
 
 ## POST /confirmed-orders
-Accepts an operator-confirmed order, durably records it, starts the upload, returns a job ID.
+Accepts an operator-confirmed order, durably records it, starts the upload, returns a upload ID.
 
 Request:
 ```json
@@ -15,8 +15,8 @@ Request:
 Responses:
 | Status | Body |
 |---|---|
-| 202 | `{"job_id":"…","state":"accepted","duplicate":false}` |
-| 200 | `{"job_id":"…","state":"<current>","duplicate":true}` — same `request_ref` and same payload |
+| 202 | `{"upload_id":"…","state":"accepted","duplicate":false}` |
+| 200 | `{"upload_id":"…","state":"<current>","duplicate":true}` — same `request_ref` and same payload |
 | 400 | `{"errors":[{"code":"VALIDATION","field":"…","message":"…"}]}` — nothing recorded |
 | 409 | `{"errors":[{"code":"REQUEST_REF_CONFLICT",…}]}` — same `request_ref`, different payload |
 | 403 | API Gateway/IAM denial |
@@ -24,7 +24,7 @@ Responses:
 ## GET /upload-jobs/{id}
 | Status | Body |
 |---|---|
-| 200 | `{"job_id","request_ref","uploaded_by","state","co_num?","jobs?":[{"line","job"}],"failure?":{"code","message","step"},"possibly_written?":[{"kind","key"}],"created_at","updated_at"}` |
+| 200 | `{"upload_id","request_ref","uploaded_by","state","co_num?","jobs?":[{"line","job"}],"failure?":{"code","message","step"},"possibly_written?":[{"kind","key"}],"created_at","updated_at"}` |
 | 404 | `{"errors":[{"code":"NOT_FOUND"}]}` |
 
 States: `accepted`, `running`, `succeeded`, `failed`, `needs_reconciliation` (see data-model.md). `co_num`/`jobs` are present only on `succeeded`. `possibly_written` is present on `needs_reconciliation`.

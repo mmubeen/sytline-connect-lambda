@@ -27,7 +27,7 @@ def _lambda():
 
 
 def _public(job, duplicate):
-    return {"job_id": job["job_id"], "state": job["state"], "duplicate": duplicate}
+    return {"upload_id": job["upload_id"], "state": job["state"], "duplicate": duplicate}
 
 
 def handler(event, context):
@@ -57,15 +57,15 @@ def handler(event, context):
         return response(503, {"errors": [errors.error(errors.STORE_UNAVAILABLE, "could not record the order")]})
 
     if duplicate:
-        log_event("create_order", started, outcome="200", job_id=job["job_id"], duplicate=True,
+        log_event("create_order", started, outcome="200", upload_id=job["upload_id"], duplicate=True,
                   uploaded_by=body["uploaded_by"], caller=identity)
         return response(200, _public(job, True))
 
     try:  # async, no retries: a failure here leaves the job `accepted` and the sweeper re-drives it
         _lambda().invoke(FunctionName=worker_function_name(), InvocationType="Event",
-                         Payload=json.dumps({"job_id": job["job_id"]}).encode("utf-8"))
+                         Payload=json.dumps({"upload_id": job["upload_id"]}).encode("utf-8"))
     except Exception:
         pass
-    log_event("create_order", started, outcome="202", job_id=job["job_id"], request_ref=body["request_ref"],
+    log_event("create_order", started, outcome="202", upload_id=job["upload_id"], request_ref=body["request_ref"],
               uploaded_by=body["uploaded_by"], caller=identity)
     return response(202, _public(job, False))

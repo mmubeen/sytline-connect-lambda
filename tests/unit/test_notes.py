@@ -1,57 +1,67 @@
-from fakes import FakeSql
-from syteline import notes
+from fakes import FakeSoap
+from syteline import idos, notes
+from syteline.errors import ErpUncertain
 
 
-def sql():
-    return FakeSql(records={("co", "100"): "rp-co", ("job", "5000"): "rp-job"})
+def soap(**kw):
+    s = FakeSoap(**kw)
+    s.add_record("SLCos", CoNum="100")
+    s.add_record("CCTJobs", Job="5000")
+    return s
 
 
-def test_internal_flag_is_1_external_0_and_proc_params(live_writes):
-    s = sql()
-    notes.add_note(s, "co", "100", "a" * 100, internal=True)
-    notes.add_note(s, "co", "100", "b", internal=False)
-    (_, p1), (_, p2) = s.writes
-    assert p1 == ("co", "rp-co", "a" * 60, "a" * 100, 1) and p2[4] == 0
-    assert "CreateSpecificNoteSp" in s.writes[0][0]
+def test_add_note_loads_row_pointer_then_invokes_method(live_writes):
+    s = soap()
+    out = notes.add_note(s, "co", "100", "a" * 100, internal=True)
+    assert out == {"ok": True, "action": "add_note"}
+    assert [c for c in s.calls if c[0] in ("load", "invoke")] == [("load", "SLCos"), ("invoke", "CreateSpecificNoteSp")]
+    assert s.rows["SpecificNotes"][0]["NoteContent"] == "a" * 100 and s.rows["SpecificNotes"][0]["NoteDesc"] == "a" * 60
+    assert s.rows["ObjectNotes"][0]["RefRowPointer"] == s.rows["SLCos"][0]["RowPointer"]
 
 
-def test_lookup_is_parameterized():
-    s = sql()
-    notes.get_notes(s, "job", "5000'; DROP TABLE job;--")
-    text, params = s.queries[0]
-    assert "DROP" not in text and params == ("5000'; DROP TABLE job;--",)
+def test_internal_flag_is_1_external_0(live_writes):
+    s = soap()
+    notes.add_note(s, "job", "5000", "a", internal=True)
+    notes.add_note(s, "job", "5000", "b", internal=False)
+    assert [r["NhNoteFlag"] for r in s.rows["ObjectNotes"]] == ["1", "0"]
 
 
-def test_get_notes_uses_documented_joins():
-    s = sql()
-    notes.get_notes(s, "co", "100")
-    text, params = s.queries[-1]
-    assert "SpecificNotes" in text and "ObjectNotes" in text
-    assert "sn.SpecificNoteToken = ObjectNotes.SpecificNoteToken" in text
-    assert "ObjectNotes.RefRowPointer = %s" in text and params == ("rp-co",)
+def test_job_notes_use_the_job_collection_and_key(live_writes):
+    s = soap()
+    notes.add_note(s, "job", "5000", "x")
+    assert ("load", "CCTJobs") in s.calls and ("load", "SLCos") not in s.calls
+
+
+def test_record_key_is_escaped_in_the_filter():
+    s = soap()
+    out = notes.get_notes(s, "job", "5000'; DROP TABLE job;--")
+    assert out["ok"] is False and out["errors"][0]["code"] == "NOT_FOUND"
+    assert idos.quote("5000'; DROP TABLE job;--") == "'5000''; DROP TABLE job;--'"
+
+
+def test_get_notes_reads_object_notes_then_specific_notes(live_writes):
+    s = soap()
+    notes.add_note(s, "co", "100", "hello", internal=False)
+    s.calls.clear()
+    out = notes.get_notes(s, "co", "100")
+    assert [c for c in s.calls] == [("load", "SLCos"), ("load", "ObjectNotes"), ("load", "SpecificNotes")]
+    assert out["notes"][0]["text"] == "hello" and out["notes"][0]["internal"] is False
 
 
 def test_missing_record_writes_nothing(live_writes):
-    s = sql()
+    s = soap()
     out = notes.add_note(s, "job", "nope", "t")
-    assert out["ok"] is False and out["errors"][0]["code"] == "NOT_FOUND" and s.writes == []
+    assert out["errors"][0]["code"] == "NOT_FOUND" and s.writes() == []
 
 
 def test_live_writes_off_blocks_add_note_but_not_get_notes():
-    s = sql()
+    s = soap()
+    assert notes.add_note(s, "co", "100", "t")["errors"][0]["code"] == "LIVE_WRITES_DISABLED"
+    assert s.writes() == [] and notes.get_notes(s, "co", "100")["ok"] is True
+
+
+def test_uncertain_invoke_is_reported_and_not_retried(live_writes):
+    s = soap(scenarios={("invoke", "CreateSpecificNoteSp", 1): "timeout_after"})
     out = notes.add_note(s, "co", "100", "t")
-    assert out["errors"][0]["code"] == "LIVE_WRITES_DISABLED" and s.writes == []
-    assert notes.get_notes(s, "co", "100")["ok"] is True
-
-
-def test_uncertain_write_is_reported_not_retried(live_writes):
-    from syteline.errors import ErpUncertain
-
-    class Boom(FakeSql):
-        def execute_write(self, sql, params=()):
-            self.writes.append(1)
-            raise ErpUncertain("timeout")
-
-    s = Boom(records={("co", "100"): "rp"})
-    out = notes.add_note(s, "co", "100", "t")
-    assert out["errors"][0]["code"] == "UNCERTAIN_OUTCOME" and len(s.writes) == 1
+    assert out["errors"][0]["code"] == "UNCERTAIN_OUTCOME"
+    assert s.calls.count(("invoke", "CreateSpecificNoteSp")) == 1

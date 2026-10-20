@@ -24,16 +24,16 @@ log.setLevel(logging.INFO)
 
 ACTIONS = ("health", "add_note", "get_notes")
 
-# Overridable factory (tests inject a fake SQL client).
-_sql_factory = None
+# Overridable factory (tests inject a fake web-service client).
+_client_factory = None
 
 
-def _make_sql():
-    if _sql_factory:
-        return _sql_factory()
-    from syteline.sql import SqlClient
+def _make_client():
+    if _client_factory:
+        return _client_factory()
+    from syteline.client import SoapIdoClient
 
-    return SqlClient(cfgmod.load_config())
+    return SoapIdoClient(cfgmod.load_config(), timeout=cfgmod.timeout(), verify=cfgmod.verify_tls())
 
 
 def _note_action(action, event):
@@ -42,19 +42,16 @@ def _note_action(action, event):
     problems = notes.validate_note_request(event, need_text=(action == "add_note"))
     if problems:
         return failure(action, *problems)
-    sql = _make_sql()
+    soap = _make_client()
     try:
         if action == "add_note":
-            return notes.add_note(sql, event["record_type"], event["record_key"], event["text"],
+            return notes.add_note(soap, event["record_type"], event["record_key"], event["text"],
                                   bool(event.get("internal", True)))
-        return notes.get_notes(sql, event["record_type"], event["record_key"], event.get("since"))
+        return notes.get_notes(soap, event["record_type"], event["record_key"], event.get("since"))
     except ErpUnreachable as exc:
         return failure(action, errors.error(errors.ERP_UNREACHABLE, str(exc)))
     except ErpError as exc:
         return failure(action, errors.error(errors.ERP_REJECTED, str(exc)))
-    finally:
-        if hasattr(sql, "close"):
-            sql.close()
 
 
 def lambda_handler(event, context):

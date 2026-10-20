@@ -35,15 +35,15 @@ def handler(event, context):
     for job in store.list_accepted_older_than(redrive_after):
         try:
             lam.invoke(FunctionName=worker_function_name(), InvocationType="Event",
-                       Payload=json.dumps({"job_id": job["job_id"]}).encode("utf-8"))
-            redriven.append(job["job_id"])
+                       Payload=json.dumps({"upload_id": job["upload_id"]}).encode("utf-8"))
+            redriven.append(job["upload_id"])
         except Exception:
             pass  # still accepted; the next sweep tries again
     for job in store.list_running_older_than(stale_after):
         possibly = (job.get("erp_records") or {}).get("possibly_written", [])
-        if store.park(job["job_id"], errors.STALE_RUNNING,
+        if store.park(job["upload_id"], errors.STALE_RUNNING,
                       "worker stopped before finishing; check SyteLine for records from this upload",
                       "sweeper", possibly):
-            parked.append(job["job_id"])
+            parked.append(job["upload_id"])
     log_event("sweep", started, redriven=len(redriven), parked=len(parked))
     return {"redriven": redriven, "parked": parked}

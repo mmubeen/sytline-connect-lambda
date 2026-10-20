@@ -3,11 +3,11 @@ SyteLine IDO web-service (SOAP over HTTP) client.
 
 ASSUMPTIONS (to be confirmed read-only by task T031 against the plant network, see
 specs/001-syteline-erp-integration/research.md): the SOAP operation names and payload shapes
-(LoadDataSet / SaveDataSet). They are isolated in `OPS` and the `_xml_*` / parse helpers so a
+(LoadDataSet / SaveDataSet / CallMethod). They are isolated in `OPS` and the `_xml_*` / parse helpers so a
 correction touches only this file.
 
 Safety rules (FR-004, FR-016):
-  * `insert` refuses to run unless live writes are enabled.
+  * `insert` and `invoke` (a method call may write) refuse to run unless live writes are enabled.
   * HTTP 200 is NOT acceptance: row-level rejections inside the response raise ErpRejected.
   * A transport failure after a write request may have been sent raises ErpUncertain, never a
     plain failure. There is intentionally no delete operation.
@@ -21,7 +21,7 @@ from .errors import ErpError, ErpRejected, ErpUncertain, ErpUnreachable, LiveWri
 
 log = logging.getLogger(__name__)
 
-OPS = {"load": "LoadDataSet", "save": "SaveDataSet"}
+OPS = {"load": "LoadDataSet", "save": "SaveDataSet", "call": "CallMethod"}
 
 
 def _looks_expired(exc):
@@ -100,9 +100,9 @@ class SoapIdoClient:
                 raise ErpUnreachable(f"{type(exc).__name__}: {exc}") from None
 
     # -- operations ----------------------------------------------------------------------
-    def load(self, ido, properties, filter_=""):
-        """Return rows (list of dicts) from an IDO. Read-only."""
-        raw = self._call("load", ido, ",".join(properties), filter_, "", "", 0)
+    def load(self, ido, properties, filter_="", record_cap=0):
+        """Return rows (list of dicts) from an IDO. Read-only. record_cap 0 = all rows."""
+        raw = self._call("load", ido, ",".join(properties), filter_, "", "", record_cap)
         return parse_rows(raw)
 
     read_back = load
@@ -117,6 +117,18 @@ class SoapIdoClient:
             raise ErpRejected(err)
         rows = parse_rows(raw)
         return rows[0] if rows else dict(values)
+
+    def invoke(self, ido, method, params):
+        """Call an IDO method (e.g. NextCoSp) through the web service; return its output values.
+
+        Every call may write, so it is gated by live writes. A fault is a definite rejection, a
+        transport failure after the request may have been sent is ErpUncertain.
+        """
+        if not config.live_writes_enabled():
+            raise LiveWritesDisabled("live ERP writes are disabled (SYTELINE_LIVE_WRITES)")
+        raw = self._call("call", ido, method, [str(p) for p in params], write=True)
+        return [str(v) for v in (raw or [])]
+
 
 
 # -- XML helpers (shape assumed, see module docstring) -----------------------------------

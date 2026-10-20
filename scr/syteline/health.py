@@ -108,16 +108,8 @@ def run_health(event, context=None):
             raise RuntimeError("empty session token returned")
         return f"session token received (length {len(str(tok))})"
 
-    def sql():  # TCP reachability only: never opens a SQL session or sends credentials
-        h, p = cfg["SYTELINE_SQL_HOST"], int(cfg["SYTELINE_SQL_PORT"])
-        with socket.create_connection((h, p), timeout=timeout):
-            return f"connected to SQL {h}:{p}"
-
     plan = [("dns", dns), ("tcp", tcp), ("wsdl", wsdl)]
     plan = [("load", load)] + plan if dry_run else plan + [("token", token)]
-    # Opt-in (event {"check_sql": true}) so the default stage list stays unchanged (FR-009, SC-007).
-    if not dry_run and cfgmod.truthy(event.get("check_sql", False)) and cfgmod.sql_configured(cfg):
-        plan.append(("sql", sql))
     for name, fn in plan:
         if not _stage(name, fn, results):
             break  # later stages depend on earlier ones

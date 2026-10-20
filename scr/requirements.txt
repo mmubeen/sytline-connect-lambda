@@ -2,4 +2,3 @@ zeep
 lxml
 requests
 urllib3
-python-tds
