@@ -1,0 +1,10 @@
+BEGIN TRANSACTION
+
+DECLARE @Key as LongList
+declare @Infobar  as Infobar
+
+EXEC [dbo].[NextCoSp] NULL, NULL, 10, @Key OUTPUT, @InfoBar OUTPUT
+
+Select @Key, @infobar
+
+ROLLBACK TRANSACTION

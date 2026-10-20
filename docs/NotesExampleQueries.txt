@@ -1,0 +1,33 @@
+/*** Query recently created notes ***/
+select ObjectNotes.* from SpecificNotes 
+inner join ObjectNotes on SpecificNotes.SpecificNoteToken = ObjectNotes. SpecificNoteToken
+inner join jobroute on jobroute.RowPointer = ObjectNotes.RefRowPointer
+where SpecificNotes.CreateDate >= '10/1/26'
+
+/*** Get all the notes for a single job ***/
+select * from SpecificNotes 
+inner join ObjectNotes on SpecificNotes.SpecificNoteToken = ObjectNotes. SpecificNoteToken
+inner join jobroute on jobroute.RowPointer = ObjectNotes.RefRowPointer
+where jobroute.job = '    161272'
+
+/*** Query a single note by SpecificNoteToken ***/
+select * from SpecificNotes 
+where SpecificNoteToken = 1683026
+
+/*** Find a base record using RowPointer ***/
+select * from jobroute
+where RowPointer = '1CFEDF23-0CBF-4F35-8346-032B11A7D8DB'
+
+/*** Query co records with notes recently added ***/
+select co.co_num, ObjectNotes.NoteHeaderToken, SpecificNotes.* from co
+inner join ObjectNotes on ObjectNotes.RefRowPointer = co.RowPointer
+inner join SpecificNotes on SpecificNotes.SpecificNoteToken = ObjectNotes.SpecificNoteToken
+where SpecificNotes.CreateDate > '9/1/26'
+
+/*** Shows the NoteHeaderToken for each table NoteFlag = 1 is Internal ***/
+select * from NoteHeaders
+
+/*** An Internal Note on co table ***/
+Select co.co_num, * from ObjectNotes 
+inner join co on co.RowPointer = ObjectNotes.RefRowPointer
+where NoteHeaderToken = 31 and ObjectNotes.CreateDate > '1/1/23'

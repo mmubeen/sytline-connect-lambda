@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Validates connectivity to the SyteLine SOAP endpoint
+
+Parameters:
+  SytelineWsdl:
+    Type: String
+  SytelineUser:
+    Type: String
+  SytelineSecretArn:
+    Type: String
+    Description: Secrets Manager secret (JSON) with SYTELINE_PASS
+  SytelineConfig:
+    Type: String
+    Default: CCT
+
+Resources:
+  SytelineConnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          SYTELINE_WSDL: !Ref SytelineWsdl
+          SYTELINE_USER: !Ref SytelineUser
+          SYTELINE_CONFIG: !Ref SytelineConfig
+          SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref SytelineSecretArn
+      # If SyteLine is only reachable on a private network, attach the function to a VPC:
+      # VpcConfig:
+      #   SecurityGroupIds: [sg-xxxx]
+      #   SubnetIds: [subnet-xxxx]
+
+Outputs:
+  FunctionName:
+    Value: !Ref SytelineConnectFunction
