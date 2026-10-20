@@ -65,6 +65,10 @@ One stack (`sytline-connect`) in **us-gov-east-1**, one configuration (`default`
 
 - **Build:** `scr/Makefile` (selected by `Metadata: BuildMethod: makefile`) installs the dependencies as
   Linux x86_64 / CPython 3.13 wheels into the `sytline-connect-deps` layer and copies the code into each function.
+- **Host network:** supply an existing one (all four of VPC, subnets, security groups, route tables), or leave all four empty and
+  set `HOST_NETWORK_CIDR` and `PLANT_CIDR_1` to have the stack create a private one (two subnets, no route out, security groups,
+  endpoints; optionally the API-caller endpoint). The plant connection (VPN, routes) is never created: the network team adds it
+  from the stack outputs. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) section 3a.
 - **Parameters:** site-specific values (web-service WSDL and user, secret ARN, the `execute-api` VPC endpoint,
   worker VPC / subnets / security groups / route tables) come from `deploy.env`; `deploy.sh` refuses to run if any is missing.
   The worker needs a route to the plant over the VPN and outbound HTTP port 80 to the web service. The template
