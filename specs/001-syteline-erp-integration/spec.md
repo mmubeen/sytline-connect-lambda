@@ -16,6 +16,8 @@ Today the Lambda only proves that the SyteLine ERP is reachable and that credent
 
 ### Session 2026-10-20
 
+- Q: Which AWS region should the stack deploy to? → A: us-gov-east-1 (GovCloud). It is a single value in the deploy configuration; partition-specific ARNs use `aws-us-gov`.
+- Q: Should the SAM setup define one deployment, or separate staging and production deployments? → A: One deployment: a single stack with one configuration (`default`). Live writes stay off in the configuration, and turning them on is a deliberate, approved change (FR-016).
 - Q: Through which channel may the system access SyteLine's database? → A: Only through the SyteLine web service (IDO SOAP). The system makes no direct SQL connection and holds no database credentials. (Source: user direction; supersedes the SQL steps in instruction sheet section 4 and the SQL-based customer lookup, number allocation and notes in the earlier answers.)
 - Q: How should CO and job numbers be obtained through the web service? → A: By calling SyteLine's `NextCoSp` and `NextWOSp` routines as methods through the web service, then inserting the rows with the allocated numbers. Allocation is a separate step before the insert and counts as a write for the live-write gate. (Whether these are callable as web-service methods is confirmed by the read-only discovery task.)
 - Q: How should the customer be looked up through the web service? → A: With a read-only query on SyteLine's customer address collection (the data behind `custaddr`), restricted to the bill-to row and filtered by the supplied name and address. If the web service exposes no such collection, the read-only discovery task reports it and this is revisited. The exact collection name is confirmed by that task.
@@ -135,6 +137,7 @@ An operator runs the existing health check to find where connectivity breaks (ne
 
 - Upstream callers (such as the PO OCR project) are internal applications that authenticate with an approved AWS identity and reach the system through a private API; individual operators do not sign in to this system, but the confirming operator is passed as `uploaded_by`.
 - The ERP's supplied SOAP service, its existing numbering and note-handling routines (see `sql/`, used as a reference for behavior; they are reached only through the web service), and the CO/job creation field mapping in `docs/COJobCreationIDOs.xlsx` define what data is required.
+- The service deploys to AWS GovCloud region us-gov-east-1.
 - There is no non-production SyteLine environment. Live ERP writes require explicit approval from the ERP owner for each test, together with a reconciliation and cleanup plan.
 - Order changes, cancellations, and deletes are out of scope for this version; only create and notes.
 - Order volume is low (tens per hour), so batch/bulk processing is out of scope.

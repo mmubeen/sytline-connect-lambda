@@ -1,0 +1,23 @@
+# One deployment: a single stack, one configuration ("default"). See README.md "Deploy (SAM)".
+# Site-specific parameters (WSDL, user, secret ARN, VPC/subnet/security-group IDs ...) are NOT stored
+# here; supply them with ./deploy.sh (which reads deploy.env) or `--parameter-overrides`.
+version = 0.1
+
+[default.global.parameters]
+stack_name = "sytline-connect"
+region = "us-gov-east-1"
+
+[default.build.parameters]
+cached = false
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+fail_on_empty_changeset = false
+# Live ERP writes stay OFF unless ./deploy.sh is run with an approval reference (FR-016).
+tags = "project=sytline-connect"

@@ -48,3 +48,7 @@ htmlcov/
 
 .DS_Store
 .claude
+# SAM
+.aws-sam/
+scr/.aws-sam/
+scr/deploy.env

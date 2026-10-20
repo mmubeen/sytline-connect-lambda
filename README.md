@@ -54,11 +54,28 @@ All tests use fakes and never touch the ERP. `tests/integration/` is skipped by 
 additionally need `SYTELINE_LIVE=1` **and** `LIVE_APPROVAL_REF` (the ERP owner's approval).
 
 ## Deploy (SAM)
-`cd scr && sam build --use-container && sam deploy --guided`
-Parameters include the API's VPC endpoint ID, and the worker's private
-subnets and security groups (they need a route to the plant over the VPN and outbound HTTP port 80 to
-the web service; nothing else goes to the plant). The template also creates DynamoDB and Secrets Manager
-VPC endpoints for the worker's VPC (`CreateVpcEndpoints=false` if the VPC already reaches them). Console deployment of the direct-invoke function: [`DEPLOY_PORTAL.md`](DEPLOY_PORTAL.md).
+One stack (`sytline-connect`) in **us-gov-east-1**, one configuration (`default` in `scr/samconfig.toml`).
+
+    pip install aws-sam-cli            # or the official installer
+    cd scr
+    cp deploy.env.example deploy.env   # fill in; git-ignored, holds no passwords
+    ./deploy.sh --validate             # lint the template
+    ./deploy.sh --build                # sam build (no Docker, no local Python 3.13 needed)
+    ./deploy.sh                        # build + deploy; confirms the change set interactively
+
+- **Build:** `scr/Makefile` (selected by `Metadata: BuildMethod: makefile`) installs the dependencies as
+  Linux x86_64 / CPython 3.13 wheels into the `sytline-connect-deps` layer and copies the code into each function.
+- **Parameters:** site-specific values (web-service WSDL and user, secret ARN, the `execute-api` VPC endpoint,
+  worker VPC / subnets / security groups / route tables) come from `deploy.env`; `deploy.sh` refuses to run if any is missing.
+  The worker needs a route to the plant over the VPN and outbound HTTP port 80 to the web service. The template
+  also creates DynamoDB and Secrets Manager VPC endpoints (`CREATE_VPC_ENDPOINTS=false` if the VPC already reaches them).
+- **Secret:** create the Secrets Manager secret (JSON with `SYTELINE_PASS`) in us-gov-east-1 first and put its ARN in `deploy.env`.
+- **Live writes stay off.** `LIVE_WRITES=false` is the default. `deploy.sh` will not deploy with `LIVE_WRITES=true` unless
+  `LIVE_APPROVAL_REF` (the ERP owner's written approval) is also set; redeploy with it off afterwards.
+- **Outputs:** API id, worker and direct-invoke function names, job table name. The API is private: call it from the
+  approved VPC endpoint with IAM (SigV4) credentials.
+- Full step-by-step guide (prerequisites, verification, enabling live writes, troubleshooting, teardown): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+- Console deployment of only the direct-invoke function: [`DEPLOY_PORTAL.md`](DEPLOY_PORTAL.md).
 
 ## Invoke (direct actions)
 `aws lambda invoke --function-name <name> --payload '{"action":"health"}' --cli-binary-format raw-in-base64-out out.json && cat out.json`

@@ -57,8 +57,11 @@ Conditions:
 Globals:
   Function:
     Runtime: python3.13
+    Architectures: [x86_64]
     CodeUri: .
     MemorySize: 256
+    Layers:
+      - !Ref DepsLayer
     Environment:
       Variables:
         JOBS_TABLE: !Ref JobsTable
@@ -84,6 +87,17 @@ Resources:
       SubnetIds: !Ref WorkerSubnetIds
       SecurityGroupIds: !Ref WorkerSecurityGroupIds
       PrivateDnsEnabled: true
+
+  # Dependencies (zeep, lxml, requests, urllib3) built for Linux x86_64 / Python 3.13 by the Makefile
+  DepsLayer:
+    Type: AWS::Serverless::LayerVersion
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      LayerName: sytline-connect-deps
+      ContentUri: .
+      CompatibleRuntimes: [python3.13]
+      CompatibleArchitectures: [x86_64]
 
   JobsTable:
     Type: AWS::DynamoDB::Table
@@ -117,6 +131,8 @@ Resources:
 
   IntakeFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: handlers.intake.handler
       Timeout: 15
@@ -138,6 +154,8 @@ Resources:
 
   StatusFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: handlers.status.handler
       Timeout: 10
@@ -154,6 +172,8 @@ Resources:
 
   WorkerFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: handlers.worker.handler
       Timeout: 300
@@ -182,6 +202,8 @@ Resources:
 
   SweeperFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: handlers.sweeper.handler
       Timeout: 60
@@ -204,6 +226,8 @@ Resources:
   # Direct-invoke actions: health (connectivity), add_note, get_notes
   DirectFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: lambda_function.lambda_handler
       Timeout: 60
