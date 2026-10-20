@@ -38,6 +38,8 @@ A region with fewer than two availability zones is refused at changeset creation
 
 New settings: `HOST_NETWORK_CIDR`, `PLANT_CIDR_1`, `PLANT_CIDR_2`, `PLANT_CIDR_3`, `DYNAMODB_PREFIX_LIST_ID`, `CREATE_API_ENDPOINT`. The four existing network settings and `API_VPCE_ID` become optional.
 
+Switches: `--build`, `--validate`, `--allow-network-change`, and `--profile NAME` (also `--profile=NAME`; or `AWS_PROFILE_NAME` in `deploy.env`, the flag wins). The profile is passed to `sam build`, `sam validate`, `sam deploy` and the existing-stack `aws` look-ups; a name that is not in `aws configure list-profiles` or contains characters outside `A-Za-z0-9_.@-` is refused before anything runs; with no profile nothing changes (default credential chain).
+
 Client-side checks (same outcomes as the rules, before any AWS call):
 - some but not all four network settings -> refuse, naming the missing ones;
 - Create mode without `HOST_NETWORK_CIDR` or `PLANT_CIDR_1` -> refuse;

@@ -18,6 +18,7 @@ The SyteLine integration (feature 001) runs its worker and direct-invoke functio
 
 - Q: Does this feature also create the plant connection (VPN gateway, VPN connection to the Palo Alto, routes)? → A: No. It creates only the host network and the resources inside it. The network team makes the plant connection, using the deployment outputs and the guide.
 - Q: Should the stack also create the API-caller endpoint in the new network? → A: Optional. It is created only when the deployer switches that option on; otherwise the endpoint stays a required input as today.
+- Q: What should the deployment profile switch select? → A: The AWS credentials profile. `./deploy.sh --profile <name>` (or `AWS_PROFILE_NAME` in the deployment settings) is passed to every AWS-facing step (build, validate, deploy and the existing-stack check). With no switch, the default credential chain is used as today. It does not introduce named deployment configurations.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -91,6 +92,7 @@ After a deployment that created the network, the deployer gets the identifiers a
 - **FR-009**: The system MUST create the API-caller endpoint (the private entry point that approved clients use to reach the order API) in the new network only when the deployer explicitly switches that option on; when the option is off, the endpoint identifier remains a required input exactly as in feature 001, and when the host network is not created the option has no effect.
 - **FR-010**: The system MUST warn, in the deployment guide and at deployment time, that the address range must not overlap the plant's range, and that the health check is expected to fail at connectivity until the plant connection exists.
 - **FR-011**: The deployment MUST NOT change feature 001's safety rules: live ERP writes stay off by default and all ERP access stays through the web service.
+- **FR-012**: The deployment tooling MUST let the deployer choose the AWS credentials profile with a switch (or a deployment setting), apply it to every AWS-facing step, refuse a profile name that is not configured on the machine, and behave as before when no profile is given.
 
 ### Key Entities
 

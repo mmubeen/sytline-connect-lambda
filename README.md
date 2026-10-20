@@ -59,9 +59,12 @@ One stack (`sytline-connect`) in **us-gov-east-1**, one configuration (`default`
     pip install aws-sam-cli            # or the official installer
     cd scr
     cp deploy.env.example deploy.env   # fill in; git-ignored, holds no passwords
-    ./deploy.sh --validate             # lint the template
-    ./deploy.sh --build                # sam build (no Docker, no local Python 3.13 needed)
-    ./deploy.sh                        # build + deploy; confirms the change set interactively
+    ./deploy.sh --profile NAME --validate   # lint the template
+    ./deploy.sh --profile NAME --build      # sam build (no Docker, no local Python 3.13 needed)
+    ./deploy.sh --profile NAME              # build + deploy; confirms the change set interactively
+
+`--profile NAME` selects the AWS credentials profile for every step (or set `AWS_PROFILE_NAME` in `deploy.env`; omit both to use
+the default credential chain).
 
 - **Build:** `scr/Makefile` (selected by `Metadata: BuildMethod: makefile`) installs the dependencies as
   Linux x86_64 / CPython 3.13 wheels into the `sytline-connect-deps` layer and copies the code into each function.

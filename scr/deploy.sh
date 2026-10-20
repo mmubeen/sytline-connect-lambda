@@ -4,29 +4,57 @@
 #   ./deploy.sh --build                  build only
 #   ./deploy.sh --validate               lint the template only
 #   ./deploy.sh --allow-network-change   permit switching between "create" and "supply" host-network mode
+#   ./deploy.sh --profile NAME           use this AWS credentials profile (flag > AWS_PROFILE_NAME in deploy.env > default chain)
+# Flags can be combined, e.g. ./deploy.sh --profile govcloud-prod --validate
 # Settings come from deploy.env (copy deploy.env.example). Nothing secret is stored there.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 mode="deploy"
 allow_network_change="false"
-for arg in "$@"; do
-  case "$arg" in
+profile=""
+while (( $# )); do
+  case "$1" in
     --build) mode="build" ;;
     --validate) mode="validate" ;;
     --allow-network-change) allow_network_change="true" ;;
-    *) echo "unknown argument: $arg"; exit 2 ;;
+    --profile) [[ $# -ge 2 && -n "${2:-}" && "${2:0:2}" != "--" ]] || { echo "ERROR: --profile needs a profile name" >&2; exit 2; }
+               profile="$2"; shift ;;
+    --profile=*) profile="${1#--profile=}"; [[ -n "$profile" ]] || { echo "ERROR: --profile needs a profile name" >&2; exit 2; } ;;
+    *) echo "unknown argument: $1"; exit 2 ;;
   esac
+  shift
 done
+
+# deploy.env is optional for --build/--validate; read it early only for AWS_PROFILE_NAME
+if [[ -z "$profile" && -f deploy.env ]]; then
+  profile="$(set -a; . ./deploy.env; printf '%s' "${AWS_PROFILE_NAME:-}")"
+fi
+
+# --- AWS credentials profile: one switch, applied to every AWS-facing step ---------------
+profile_args=()
+if [[ -n "$profile" ]]; then
+  [[ "$profile" =~ ^[A-Za-z0-9_.@-]+$ ]] || { echo "ERROR: invalid profile name: $profile" >&2; exit 2; }
+  if command -v aws >/dev/null; then
+    if profiles="$(aws configure list-profiles 2>/dev/null)"; then
+      printf '%s\n' "$profiles" | grep -Fxq -- "$profile" \
+        || { echo "ERROR: AWS profile '$profile' is not configured on this machine (aws configure list-profiles)" >&2; exit 1; }
+    else
+      echo "WARNING: could not list AWS profiles (older aws CLI?); not checking that '$profile' exists."
+    fi
+  fi
+  profile_args=(--profile "$profile")
+  echo "Using AWS profile: $profile"
+fi
 
 command -v sam >/dev/null || { echo "sam CLI not found (https://docs.aws.amazon.com/serverless-application-model/)"; exit 1; }
 
 if [[ "$mode" == "validate" ]]; then
-  sam validate --lint
+  sam validate --lint ${profile_args[@]+"${profile_args[@]}"}
   exit 0
 fi
 
-if [[ "$mode" == "build" ]]; then sam build; exit 0; fi
+if [[ "$mode" == "build" ]]; then sam build ${profile_args[@]+"${profile_args[@]}"}; exit 0; fi
 
 [[ -f deploy.env ]] || { echo "deploy.env missing: copy deploy.env.example and fill it in"; exit 1; }
 set -a; . ./deploy.env; set +a
@@ -83,10 +111,10 @@ fi
 stack_name="$(sed -n 's/^stack_name *= *"\(.*\)"/\1/p' samconfig.toml | head -1)"
 region="$(sed -n 's/^region *= *"\(.*\)"/\1/p' samconfig.toml | head -1)"
 if command -v aws >/dev/null; then
-  status="$(aws cloudformation describe-stacks --stack-name "$stack_name" --region "$region" \
+  status="$(aws ${profile_args[@]+"${profile_args[@]}"} cloudformation describe-stacks --stack-name "$stack_name" --region "$region" \
               --query 'Stacks[0].StackStatus' --output text 2>/dev/null || true)"
   if [[ -n "$status" && "$status" != "None" ]]; then
-    host_vpc="$(aws cloudformation describe-stacks --stack-name "$stack_name" --region "$region" \
+    host_vpc="$(aws ${profile_args[@]+"${profile_args[@]}"} cloudformation describe-stacks --stack-name "$stack_name" --region "$region" \
                   --query "Stacks[0].Outputs[?OutputKey=='HostVpcId'].OutputValue | [0]" --output text 2>/dev/null || true)"
     existing_mode="supply"
     [[ -n "$host_vpc" && "$host_vpc" != "None" ]] && existing_mode="create"
@@ -110,7 +138,7 @@ else
   live="false"
 fi
 
-sam build
+sam build ${profile_args[@]+"${profile_args[@]}"}
 
 # Every value is double-quoted so commas (list parameters) and other characters are kept literally.
 # (Verified with SAM's own parser: Key="a,b" -> a,b.)
@@ -146,4 +174,4 @@ else
   [[ -z "${DYNAMODB_PREFIX_LIST_ID:-}" ]] || overrides+=("$(q DynamoDbPrefixListId "$DYNAMODB_PREFIX_LIST_ID")")
 fi
 
-sam deploy --parameter-overrides "${overrides[@]}"
+sam deploy ${profile_args[@]+"${profile_args[@]}"} --parameter-overrides "${overrides[@]}"

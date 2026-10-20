@@ -28,7 +28,7 @@ prerequisites are listed in section 2 and come from
 ## 2. Prerequisites
 
 **Tools (on the machine that deploys)**
-- AWS CLI v2 with credentials for the GovCloud account (`AWS_PROFILE=<profile>`; the `aws-us-gov` partition).
+- AWS CLI v2 with credentials for the GovCloud account, ideally as a named profile (`aws configure list-profiles`; the `aws-us-gov` partition). Select it with `./deploy.sh --profile <name>` (section 4).
 - SAM CLI (`sam --version`): <https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html>
   or `pip install aws-sam-cli`.
 - `python3` with `pip` (any recent 3.x) and `make`. **Docker and a local Python 3.13 are not needed**: `scr/Makefile`
@@ -67,6 +67,7 @@ cp deploy.env.example deploy.env
 
 | Variable (`deploy.env`) | Template parameter | Meaning |
 |---|---|---|
+| `AWS_PROFILE_NAME` | (none) | AWS credentials profile for every AWS-facing step; `--profile` overrides it; empty = default credential chain |
 | `SYTELINE_WSDL` | `SytelineWsdl` | `http://<host>/IDORequestService/IDOWebService.asmx?wsdl` (HTTP, port 80) |
 | `SYTELINE_USER` | `SytelineUser` | web-service user name |
 | `SYTELINE_SECRET_ARN` | `SytelineSecretArn` | the secret from step 2.1 |
@@ -128,11 +129,15 @@ Then run the health check (section 5); it should now pass `dns`, `tcp`, `wsdl` a
 ## 4. Validate, build, deploy
 
 ```
-export AWS_PROFILE=<govcloud-profile>
-./deploy.sh --validate     # sam validate --lint
-./deploy.sh --build        # sam build -> .aws-sam/build (layer + 5 functions)
-./deploy.sh                # build + sam deploy, with an interactive change-set review
+./deploy.sh --profile <govcloud-profile> --validate   # sam validate --lint
+./deploy.sh --profile <govcloud-profile> --build      # sam build -> .aws-sam/build (layer + 5 functions)
+./deploy.sh --profile <govcloud-profile>              # build + sam deploy, with an interactive change-set review
 ```
+
+`--profile NAME` (or `AWS_PROFILE_NAME` in `deploy.env`; the flag wins) is passed to `sam build`, `sam validate`, `sam deploy`
+and the existing-stack check. `deploy.sh` refuses a profile that `aws configure list-profiles` does not list, and a name with
+unsafe characters. With no profile the default credential chain is used (including an exported `AWS_PROFILE`). The profile
+is printed at the start of each run so you can see which account you are about to change.
 
 `deploy.sh` stops with a clear message if `deploy.env` is missing or a required value is empty, if the network settings are a partial set, or if create mode lacks `HOST_NETWORK_CIDR`/`PLANT_CIDR_1`. Equivalent raw
 commands: `sam validate --lint`, `sam build`, `sam deploy --parameter-overrides 'Key="value"' ...` (quote every value;
@@ -196,6 +201,7 @@ enabled for a test the ERP owner approved in writing, with a reconciliation and 
 |---|---|
 | `sam build` fails in `pip install` | pip too old for `--platform`: `python3 -m pip install --upgrade pip`; or no network access to the package index |
 | `deploy.sh`: "missing in deploy.env" | fill in the named values |
+| `deploy.sh`: "AWS profile ... is not configured" | the name is not in `aws configure list-profiles`; fix the name or run `aws configure --profile <name>` |
 | Stack in `ROLLBACK_COMPLETE` after a failed first deploy | `sam delete --stack-name sytline-connect --region us-gov-east-1`, fix the cause, redeploy |
 | VPC endpoint creation fails ("private DNS already enabled" or a conflict) | the VPC already has one: set `CREATE_VPC_ENDPOINTS=false` |
 | Deployment refused with "Supply all four ..." or "HostNetworkCidr and PlantCidr1 are required ..." | the network settings are a partial set, or create mode lacks its ranges; see section 3a |

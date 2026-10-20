@@ -20,6 +20,7 @@ SAM_STUB = '#!/usr/bin/env bash\necho "SAM $*" >> "$STUB_LOG"\n'
 AWS_STUB = '''#!/usr/bin/env bash
 echo "AWS $*" >> "$STUB_LOG"
 case "$*" in
+  *list-profiles*) [[ "${STUB_PROFILES_FAIL:-}" == "1" ]] && exit 252; printf '%s\n' ${STUB_PROFILES:-default} ;;
   *StackStatus*) [[ -n "${STUB_STACK_STATUS:-}" ]] && echo "$STUB_STACK_STATUS" || exit 255 ;;
   *HostVpcId*) echo "${STUB_HOSTVPC:-None}" ;;
 esac
@@ -41,10 +42,11 @@ def run(tmp_path):
     log = tmp_path / "log"
     log.write_text("")
 
-    def go(settings, args=(), stack_status="", host_vpc="", with_aws=True):
+    def go(settings, args=(), stack_status="", host_vpc="", with_aws=True, profiles="default govcloud-prod",
+           profiles_fail=False):
         (work / "deploy.env").write_text("".join(f'{k}="{v}"\n' for k, v in settings.items()))
         env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "STUB_LOG": str(log), "STUB_STACK_STATUS": stack_status,
-               "STUB_HOSTVPC": host_vpc}
+               "STUB_HOSTVPC": host_vpc, "STUB_PROFILES": profiles, "STUB_PROFILES_FAIL": "1" if profiles_fail else ""}
         if not with_aws:
             (bin_dir / "aws").unlink()
         log.write_text("")
@@ -182,3 +184,73 @@ def test_live_writes_still_need_an_approval_reference(run):
 def test_always_required_settings_are_checked(run):
     p, calls = run({"SYTELINE_USER": "svc", **SUPPLY})
     assert p.returncode != 0 and "SYTELINE_WSDL" in p.stderr and "SYTELINE_SECRET_ARN" in p.stderr
+
+
+# ---- AWS credentials profile switch (FR-012) ---------------------------------------------
+def profile_args_of(calls):
+    """{step: set of profiles used} for the AWS-facing calls (None = no --profile on that call)."""
+    out = {}
+    for line in calls.splitlines():
+        step = ("build" if line.startswith("SAM build") else "deploy" if line.startswith("SAM deploy")
+                else "validate" if line.startswith("SAM validate")
+                else "stack lookup" if "describe-stacks" in line else None)
+        if step:
+            m = re.search(r"--profile (\S+)", line)
+            out.setdefault(step, set()).add(m.group(1) if m else None)
+    return out
+
+
+def test_no_profile_means_no_profile_flag_anywhere(run):
+    p, calls = run({**BASE, **SUPPLY}, stack_status="CREATE_COMPLETE", host_vpc="None")
+    assert p.returncode == 0 and "--profile" not in calls and "Using AWS profile" not in p.stdout
+
+
+def test_profile_flag_reaches_every_aws_facing_step(run):
+    p, calls = run({**BASE, **SUPPLY}, args=["--profile", "govcloud-prod"], stack_status="CREATE_COMPLETE",
+                   host_vpc="None")
+    assert p.returncode == 0 and "Using AWS profile: govcloud-prod" in p.stdout
+    seen = profile_args_of(calls)
+    assert seen == {"build": {"govcloud-prod"}, "deploy": {"govcloud-prod"}, "stack lookup": {"govcloud-prod"}}
+    assert calls.count("--profile govcloud-prod") >= 4  # build, deploy and both stack look-ups
+
+
+def test_equals_form_and_validate_and_build_modes(run):
+    p, calls = run({**BASE, **SUPPLY}, args=["--profile=govcloud-prod", "--validate"])
+    assert p.returncode == 0 and "SAM validate --lint --profile govcloud-prod" in calls
+    p, calls = run({**BASE, **SUPPLY}, args=["--build", "--profile", "govcloud-prod"])
+    assert p.returncode == 0 and "SAM build --profile govcloud-prod" in calls and not deployed(calls)
+
+
+def test_profile_from_deploy_env_and_flag_wins(run):
+    p, calls = run({**BASE, **SUPPLY, "AWS_PROFILE_NAME": "govcloud-prod"})
+    assert p.returncode == 0 and "SAM deploy --profile govcloud-prod" in calls
+    p, calls = run({**BASE, **SUPPLY, "AWS_PROFILE_NAME": "govcloud-prod"}, args=["--profile", "default"])
+    assert p.returncode == 0 and "--profile default" in calls and "govcloud-prod" not in calls
+
+
+def test_unknown_profile_is_refused_before_anything_runs(run):
+    p, calls = run({**BASE, **SUPPLY}, args=["--profile", "nope"])
+    assert p.returncode != 0 and "'nope' is not configured" in p.stderr
+    assert "SAM" not in calls and "describe-stacks" not in calls
+
+
+@pytest.mark.parametrize("bad", ["a b", "x;rm -rf", "$(id)", "p/q"])
+def test_invalid_profile_names_are_refused(run, bad):
+    p, calls = run({**BASE, **SUPPLY}, args=["--profile", bad])
+    assert p.returncode != 0 and "invalid profile name" in p.stderr and "SAM" not in calls
+
+
+@pytest.mark.parametrize("args", [["--profile"], ["--profile="], ["--profile", "--validate"]])
+def test_profile_without_a_name_is_refused(run, args):
+    p, calls = run({**BASE, **SUPPLY}, args=args)
+    assert p.returncode != 0 and "needs a profile name" in p.stderr and "SAM" not in calls
+
+
+def test_profile_check_is_skipped_with_a_warning_if_profiles_cannot_be_listed(run):
+    p, calls = run({**BASE, **SUPPLY}, args=["--profile", "whatever"], profiles_fail=True)
+    assert p.returncode == 0 and "could not list AWS profiles" in p.stdout and "--profile whatever" in calls
+
+
+def test_profile_works_without_the_aws_cli_installed(run):
+    p, calls = run({**BASE, **SUPPLY}, args=["--profile", "govcloud-prod"], with_aws=False)
+    assert p.returncode == 0 and "SAM deploy --profile govcloud-prod" in calls
