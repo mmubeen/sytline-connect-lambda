@@ -1,4 +1,6 @@
-# Deploying sytline-connect via the AWS Console (no SAM)
+# Deploying the direct-invoke function via the AWS Console (no SAM)
+
+> This covers only the direct-invoke function (`health`, `add_note`, `get_notes`). The private order API, worker, sweeper and job table are defined in `scr/template.yaml` (deploy with SAM); see README.md. The function needs the `python-tds` dependency in the layer, runs in the private subnets that route to the plant, and keeps `SYTELINE_LIVE_WRITES=false` unless an approved test window.
 
 ## 1. What gets deployed
 
@@ -6,8 +8,8 @@
 |---|---|
 | Secrets Manager secret `sytline/connect` | Holds `SYTELINE_PASS` (and optionally other keys) |
 | IAM execution role `sytline-connect-role` | Logs + read the secret (+ VPC ENI access if in a VPC) |
-| Lambda layer `sytline-connect-deps` | `zeep`, `lxml`, `requests` built for Linux |
-| Lambda function `sytline-connect` | `scr/lambda_function.py`, handler `lambda_function.lambda_handler` |
+| Lambda layer `sytline-connect-deps` | `zeep`, `lxml`, `requests`, `python-tds` built for Linux |
+| Lambda function `sytline-connect` | `scr/lambda_function.py` + `scr/syteline/`, handler `lambda_function.lambda_handler` |
 | (Optional) VPC config | Only if SyteLine is private |
 
 ```
@@ -27,7 +29,7 @@ Test event ──► Lambda ──(VPC/NAT or public)──► SyteLine WSDL/SOA
     --platform manylinux2014_x86_64 --implementation cp \
     --python-version 3.13 --only-binary=:all:
   (cd build && zip -r ../dist/deps-layer.zip python -x '*/__pycache__/*')
-  (cd scr && zip ../dist/function.zip lambda_function.py)
+  (cd scr && zip -r ../dist/function.zip lambda_function.py syteline handlers -x '*/__pycache__/*')
   ```
   Layer limit: 50 MB zipped for direct console upload, 250 MB unzipped total. If `deps-layer.zip` exceeds 50 MB, upload it to S3 and use "Upload a file from Amazon S3".
 - **B. Stdlib-only rewrite.** Replace zeep with a hand-built SOAP envelope via `urllib`, then paste the code straight into the console editor. Fewer moving parts, but diverges from the proven `core.py` flow. Only worth it if layers are blocked.

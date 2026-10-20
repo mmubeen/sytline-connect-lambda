@@ -1,0 +1,207 @@
+"""
+The upload sequence from the instruction sheet, section 4 (see research.md R5/R6):
+
+  resolve customer (SQL) -> [live-writes gate] -> NextCoSp (SQL) -> insert SLCos (SOAP)
+  -> per line: NextWoSp (SQL) -> insert CCT_Coitems -> insert CCTJobs -> read back and verify.
+
+Outcome classification (FR-004):
+  failed                 - nothing can have been written (or the ERP rejected the very first row and
+                           a successful read-back proves it is absent). Retriable.
+  needs_reconciliation   - any row may exist and the outcome is not proven: timeouts after a request
+                           was sent, rejections after earlier rows were written, read-back failure or
+                           mismatch. No delete, no retry, ever.
+  succeeded              - every row verified by read-back.
+
+ASSUMPTIONS (confirm read-only with task T031): the property names written to SLCos / CCT_Coitems /
+CCTJobs and the way the teardown value is stored (here: property `Teardown` on CCT_Coitems).
+"""
+
+import logging
+
+from . import config, errors, resolver
+from .errors import (ErpRejected, ErpUncertain, ErpUnreachable, IntegrationError, LiveWritesDisabled)
+from .validation import today
+
+log = logging.getLogger(__name__)
+
+MIN_REMAINING_MS = 5000
+CO_IDO, LINE_IDO, JOB_IDO = "SLCos", "CCT_Coitems", "CCTJobs"
+
+NEXT_CO_SQL = ("DECLARE @Key LongList, @Infobar Infobar; "
+               "EXEC dbo.NextCoSp NULL, NULL, 10, @Key OUTPUT, @Infobar OUTPUT; "
+               "SELECT @Key AS [Key], @Infobar AS Infobar")
+NEXT_JOB_SQL = ("DECLARE @Key JobType, @Infobar InfobarType; "
+                "EXEC dbo.NextWoSp NULL, NULL, 10, @Key OUTPUT, @Infobar OUTPUT; "
+                "SELECT @Key AS [Key], @Infobar AS Infobar")
+
+
+def _q(v):
+    return "'" + str(v).replace("'", "''") + "'"
+
+
+class _Stop(Exception):
+    """Internal: carries a finished outcome."""
+
+    def __init__(self, outcome):
+        self.outcome = outcome
+
+
+class Upload:
+    def __init__(self, request, sql, soap, cfg, remaining_ms=None, on_progress=None):
+        self.req, self.sql, self.soap, self.cfg = request, sql, soap, cfg
+        self.remaining_ms = remaining_ms or (lambda: 10 ** 9)
+        self.on_progress = on_progress
+        self.possibly = []  # [{"kind","key"}]
+        self.customer = None
+        self.co_num = None
+        self.lines = []  # [{"line","job"}]
+
+    # -- outcome builders ----------------------------------------------------------------
+    def _failed(self, code, message, step):
+        return {"state": "failed", "code": code, "message": message, "step": step,
+                "customer_match": self.customer or {}}
+
+    def _park(self, code, message, step):
+        return {"state": "needs_reconciliation", "code": code, "message": message, "step": step,
+                "possibly_written": list(self.possibly), "customer_match": self.customer or {}}
+
+    def _mark(self, kind, key):
+        self.possibly.append({"kind": kind, "key": key})
+        if self.on_progress:
+            self.on_progress(list(self.possibly), self.customer)
+
+    def _time(self, step):
+        if self.remaining_ms() < MIN_REMAINING_MS:
+            msg = "not enough Lambda time left to continue safely"
+            raise _Stop(self._park(errors.TIME_BUDGET_EXHAUSTED, msg, step) if self.possibly
+                        else self._failed(errors.TIME_BUDGET_EXHAUSTED, msg, step))
+
+    # -- steps ---------------------------------------------------------------------------
+    def _allocate(self, sql_text, kind, step):
+        self._time(step)
+        try:
+            rows = self.sql.execute_write(sql_text)
+        except LiveWritesDisabled:
+            raise _Stop(self._failed(errors.LIVE_WRITES_DISABLED, "live ERP writes are disabled", step))
+        except (ErpUnreachable, ErpUncertain) as exc:
+            # a number may have been consumed but no ERP row exists yet unless earlier rows were written
+            out = self._park if self.possibly else self._failed
+            raise _Stop(out(errors.ERP_UNREACHABLE, f"{kind} number allocation failed: {exc}", step))
+        key = str(rows[0].get("Key", "")).strip() if rows else ""
+        if not key:
+            info = rows[0].get("Infobar") if rows else None
+            out = self._park if self.possibly else self._failed
+            raise _Stop(out(errors.ERP_REJECTED, f"{kind} number allocation returned no number ({info})", step))
+        return key
+
+    def _insert(self, ido, values, kind, key, step):
+        """Insert one row. The row is recorded as possibly written BEFORE the request is sent."""
+        self._time(step)
+        first = not self.possibly
+        self._mark(kind, key)
+        try:
+            return self.soap.insert(ido, values)
+        except LiveWritesDisabled:
+            self.possibly.pop()
+            raise _Stop(self._failed(errors.LIVE_WRITES_DISABLED, "live ERP writes are disabled", step))
+        except ErpUnreachable as exc:  # failed while connecting: this request cannot have been processed
+            if first:
+                self.possibly.pop()
+                raise _Stop(self._failed(errors.ERP_UNREACHABLE, f"{step}: {exc}", step))
+            self.possibly.pop()
+            raise _Stop(self._park(errors.ERP_UNREACHABLE, f"{step}: {exc}", step))
+        except ErpRejected as exc:
+            if first and self._proven_absent(ido, key):
+                self.possibly.pop()
+                raise _Stop(self._failed(errors.ERP_REJECTED, f"{step}: {exc}", step))
+            raise _Stop(self._park(errors.ERP_REJECTED, f"{step}: {exc}", step))
+        except ErpUncertain as exc:  # timeout etc.: it may have been processed. Never classify as failed.
+            raise _Stop(self._park(errors.UNCERTAIN_OUTCOME, f"{step}: {exc}", step))
+
+    def _proven_absent(self, ido, key):
+        try:
+            return not self.soap.read_back(ido, ["CoNum"], f"CoNum = {_q(key)}")
+        except Exception:
+            return False
+
+    def _verify(self):
+        step = "read_back"
+        try:
+            cos = self.soap.read_back(CO_IDO, ["CoNum", "CustNum"], f"CoNum = {_q(self.co_num)}")
+            lines = self.soap.read_back(LINE_IDO, ["CoNum", "CoLine", "Item", "QtyOrdered"],
+                                        f"CoNum = {_q(self.co_num)}")
+            jobs = [self.soap.read_back(JOB_IDO, ["Job", "CoNum", "CoLine"], f"Job = {_q(j['job'])}")
+                    for j in self.lines]
+        except Exception as exc:
+            raise _Stop(self._park(errors.UNCERTAIN_OUTCOME, f"read-back failed: {exc}", step))
+        problems = []
+        if len(cos) != 1 or str(cos[0].get("CoNum", "")).strip() != self.co_num:
+            problems.append("CO header not found or duplicated")
+        elif str(cos[0].get("CustNum", "")).strip() != self.customer["cust_num"]:
+            problems.append("CO customer differs from the resolved customer")
+        by_line = {str(r.get("CoLine")): r for r in lines}
+        for i, ln in enumerate(self.req["lines"], start=1):
+            row = by_line.get(str(i))
+            if row is None:
+                problems.append(f"line {i} missing")
+                continue
+            if str(row.get("Item", "")).strip() != ln["item"].strip():
+                problems.append(f"line {i} item differs")
+            try:
+                if float(row.get("QtyOrdered")) != float(ln["quantity"]):
+                    problems.append(f"line {i} quantity differs")
+            except (TypeError, ValueError):
+                problems.append(f"line {i} quantity unreadable")
+        for entry, found in zip(self.lines, jobs):
+            if len(found) != 1:
+                problems.append(f"job {entry['job']} (line {entry['line']}) not found")
+        if problems:
+            raise _Stop(self._park(errors.READBACK_MISMATCH, "; ".join(problems), step))
+
+    # -- main ----------------------------------------------------------------------------
+    def run(self):
+        req = self.req
+        try:
+            step = "resolve_customer"
+            try:
+                self.customer = resolver.resolve_customer(self.sql, req["customer"])
+            except IntegrationError as exc:
+                raise _Stop(self._failed(exc.err["code"], exc.err["message"], step))
+            except (ErpUnreachable, ErpUncertain) as exc:
+                raise _Stop(self._failed(errors.ERP_UNREACHABLE, str(exc), step))
+
+            if not config.live_writes_enabled():  # allocating numbers is a write too (FR-016)
+                raise _Stop(self._failed(errors.LIVE_WRITES_DISABLED,
+                                         "live ERP writes are disabled; nothing was written", "live_writes_check"))
+
+            self.co_num = self._allocate(NEXT_CO_SQL, "CO", "number_co")
+            self._insert(CO_IDO, {
+                "CoNum": self.co_num, "CustNum": self.customer["cust_num"], "CustSeq": self.customer["cust_seq"],
+                "OrderDate": req.get("order_date") or today(), "Stat": "O",
+            }, "co", self.co_num, "create_co")
+
+            whse = req.get("warehouse") or self.cfg.get("SYTELINE_DEFAULT_WHSE", "")
+            ordtype = req.get("order_type") or self.cfg.get("SYTELINE_DEFAULT_ORDTYPE", "")
+            for i, ln in enumerate(req["lines"], start=1):
+                job = self._allocate(NEXT_JOB_SQL, "job", f"number_job_{i}")
+                vals = {"CoNum": self.co_num, "CoLine": i, "Item": ln["item"], "UM": ln["uom"],
+                        "QtyOrdered": ln["quantity"]}
+                for src, dst in (("due_date", "DueDate"), ("price", "Price"), ("teardown", "Teardown")):
+                    if src in ln:
+                        vals[dst] = ln[src]
+                self._insert(LINE_IDO, vals, "line", f"{self.co_num}/{i}", f"create_line_{i}")
+                self._insert(JOB_IDO, {
+                    "Job": job, "OrdType": ordtype, "Whse": whse, "Item": ln["item"],
+                    "QtyReleased": ln["quantity"], "CoNum": self.co_num, "CoLine": i,
+                }, "job", job, f"create_job_{i}")
+                self.lines.append({"line": i, "job": job})
+
+            self._verify()
+            return {"state": "succeeded", "co_num": self.co_num, "lines": self.lines,
+                    "customer_match": self.customer}
+        except _Stop as stop:
+            return stop.outcome
+
+
+def run_upload(request, sql, soap, cfg, remaining_ms=None, on_progress=None):
+    return Upload(request, sql, soap, cfg, remaining_ms, on_progress).run()

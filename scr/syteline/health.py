@@ -1,0 +1,126 @@
+"""
+Connectivity check for the SyteLine SOAP endpoint (the `health` action).
+
+Stages, stopping at the first failure:
+  1. dns   - resolve the WSDL host
+  2. tcp   - open a socket to host:port
+  3. wsdl  - download + parse the WSDL (zeep)
+  4. token - CreateSessionToken(user, pass, config)  (proves credentials work)
+
+Dry run (event {"dry_run": true} or env SYTELINE_DRY_RUN=true) needs only SYTELINE_WSDL:
+no credentials are read or sent and the token stage is skipped. Stages: load, dns, tcp, wsdl.
+The wsdl stage is a plain GET: HTTP 401/403 counts as a PASS ("reachable, authentication
+required"); 2xx is parsed with zeep; any other status fails.
+
+The password is never logged or returned.
+"""
+
+import os
+import socket
+import time
+from urllib.parse import urlparse
+
+from . import config as cfgmod
+
+
+def _stage(name, fn, results):
+    start = time.monotonic()
+    try:
+        detail = fn()
+        results.append({"stage": name, "ok": True, "ms": int((time.monotonic() - start) * 1000), "detail": detail})
+        return True
+    except Exception as exc:  # report, don't raise: we want a structured result
+        results.append({
+            "stage": name, "ok": False, "ms": int((time.monotonic() - start) * 1000),
+            "error": f"{type(exc).__name__}: {exc}",
+        })
+        return False
+
+
+def run_health(event, context=None):
+    event = event if isinstance(event, dict) else {}
+    dry_run = cfgmod.truthy(event.get("dry_run", os.environ.get("SYTELINE_DRY_RUN", "false")))
+    timeout = cfgmod.timeout()
+    verify = cfgmod.verify_tls()
+
+    # Dry run never touches Secrets Manager or credentials.
+    cfg = cfgmod.load_config(skip_secret=dry_run)
+    required = ("SYTELINE_WSDL",) if dry_run else ("SYTELINE_WSDL", "SYTELINE_USER", "SYTELINE_PASS")
+    missing = [k for k in required if not cfg[k]]
+    if missing:
+        return {"ok": False, "dry_run": dry_run, "error": f"missing config: {', '.join(missing)}", "stages": []}
+
+    parsed = urlparse(cfg["SYTELINE_WSDL"])
+    host = parsed.hostname
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    results = []
+    state = {}
+
+    def load():
+        import lxml.etree
+        import requests
+        import zeep
+
+        return f"zeep {zeep.__version__}, requests {requests.__version__}, lxml {lxml.etree.LXML_VERSION}"
+
+    def dns():
+        return sorted({ai[4][0] for ai in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)})
+
+    def tcp():
+        with socket.create_connection((host, port), timeout=timeout):
+            return f"connected to {host}:{port}"
+
+    def _session():
+        import urllib3
+        from requests import Session
+
+        if not verify:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        session = Session()
+        session.verify = verify
+        return session
+
+    def _zeep_client(session):
+        from zeep import Client
+        from zeep.transports import Transport
+
+        transport = Transport(session=session, cache=None, timeout=timeout, operation_timeout=timeout)
+        return Client(cfg["SYTELINE_WSDL"], transport=transport)
+
+    def wsdl():
+        session = _session()
+        if not dry_run:
+            state["client"] = _zeep_client(session)
+            return "WSDL loaded"
+        resp = session.get(cfg["SYTELINE_WSDL"], timeout=timeout)
+        if resp.status_code in (401, 403):
+            return f"HTTP {resp.status_code}: endpoint reachable, authentication required"
+        if resp.ok:
+            _zeep_client(session)
+            return f"HTTP {resp.status_code}: WSDL downloaded and parsed"
+        raise RuntimeError(f"unexpected HTTP {resp.status_code}")
+
+    def token():
+        tok = state["client"].service.CreateSessionToken(
+            cfg["SYTELINE_USER"], cfg["SYTELINE_PASS"], cfg["SYTELINE_CONFIG"]
+        )
+        if not tok:
+            raise RuntimeError("empty session token returned")
+        return f"session token received (length {len(str(tok))})"
+
+    def sql():  # TCP reachability only: never opens a SQL session or sends credentials
+        h, p = cfg["SYTELINE_SQL_HOST"], int(cfg["SYTELINE_SQL_PORT"])
+        with socket.create_connection((h, p), timeout=timeout):
+            return f"connected to SQL {h}:{p}"
+
+    plan = [("dns", dns), ("tcp", tcp), ("wsdl", wsdl)]
+    plan = [("load", load)] + plan if dry_run else plan + [("token", token)]
+    # Opt-in (event {"check_sql": true}) so the default stage list stays unchanged (FR-009, SC-007).
+    if not dry_run and cfgmod.truthy(event.get("check_sql", False)) and cfgmod.sql_configured(cfg):
+        plan.append(("sql", sql))
+    for name, fn in plan:
+        if not _stage(name, fn, results):
+            break  # later stages depend on earlier ones
+
+    ok = len(results) == len(plan) and all(r["ok"] for r in results)
+    return {"ok": ok, "dry_run": dry_run, "host": host, "config": cfg["SYTELINE_CONFIG"], "stages": results}

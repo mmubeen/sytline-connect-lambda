@@ -1,43 +1,213 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Validates connectivity to the SyteLine SOAP endpoint
+Description: SyteLine ERP integration - private order-upload API, worker, status, sweeper, health/notes
 
 Parameters:
   SytelineWsdl:
     Type: String
+    Description: http://<host>/IDORequestService/IDOWebService.asmx?wsdl (HTTP, port 80 as documented)
   SytelineUser:
     Type: String
   SytelineSecretArn:
     Type: String
-    Description: Secrets Manager secret (JSON) with SYTELINE_PASS
+    Description: Secrets Manager secret (JSON) with SYTELINE_PASS, SYTELINE_SQL_USER, SYTELINE_SQL_PASS
   SytelineConfig:
     Type: String
     Default: CCT
+  SqlHost:
+    Type: String
+  SqlPort:
+    Type: String
+    Description: Verified SQL listener port (confirm with Chromalloy IT; do not assume 1433)
+  SqlDatabase:
+    Type: String
+  DefaultWhse:
+    Type: String
+    Default: ""
+  DefaultOrdType:
+    Type: String
+    Default: ""
+  LiveWrites:
+    Type: String
+    Default: "false"
+    AllowedValues: ["false", "true"]
+    Description: Leave "false" except for an ERP-owner-approved test window (FR-016)
+  ApiVpcEndpointId:
+    Type: String
+    Description: execute-api interface VPC endpoint (vpce-...) through which approved clients call the API
+  WorkerSecurityGroupIds:
+    Type: CommaDelimitedList
+    Description: Security groups for the worker/health functions (outbound to SOAP port 80 and the SQL port)
+  WorkerSubnetIds:
+    Type: CommaDelimitedList
+    Description: Private subnets with a route to the plant network over the VPN
+  UseFipsEndpoints:
+    Type: String
+    Default: "true"
+    AllowedValues: ["false", "true"]
+    Description: Use FIPS AWS service endpoints (GovCloud)
+
+Globals:
+  Function:
+    Runtime: python3.13
+    CodeUri: .
+    MemorySize: 256
+    Environment:
+      Variables:
+        JOBS_TABLE: !Ref JobsTable
+        AWS_USE_FIPS_ENDPOINT: !Ref UseFipsEndpoints
 
 Resources:
-  SytelineConnectFunction:
+  JobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  OrderApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      EndpointConfiguration:
+        Type: PRIVATE
+        VPCEndpointIds:
+          - !Ref ApiVpcEndpointId
+      Auth:
+        DefaultAuthorizer: AWS_IAM
+        ResourcePolicy:
+          IntrinsicVpcWhitelist:
+            - !Ref ApiVpcEndpointId
+
+  IntakeFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: lambda_function.lambda_handler
-      Runtime: python3.13
-      Timeout: 60
-      MemorySize: 256
+      Handler: handlers.intake.handler
+      Timeout: 15
+      Environment:
+        Variables:
+          WORKER_FUNCTION_NAME: !Ref WorkerFunction
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref WorkerFunction
+      Events:
+        Post:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OrderApi
+            Path: /confirmed-orders
+            Method: post
+
+  StatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers.status.handler
+      Timeout: 10
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref JobsTable
+      Events:
+        Get:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OrderApi
+            Path: /upload-jobs/{id}
+            Method: get
+
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers.worker.handler
+      Timeout: 300
+      ReservedConcurrentExecutions: 1   # serializes ERP writes
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0          # never replay an upload automatically
+      VpcConfig:
+        SecurityGroupIds: !Ref WorkerSecurityGroupIds
+        SubnetIds: !Ref WorkerSubnetIds
       Environment:
         Variables:
           SYTELINE_WSDL: !Ref SytelineWsdl
           SYTELINE_USER: !Ref SytelineUser
           SYTELINE_CONFIG: !Ref SytelineConfig
           SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
+          SYTELINE_SQL_HOST: !Ref SqlHost
+          SYTELINE_SQL_PORT: !Ref SqlPort
+          SYTELINE_SQL_DB: !Ref SqlDatabase
+          SYTELINE_DEFAULT_WHSE: !Ref DefaultWhse
+          SYTELINE_DEFAULT_ORDTYPE: !Ref DefaultOrdType
+          SYTELINE_LIVE_WRITES: !Ref LiveWrites
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref SytelineSecretArn
+
+  SweeperFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers.sweeper.handler
+      Timeout: 60
+      Environment:
+        Variables:
+          WORKER_FUNCTION_NAME: !Ref WorkerFunction
+          WORKER_TIMEOUT_SECONDS: "300"
+          SWEEPER_REDRIVE_AFTER_SECONDS: "120"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref WorkerFunction
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+
+  # Direct-invoke actions: health (connectivity), add_note, get_notes
+  DirectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_function.lambda_handler
+      Timeout: 60
+      VpcConfig:
+        SecurityGroupIds: !Ref WorkerSecurityGroupIds
+        SubnetIds: !Ref WorkerSubnetIds
+      Environment:
+        Variables:
+          SYTELINE_WSDL: !Ref SytelineWsdl
+          SYTELINE_USER: !Ref SytelineUser
+          SYTELINE_CONFIG: !Ref SytelineConfig
+          SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
+          SYTELINE_SQL_HOST: !Ref SqlHost
+          SYTELINE_SQL_PORT: !Ref SqlPort
+          SYTELINE_SQL_DB: !Ref SqlDatabase
+          SYTELINE_LIVE_WRITES: !Ref LiveWrites
       Policies:
         - Statement:
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
               Resource: !Ref SytelineSecretArn
-      # If SyteLine is only reachable on a private network, attach the function to a VPC:
-      # VpcConfig:
-      #   SecurityGroupIds: [sg-xxxx]
-      #   SubnetIds: [subnet-xxxx]
 
 Outputs:
-  FunctionName:
-    Value: !Ref SytelineConnectFunction
+  ApiId:
+    Value: !Ref OrderApi
+  WorkerFunctionName:
+    Value: !Ref WorkerFunction
+  DirectFunctionName:
+    Value: !Ref DirectFunction
+  JobsTableName:
+    Value: !Ref JobsTable
