@@ -1,6 +1,6 @@
 # Research: Optional Host Network Creation
 
-All decisions were prototyped against `cfn-lint` and `sam validate --lint` (a small template using `Rules`, `Fn::Cidr` and `Fn::GetAZs` validated; the only finding was the empty-default warning in R2).
+All decisions were prototyped against `cfn-lint`, `sam validate --lint` and `sam build` on a copy of the real template (see "Prototype results" at the end).
 
 ## R1 — How inputs become optional
 - **Decision**: The four network inputs (`WorkerVpcId`, `WorkerSubnetIds`, `WorkerSecurityGroupIds`, `WorkerRouteTableIds`) become `String` parameters with `Default: ""` (the two ID lists stay comma-separated strings). A condition `CreateNetwork` is true when all four are empty. Consumers use `!If [CreateNetwork, <created>, <supplied>]`; list consumers use `!Split [",", !Ref ...]` for the supplied path.
@@ -44,6 +44,12 @@ All decisions were prototyped against `cfn-lint` and `sam validate --lint` (a sm
 ## R10 — Validation strategy and limits
 - **Decision**: cfn-lint and `sam validate --lint` on the template; pytest loads the template with a CloudFormation-aware YAML loader to assert invariants (no internet gateway/NAT/EIP/default route, every network resource conditioned on `CreateNetwork`, outputs conditional, Lambda `VpcConfig` switches by condition); a small evaluator checks the `Rules` assertions for parameter combinations (all supplied, none supplied, each partial case, endpoint-option cases); `deploy.sh` is exercised with stub `sam`/`aws` commands.
 - **Limits**: nothing is deployed from here, so availability-zone resolution, endpoint creation and IAM are verified by the linter only. The `Rules` evaluator supports the small function subset the template uses.
+
+## Prototype results (copy of `scr/template.yaml` with the full network section, outside the repo)
+- The optional-string parameters, four `Rules`, `Fn::Cidr`, `Fn::GetAZs`, conditional resources, `Fn::If` in the Lambda VPC settings, the API's `VPCEndpointIds` and the resource-policy whitelist all pass `cfn-lint` (with the one `W1030` check ignored) and `sam validate --lint`; `sam build` keeps the `Rules` and `Conditions` in the built template.
+- **Bug found and designed out:** an optional egress rule that referenced the security group only checked its own setting (`PlantCidr2` non-empty). In Supply mode with a stray `PlantCidr2`, it would have referenced a group that does not exist. Rule: **every optional network resource's condition must include `CreateNetwork`** (`HasPlantCidr2`, `HasPlantCidr3`, `HasDdbPrefixList`, `MakeApiEndpoint`). A structural test asserts this for every resource that references a Create-mode resource.
+- Create-mode-only settings (`HostNetworkCidr`, `PlantCidr*`, `DynamoDbPrefixListId`) given together with a full set of identifiers (Supply mode) are ignored by the template; `deploy.sh` warns about them.
+- Not provable here: that `Fn::Select [1, Fn::GetAZs]` is refused in a one-zone region (the transform accepts it), and real endpoint/IAM creation.
 
 ## Open items (do not block planning)
 1. Which address range the network team will give for the new network, and the plant ranges (inputs, not decisions).

@@ -36,6 +36,8 @@ No stored data. This is the model of the deployment inputs and the resources the
 | Secrets Manager interface endpoint | both subnets, private DNS |
 | API-caller (`execute-api`) interface endpoint | only when `CreateApiEndpoint=true` |
 
+Every optional resource above (`EgressPlant2`/`3`, the prefix-list egress rule, the API endpoint) carries a condition that includes `CreateNetwork`, so a stray Create-mode setting in Supply mode cannot create or reference anything.
+
 Never created: internet gateway, NAT gateway, elastic IP, default route, VPN gateway, VPN connection, plant routes.
 
 ## Consumers (resolved by `CreateNetwork`)

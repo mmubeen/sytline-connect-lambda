@@ -19,3 +19,10 @@ def _live_writes_off(monkeypatch):
 @pytest.fixture
 def live_writes(monkeypatch):
     monkeypatch.setenv("SYTELINE_LIVE_WRITES", "true")
+
+
+@pytest.fixture(scope="module")
+def template():
+    from cfn_template import load_template
+
+    return load_template()
