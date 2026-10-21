@@ -183,6 +183,14 @@ def test_private_erp_address_from_a_function_outside_a_vpc():
     assert "not attached to a VPC" not in text(diag(True, False, True, True, vpc=False, erp_addr="52.0.0.1"))
 
 
+def test_private_erp_outside_a_vpc_does_not_also_suggest_route_or_firewall_causes():
+    t = text(diag(True, False, True, True, vpc=False, erp_addr="10.9.1.5"))
+    assert "not attached to a VPC" in t
+    assert "missing route to the ERP" not in t and "no working outbound path" not in t
+    # inside a VPC the route/firewall advice still applies
+    assert "missing route to the ERP" in text(diag(True, False, True, True, vpc=True, erp_addr="10.9.1.5"))
+
+
 def test_erp_ok_but_the_secret_store_unreachable():
     t = text(diag(True, True, True, False))
     assert "cannot reach the credentials store (Secrets Manager)" in t and "even though the ERP itself is reachable" in t

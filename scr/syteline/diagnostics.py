@@ -274,7 +274,13 @@ def findings(d):
         out.append("The ERP name did not resolve (the AWS region is unknown, so the comparison lookup was skipped).")
 
     if erp_dns and not erp_tcp:
-        if aws_known and aws.get("connected"):
+        private_outside_vpc = (any(_private(a) for a in erp["addresses"])
+                               and d.get("local", {}).get("likely_vpc_attached") is False)
+        if private_outside_vpc:
+            # the missing VPC attachment explains the failure; route/firewall advice would mislead
+            out.append("The ERP resolves to a private address but this function is not attached to a VPC, so it cannot "
+                       "reach it: use the VPC deployment, or a publicly reachable ERP address.")
+        elif aws_known and aws.get("connected"):
             out.append(f"The ERP name resolves ({', '.join(erp['addresses'][:MAX_ADDRESSES])}) but no connection to port "
                        f"{erp['port']} succeeded while the AWS endpoint is reachable: look for a missing route to the ERP "
                        "(VPN/transit), a security group or firewall blocking that port, or the ERP being down.")
@@ -284,9 +290,6 @@ def findings(d):
         else:
             out.append("The ERP name resolves but no connection to it succeeded: check routing, security groups and the "
                        "ERP's own firewall.")
-        if any(_private(a) for a in erp["addresses"]) and d.get("local", {}).get("likely_vpc_attached") is False:
-            out.append("The ERP resolves to a private address but this function is not attached to a VPC, so it cannot "
-                       "reach it: use the VPC deployment, or a publicly reachable ERP address.")
 
     if aws_known and not aws.get("connected"):
         out.append("The function cannot reach the credentials store (Secrets Manager), so it cannot read the ERP password"
