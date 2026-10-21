@@ -134,6 +134,10 @@ if [[ "$standalone" == "true" ]]; then
   fi
 
   q() { printf '%s="%s"' "$1" "$2"; }
+  # sam deploy keeps an existing stack's value for any parameter not given, so clear the address type not in use
+  # (otherwise a stack first deployed with https:// still has it set when you switch to http://, and the
+  # "exactly one" rule refuses the deployment)
+  other_wsdl_param="SytelineWsdlHttp"; [[ "$wsdl_param" == "SytelineWsdlHttp" ]] && other_wsdl_param="SytelineWsdlHttps"
   attach_overrides=()
   if [[ "$attached" == "true" ]]; then
     attach_overrides=("$(q AttachVpcId "$ATTACH_VPC_ID")" "$(q AttachSubnetIds "$ATTACH_SUBNET_IDS")" "$(q AttachSecurityGroupIds "$ATTACH_SG_IDS")")
@@ -147,6 +151,7 @@ if [[ "$standalone" == "true" ]]; then
   sam build "${cfg_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
   sam deploy "${cfg_args[@]}" ${profile_args[@]+"${profile_args[@]}"} --parameter-overrides \
     "$(q "$wsdl_param" "$SYTELINE_WSDL")" \
+    "$(q "$other_wsdl_param" "")" \
     "$(q AllowPlainHttp "$allow_http")" \
     "$(q VerifyTls "$verify_tls")" \
     "$(q SytelineUser "$SYTELINE_USER")" \
