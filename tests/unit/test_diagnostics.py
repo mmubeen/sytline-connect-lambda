@@ -122,20 +122,19 @@ def test_aws_endpoint_name():
     assert dg.aws_endpoint({}) is None
 
 
-def test_local_info_distinguishes_vpc_attachment(net):
-    net({}, local="169.254.76.1")
-    assert dg.local_info()["likely_vpc_attached"] is False
-    net({}, local="10.50.0.17")
-    assert dg.local_info()["likely_vpc_attached"] is True
+def test_local_info_makes_no_vpc_attachment_claim(net):
+    for addr in ("169.254.76.1", "10.50.0.17"):
+        net({}, local=addr)
+        assert "likely_vpc_attached" not in dg.local_info()
 
 
 # ---- findings: what the combination means ------------------------------------------------
-def diag(erp_dns, erp_tcp, aws_dns, aws_tcp, vpc=True, erp_addr="10.9.1.5", attempts=None):
+def diag(erp_dns, erp_tcp, aws_dns, aws_tcp, erp_addr="10.9.1.5", attempts=None):
     erp = {"host": ERP, "port": 80, "ok": erp_dns, "addresses": [erp_addr] if erp_dns else [],
            "attempts": attempts or [{"ok": erp_dns}], "connected": erp_tcp}
     aws = {"host": AWS, "port": 443, "ok": aws_dns, "addresses": ["10.0.0.9"] if aws_dns else [],
            "attempts": [{"ok": aws_dns}], "connected": aws_tcp}
-    return {"erp": erp, "aws": aws, "local": {"likely_vpc_attached": vpc}}
+    return {"erp": erp, "aws": aws, "local": {}}
 
 
 def text(d):
@@ -177,18 +176,10 @@ def test_no_outbound_path_when_neither_connects():
     assert "no working outbound path" in text(diag(True, False, True, False))
 
 
-def test_private_erp_address_from_a_function_outside_a_vpc():
-    t = text(diag(True, False, True, True, vpc=False, erp_addr="10.9.1.5"))
-    assert "not attached to a VPC" in t
-    assert "not attached to a VPC" not in text(diag(True, False, True, True, vpc=False, erp_addr="52.0.0.1"))
-
-
-def test_private_erp_outside_a_vpc_does_not_also_suggest_route_or_firewall_causes():
-    t = text(diag(True, False, True, True, vpc=False, erp_addr="10.9.1.5"))
-    assert "not attached to a VPC" in t
-    assert "missing route to the ERP" not in t and "no working outbound path" not in t
-    # inside a VPC the route/firewall advice still applies
-    assert "missing route to the ERP" in text(diag(True, False, True, True, vpc=True, erp_addr="10.9.1.5"))
+def test_a_private_erp_that_does_not_connect_never_claims_the_function_is_outside_a_vpc():
+    # a link-local sandbox address says nothing about VpcConfig, so no finding may assert "not attached"
+    t = text(diag(True, False, True, True, erp_addr="10.9.1.5"))
+    assert "missing route to the ERP" in t and "not attached" not in t.lower()
 
 
 def test_erp_ok_but_the_secret_store_unreachable():
@@ -443,14 +434,6 @@ def raw(rcode_name="NOERROR", answers=(), ok=True):
     return {"nameserver": "169.254.100.5", "ok": ok, "rcode_name": rcode_name, "rcode": 0, "answers": list(answers)} \
         if rcode_name == "NOERROR" else {"nameserver": "169.254.100.5", "ok": ok, "rcode_name": rcode_name, "rcode": 3,
                                           "answers": list(answers)}
-
-
-def test_not_attached_to_a_vpc_is_the_first_and_clearest_finding():
-    d = diag(False, False, True, True, vpc=False)
-    f = dg.findings(d)
-    assert f[0].startswith("This function is NOT attached to a VPC") and "EC2 instance in your subnet" in f[0]
-    assert "VpcConfig" in f[0]
-    assert not any("NOT attached" in x for x in dg.findings(diag(False, False, True, True, vpc=True)))
 
 
 def test_the_nameserver_answers_but_the_function_lookup_fails_is_a_runtime_problem_not_dns():
