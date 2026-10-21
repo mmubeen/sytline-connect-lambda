@@ -16,10 +16,13 @@ Adds a `diagnostics` object to the result; `stages`, `ok` and every other key ar
           "addresses": [], "connections": [{"address": "...", "port": 80, "ok": false, "ms": 5000, "error": "...", "errno": 110}],
           "connected": false},
   "aws": {"host": "secretsmanager[-fips].<region>.amazonaws.com", "port": 443, "ok": true, "...": "same shape as erp"},
+  "dns_raw": {"erp": [{"nameserver": "...", "ok": true, "rcode_name": "NOERROR|NXDOMAIN|SERVFAIL|REFUSED", "answers": ["..."], "ms": 3}],
+              "aws": [ ...same shape... ]},
   "findings": ["plain-language conclusions"]
 }
 ```
 - Contacts only the ERP host and the function's own regional AWS endpoint (name lookup + a TCP connection test, no data sent), reads no secret and uses no credentials; works with `dry_run`.
+- `dns_raw` (added 2026-10-21): a raw DNS A query for those same two names sent straight to the function's own nameserver(s) from `resolver` (at most two, 2 s timeout, UDP port 53), reporting the response code or a timeout. It separates "the resolver says no" from "the resolver answers but the function's own lookup fails". On a failed ERP lookup, `erp.gethostbyname` gives a second libc opinion. IPv6 connection failures carry an `expected` note (Lambda has no IPv6 route). `findings` also says when the function is **not attached to a VPC**.
 - The ERP lookup is retried up to 3 times on transient errors (every attempt is reported); other lookup errors are not retried. At most 4 addresses are tested per host (IPv4 first).
 - `"diagnostics": {"skipped": "..."}` when no ERP address is configured, or when the HTTPS rule (stand-alone version) refused the address (the ERP is then not contacted). `aws` is `null` with `aws_skipped` when the region is not in the environment.
 

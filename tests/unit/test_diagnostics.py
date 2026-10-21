@@ -154,7 +154,13 @@ def test_only_the_erp_name_failing_points_at_plant_dns():
 def test_the_reported_case_busy_on_every_attempt_with_aws_resolving():
     d = diag(False, False, True, True, attempts=[{"ok": False, "errno": errno.EBUSY, "error": "OSError: [Errno 16]"}] * 3)
     t = text(d)
-    assert "transient-looking resolver error" in t and "General name resolution works" in t
+    assert "failed with a system error" in t and "specific to this name" in t and "General name resolution works" in t
+    assert "overloaded" not in t  # the resolver demonstrably served another lookup, so it is not "overloaded"
+
+
+def test_no_other_name_resolving_keeps_the_resolver_unavailable_wording():
+    d = diag(False, False, False, False, attempts=[{"ok": False, "errno": errno.EBUSY, "error": "OSError: [Errno 16]"}] * 3)
+    assert "may be unavailable or overloaded" in text(d)
 
 
 def test_resolving_after_retries_is_called_out_as_transient():
@@ -214,7 +220,7 @@ def test_diagnose_adds_a_section_without_changing_stages_or_ok(net, cfg_env):
     assert stable(with_diag) == stable(plain)
     d = with_diag["diagnostics"]
     assert d["erp"]["ok"] is False and len(d["erp"]["attempts"]) == 3 and d["aws"]["connected"] is True
-    assert d["aws"]["host"] == AWS and any("transient-looking" in f for f in d["findings"])
+    assert d["aws"]["host"] == AWS and any("specific to this name" in f for f in d["findings"])
     assert {"resolver", "local", "erp", "aws", "findings"} <= set(d)
 
 
@@ -275,3 +281,192 @@ def test_event_flag_parsing(net, cfg_env):
     for v, expected in ((True, True), ("true", True), ("1", True), (False, False), ("false", False), (None, False)):
         out = health.run_health({"dry_run": True, "diagnose": v})
         assert ("diagnostics" in out) is expected
+
+
+# ---- raw DNS: ask the function's own nameserver ------------------------------------------
+import struct
+
+
+def make_response(query, rcode=0, ips=(), truncated=False, mismatch=False):
+    qid = struct.unpack(">H", query[:2])[0] ^ (1 if mismatch else 0)
+    flags = 0x8180 | rcode | (0x200 if truncated else 0)
+    question = query[12:]
+    body = b"".join(b"\xc0\x0c" + struct.pack(">HHIH", 1, 1, 60, 4) + bytes(int(x) for x in ip.split(".")) for ip in ips)
+    return struct.pack(">HHHHHH", qid, flags, 1, len(ips), 0, 0) + question + body
+
+
+def qname_of(query):
+    labels, off = [], 12
+    while query[off]:
+        n = query[off]
+        labels.append(query[off + 1:off + 1 + n].decode())
+        off += 1 + n
+    return ".".join(labels)
+
+
+class FakeUdp:
+    """Scripted nameserver: rules = {name: ("answer", rcode, ips) | ("timeout",) | ("oserror", errno)}."""
+    instances = []
+
+    def __init__(self, rules, family, kind):
+        self.rules, self.family, self.kind = rules, family, kind
+        self.sent, self._reply, self.closed = [], None, False
+        FakeUdp.instances.append(self)
+
+    def settimeout(self, t):
+        self.timeout = t
+
+    def sendto(self, data, addr):
+        self.sent.append((addr, qname_of(data)))
+        rule = self.rules.get(qname_of(data), ("timeout",))
+        if rule[0] == "oserror":
+            raise OSError(rule[1], "network error")
+        self._reply = rule if rule[0] == "answer" else None
+        self._query = data
+
+    def recvfrom(self, n):
+        if self._reply is None:
+            raise socket.timeout()
+        kind, rcode, ips, *extra = self._reply
+        return make_response(self._query, rcode, ips, truncated=bool(extra and extra[0]), mismatch=bool(extra and len(extra) > 1)), ("ns", 53)
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.fixture
+def udp(monkeypatch):
+    def install(rules):
+        FakeUdp.instances.clear()
+        monkeypatch.setattr(socket, "socket", lambda family=socket.AF_INET, kind=socket.SOCK_DGRAM: FakeUdp(rules, family, kind))
+    return install
+
+
+def test_query_packet_is_a_valid_a_record_query():
+    q = dg.build_query("cctsl01.cgtc.com", 0x1234)
+    assert q[:2] == b"\x12\x34" and struct.unpack(">H", q[4:6])[0] == 1 and qname_of(q) == "cctsl01.cgtc.com"
+    assert q[-4:] == struct.pack(">HH", 1, 1)
+
+
+def test_noerror_answer_is_parsed_including_compressed_names(udp):
+    udp({ERP: ("answer", 0, ["10.9.1.5", "10.9.1.6"])})
+    r = dg.query_nameserver("169.254.100.5", ERP)
+    assert r["ok"] and r["rcode_name"] == "NOERROR" and r["answers"] == ["10.9.1.5", "10.9.1.6"] and r["truncated"] is False
+    assert FakeUdp.instances[0].sent == [(("169.254.100.5", 53), ERP)] and FakeUdp.instances[0].closed
+
+
+@pytest.mark.parametrize("rcode,name", [(3, "NXDOMAIN"), (2, "SERVFAIL"), (5, "REFUSED")])
+def test_error_response_codes_are_named(udp, rcode, name):
+    udp({ERP: ("answer", rcode, [])})
+    r = dg.query_nameserver("10.0.0.2", ERP)
+    assert r["ok"] and r["rcode_name"] == name and r["answers"] == []
+
+
+def test_timeout_and_network_errors_are_reported_not_raised(udp):
+    udp({})
+    r = dg.query_nameserver("10.0.0.2", ERP, timeout=2)
+    assert r["ok"] is False and "no answer from 10.0.0.2 within 2s" in r["error"]
+    udp({ERP: ("oserror", errno.ENETUNREACH)})
+    r = dg.query_nameserver("10.0.0.2", ERP)
+    assert r["ok"] is False and r["errno"] == errno.ENETUNREACH
+
+
+def test_a_response_with_the_wrong_id_is_rejected(udp):
+    udp({ERP: ("answer", 0, ["10.9.1.5"], False, True)})
+    r = dg.query_nameserver("10.0.0.2", ERP)
+    assert r["ok"] is False and "id does not match" in r["error"]
+
+
+def test_an_ipv6_nameserver_uses_an_ipv6_socket(udp):
+    udp({ERP: ("answer", 0, ["10.9.1.5"])})
+    dg.query_nameserver("2600:1700::1", ERP)
+    assert FakeUdp.instances[0].family == socket.AF_INET6
+
+
+def test_raw_probe_asks_at_most_two_nameservers(udp):
+    udp({ERP: ("answer", 3, [])})
+    r = dg.raw_probe(ERP, ["10.0.0.2", "10.0.0.3", "10.0.0.4"])
+    assert [x["nameserver"] for x in r] == ["10.0.0.2", "10.0.0.3"]
+
+
+def test_run_diagnostics_sends_dns_queries_only_for_the_erp_and_aws_names(net, udp, monkeypatch):
+    net({ERP: [busy()], AWS: ["10.0.0.9"]}, {("10.0.0.9", 443): True})
+    udp({ERP: ("answer", 3, []), AWS: ("answer", 0, ["10.0.0.9"])})
+    monkeypatch.setattr(dg, "read_resolv", lambda path="/etc/resolv.conf": {"nameservers": ["10.0.0.2"], "search": []})
+    d = dg.run_diagnostics({"SYTELINE_WSDL": f"https://{ERP}/x?wsdl"}, 5)
+    sent = [q for inst in FakeUdp.instances for q in inst.sent]
+    assert set(n for _, n in sent) == {ERP, AWS} and all(addr == ("10.0.0.2", 53) for addr, _ in sent)
+    assert d["dns_raw"]["erp"][0]["rcode_name"] == "NXDOMAIN" and d["dns_raw"]["aws"][0]["answers"] == ["10.0.0.9"]
+
+
+def test_no_nameservers_means_no_raw_query(net, udp, monkeypatch):
+    net({ERP: ["10.9.1.5"], AWS: ["10.0.0.9"]}, {})
+    udp({})
+    monkeypatch.setattr(dg, "read_resolv", lambda path="/etc/resolv.conf": {"nameservers": [], "search": []})
+    d = dg.run_diagnostics({"SYTELINE_WSDL": f"https://{ERP}/x?wsdl"}, 5)
+    assert "dns_raw" not in d and FakeUdp.instances == []
+
+
+def test_gethostbyname_is_a_second_opinion_only_when_getaddrinfo_fails(net, monkeypatch):
+    net({ERP: [busy()]})
+    monkeypatch.setattr(socket, "gethostbyname", lambda h: (_ for _ in ()).throw(OSError(errno.EBUSY, "Device or resource busy")))
+    r = dg.probe_host(ERP, 443, 1)
+    assert r["gethostbyname"]["ok"] is False and r["gethostbyname"]["errno"] == errno.EBUSY
+    net({ERP: ["10.9.1.5"]}, {("10.9.1.5", 443): True})
+    assert "gethostbyname" not in dg.probe_host(ERP, 443, 1)
+
+
+def test_ipv6_connection_failures_are_marked_as_expected(net):
+    net({}, {("2600:1f15::1", 443): OSError(errno.EADDRNOTAVAIL, "Cannot assign requested address")})
+    bad = dg.connect("2600:1f15::1", 443, 1)
+    assert bad["ok"] is False and "IPv6 is not available to Lambda" in bad["expected"]
+    net({}, {("10.0.0.1", 443): OSError(errno.EADDRNOTAVAIL, "x")})
+    assert "expected" not in dg.connect("10.0.0.1", 443, 1)  # only for IPv6
+
+
+# ---- findings with the raw answer --------------------------------------------------------
+def with_raw(d, results):
+    d = dict(d)
+    d["dns_raw"] = {"erp": results, "aws": None}
+    return d
+
+
+def raw(rcode_name="NOERROR", answers=(), ok=True):
+    return {"nameserver": "169.254.100.5", "ok": ok, "rcode_name": rcode_name, "rcode": 0, "answers": list(answers)} \
+        if rcode_name == "NOERROR" else {"nameserver": "169.254.100.5", "ok": ok, "rcode_name": rcode_name, "rcode": 3,
+                                          "answers": list(answers)}
+
+
+def test_not_attached_to_a_vpc_is_the_first_and_clearest_finding():
+    d = diag(False, False, True, True, vpc=False)
+    f = dg.findings(d)
+    assert f[0].startswith("This function is NOT attached to a VPC") and "EC2 instance in your subnet" in f[0]
+    assert "VpcConfig" in f[0]
+    assert not any("NOT attached" in x for x in dg.findings(diag(False, False, True, True, vpc=True)))
+
+
+def test_the_nameserver_answers_but_the_function_lookup_fails_is_a_runtime_problem_not_dns():
+    d = with_raw(diag(False, False, True, True), [raw("NOERROR", ["10.9.1.5"])])
+    t = text(d)
+    assert "answers this name correctly (10.9.1.5)" in t and "inside the function's runtime lookup" in t
+
+
+def test_nxdomain_from_the_functions_nameserver():
+    t = text(with_raw(diag(False, False, True, True), [raw("NXDOMAIN")]))
+    assert "says the name does not exist (NXDOMAIN)" in t and "forwarding rule" in t
+
+
+@pytest.mark.parametrize("name", ["SERVFAIL", "REFUSED"])
+def test_servfail_and_refused_are_called_out(name):
+    t = text(with_raw(diag(False, False, True, True), [raw(name)]))
+    assert f"answered {name}" in t
+
+
+def test_no_answer_from_any_nameserver_points_at_port_53():
+    t = text(with_raw(diag(False, False, True, True), [{"nameserver": "10.0.0.2", "ok": False, "error": "no answer"}]))
+    assert "No nameserver answered a direct DNS query" in t and "port 53" in t
+
+
+def test_raw_findings_are_only_added_when_the_erp_lookup_failed():
+    d = with_raw(diag(True, True, True, True), [raw("NXDOMAIN")])
+    assert not any("NXDOMAIN" in f for f in dg.findings(d))
