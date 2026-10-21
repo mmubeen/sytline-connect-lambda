@@ -26,3 +26,7 @@ Direct Lambda invoke only (no URL, no API), by principals with `lambda:InvokeFun
 `SYTELINE_WSDL`, `SYTELINE_USER`, `SYTELINE_SECRET_ARN`, `SYTELINE_CONFIG`, `ALLOW_PLAIN_HTTP`, `VERIFY_TLS`, `LIVE_WRITES`, `LIVE_APPROVAL_REF`, `AWS_PROFILE_NAME`.
 
 Refusals (before any AWS call): a network setting present (`WORKER_*`, `HOST_NETWORK_CIDR`, `PLANT_CIDR_*`, `DYNAMODB_PREFIX_LIST_ID`, `API_VPCE_ID`, `CREATE_API_ENDPOINT`, `CREATE_VPC_ENDPOINTS`) "not applicable to the stand-alone version"; an `http://` `SYTELINE_WSDL` without `ALLOW_PLAIN_HTTP=true`; `LIVE_WRITES=true` without `LIVE_APPROVAL_REF`; missing required settings. With the override on it prints that credentials will cross the network unencrypted. The existing `--profile` handling is unchanged.
+
+## Attached mode (revision 2026-10-21)
+
+New parameters: `AttachVpcId`, `AttachSubnetIds`, `AttachSecurityGroupIds` (all three or none). New rule `AttachmentAllOrNothing`: "Supply all three of AttachVpcId, AttachSubnetIds and AttachSecurityGroupIds, or none of them to run outside any VPC." New outputs: `NetworkMode`, `AttachedVpcId` (when attached). New error code on every action that reads the secret and on `health` outside the dry run: `SECRET_STORE_UNREACHABLE` (the credentials secret could not be read within a few seconds; the message names Secrets Manager and the likely fix). `deploy.sh --standalone` settings add `ATTACH_VPC_ID`, `ATTACH_SUBNET_IDS`, `ATTACH_SG_IDS` (all three or none; formats checked client-side); every other network setting is still refused as not applicable.

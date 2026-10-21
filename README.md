@@ -85,9 +85,10 @@ the default credential chain).
 - Console deployment of only the direct-invoke function: [`DEPLOY_PORTAL.md`](DEPLOY_PORTAL.md).
 
 ## Stand-alone version (no VPC)
-`./deploy.sh --standalone` deploys only the connectivity check and the notes operations as a separate stack with **no VPC and no network
-resources**, callable only with IAM-permitted cloud credentials (no public address). It needs an ERP reachable from the internet, requires
-**HTTPS** to the ERP (plain HTTP only with an explicit override that sends credentials unencrypted), and cannot use ERP source-address
+`./deploy.sh --standalone` deploys only the connectivity check and the notes operations as a separate stack that **creates no network
+resources**, callable only with IAM-permitted cloud credentials (no API gateway, no public address). By default it runs **outside any VPC**
+(the ERP must then be reachable from the internet); with the three `ATTACH_*` settings it runs **inside an existing VPC, subnets and security
+group** instead. It requires **HTTPS** to the ERP in both modes (plain HTTP only with an explicit override that sends credentials unencrypted), and cannot use ERP source-address
 allow-listing. See [`docs/STANDALONE.md`](docs/STANDALONE.md).
 
 ## Invoke (direct actions)

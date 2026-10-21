@@ -40,3 +40,17 @@ Never present: any `AWS::EC2::*` resource, any API Gateway or function URL, any 
 ## Outputs
 
 `DirectFunctionName`, `DirectFunctionArn`, `PlainHttpOverride` (`true`/`false`, so the deployment output states the exposure), `LiveWrites`.
+
+## Attached mode (revision 2026-10-21)
+
+| Parameter | Required | Constraint |
+|---|---|---|
+| `AttachVpcId` | all three or none | pattern `^$\|^vpc-[0-9a-f]+$` |
+| `AttachSubnetIds` | (see above) | comma-separated `subnet-...`, no spaces |
+| `AttachSecurityGroupIds` | (see above) | comma-separated `sg-...`, no spaces |
+
+Modes: all three empty -> **no-VPC**; all three given -> **attached** (every function attached to exactly those subnets and security group); a partial set is refused by rule `AttachmentAllOrNothing`.
+
+Resources: `DepsLayer`, **`DirectFunctionRole`** (logging; read of the one secret; network-interface managed policy only when attached), `DirectFunction` (`VpcConfig` only when attached). Still no `AWS::EC2::*` resource, no events, no URL, no API.
+
+Outputs added: `NetworkMode` (`attached` / `no-vpc`) and, when attached, `AttachedVpcId`.

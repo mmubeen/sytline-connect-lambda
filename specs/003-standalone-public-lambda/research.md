@@ -39,3 +39,20 @@ A prototype of the new template was validated before planning (`cfn-lint`, `sam 
 ## Open items (do not block planning)
 1. Whether the SyteLine web service is offered over HTTPS at all (the instruction sheet says the plant service is HTTP today). Until it is, deployments use the override.
 2. Nothing is deployed from this environment: Lambda egress, secret access and IAM behavior are verified by the linter and tests only.
+
+## Attached mode (revision 2026-10-21)
+
+Prototyped (`cfn-lint`, `sam validate`, `sam build`, and the SAM transform): the optional `VpcConfig` survives as an `Fn::If`.
+
+### R9 — Optional attachment (FR-002, FR-012)
+- **Decision**: Parameters `AttachVpcId`, `AttachSubnetIds`, `AttachSecurityGroupIds` (strings, default empty, identifier patterns). Condition `AttachToVpc` = all three non-empty; rule `AttachmentAllOrNothing` refuses a partial set. `VpcConfig: !If [AttachToVpc, {SubnetIds: !Split, SecurityGroupIds: !Split}, !Ref AWS::NoValue]`. The VPC id is not needed by Lambda itself; it is required so the deployer states the whole network and appears in the `AttachedVpcId` output (the stack cannot verify that the subnets belong to it).
+- **Rationale**: Same pattern as feature 002 (all or none). One template, one stack name, no new resources, no API gateway or URL.
+
+### R10 — Least-privilege role
+- **Decision**: An explicit `DirectFunctionRole` (basic logging, one inline policy to read the secret, and the VPC network-interface managed policy **only when attached**) referenced by `Role:`; the function has no SAM `Policies`.
+- **Rationale**: Prototype of the SAM transform showed SAM adds `AWSLambdaVPCAccessExecutionRole` whenever a `VpcConfig` exists, even a conditional one, and a duplicate explicit policy fails lint (E3037).
+
+### R11 — Reaching the secret store when attached (FR-005, FR-013)
+- **Decision**: The deployer provides the private path (existing Secrets Manager endpoint with private DNS, or a NAT route); the stack creates none. The secret read uses short timeouts (connect 3 s, read 5 s, one attempt) and any failure becomes one structured `SECRET_STORE_UNREACHABLE` error naming the store; with `diagnose`, the existing regional-endpoint probe shows whether the store's address resolves and connects, and a finding explains the fix.
+- **Rationale**: A function in a VPC loses default internet access; without this, the secret read could hang for the SDK's default (minutes) and the check would time out with no explanation.
+- **Alternatives**: the stack creating an endpoint (rejected by the clarification; conflicts with an existing endpoint's private DNS).

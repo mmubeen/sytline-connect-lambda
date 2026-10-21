@@ -55,7 +55,14 @@ def run_health(event, context=None):
     verify = cfgmod.verify_tls()
 
     # Dry run never touches Secrets Manager or credentials.
-    cfg = cfgmod.load_config(skip_secret=dry_run)
+    try:
+        cfg = cfgmod.load_config(skip_secret=dry_run)
+    except errors.SecretStoreUnavailable as exc:  # fail promptly, name the credentials store (FR-013)
+        out = {"ok": False, "dry_run": dry_run, "error": str(exc), "stages": [],
+               "errors": [errors.error(errors.SECRET_STORE_UNREACHABLE, str(exc))]}
+        if diagnose:
+            out["diagnostics"] = diagnostics.run_diagnostics(cfgmod.load_config(skip_secret=True), timeout)
+        return out
     required = ("SYTELINE_WSDL",) if dry_run else ("SYTELINE_WSDL", "SYTELINE_USER", "SYTELINE_PASS")
     missing = [k for k in required if not cfg[k]]
     if missing:

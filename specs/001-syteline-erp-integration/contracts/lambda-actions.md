@@ -31,4 +31,6 @@ Adds a `diagnostics` object to the result; `stages`, `ok` and every other key ar
 
 Stand-alone (no VPC) deployment only (feature 003): error code `INSECURE_TRANSPORT` is returned by every action, before any ERP access, when the ERP address (or the service address declared in its WSDL) is `http://` and the plain-HTTP override is off; `health` may add `"warnings": ["plain HTTP override is on: credentials cross the network unencrypted"]` when the override is on. The stage list never changes.
 
+`SECRET_STORE_UNREACHABLE` (all actions that read the secret, and `health` outside the dry run): the credentials secret could not be read from Secrets Manager within a few seconds (no network path, denied, missing or malformed); the message names the store and the likely fix.
+
 Error codes: `VALIDATION`, `NOT_FOUND`, `LIVE_WRITES_DISABLED`, `ERP_UNREACHABLE`, `ERP_REJECTED`, `UNKNOWN_ACTION`, `NOT_IMPLEMENTED`.

@@ -6,7 +6,9 @@
 
 ## Summary
 
-Add a second, independent SAM deployment of the direct-invoke Lambda (connectivity check including the dry run, `add_note`, `get_notes`) that runs **outside any VPC** with Lambda's default public networking. It is a separate template (`scr/template-standalone.yaml`) and stack, reuses the existing application code and the same `Makefile` build, has **no network parameters or resources, no public web address and no function URL or API** (callable only with IAM-authorized cloud credentials), and refuses to talk to an `http://` ERP address unless the deployer explicitly switches on a plain-HTTP override. The HTTPS rule is enforced twice: at deployment (CloudFormation parameter patterns and rules) and at run time (a small guard in the application, switched on only in this deployment, so the VPC version keeps working over the plant's HTTP). `deploy.sh` gains a `--standalone` mode with its own settings file. See [research.md](research.md).
+**Revision 2026-10-21:** the stand-alone version can now optionally be **attached to an existing VPC, subnets and security group** (all three, or none; clarified in spec.md). Still direct-invoke only, no API gateway/URL/public address, and no network resources created. See "Attached mode" in research.md (R9–R11).
+
+Add a second, independent SAM deployment of the direct-invoke Lambda (connectivity check including the dry run, `add_note`, `get_notes`) that by default runs **outside any VPC** with Lambda's default public networking. It is a separate template (`scr/template-standalone.yaml`) and stack, reuses the existing application code and the same `Makefile` build, has **no network parameters or resources, no public web address and no function URL or API** (callable only with IAM-authorized cloud credentials), and refuses to talk to an `http://` ERP address unless the deployer explicitly switches on a plain-HTTP override. The HTTPS rule is enforced twice: at deployment (CloudFormation parameter patterns and rules) and at run time (a small guard in the application, switched on only in this deployment, so the VPC version keeps working over the plant's HTTP). `deploy.sh` gains a `--standalone` mode with its own settings file. See [research.md](research.md).
 
 ## Technical Context
 
@@ -24,7 +26,7 @@ Add a second, independent SAM deployment of the direct-invoke Lambda (connectivi
 
 **Performance Goals**: N/A (same function, same behavior as the VPC version)
 
-**Constraints**: no VPC/network input or resource (FR-001/002); independent stack, no name collisions (FR-003); direct-invoke operations only (FR-004); no public address, IAM-only callers (FR-006); HTTPS required unless the override is on (FR-007); 001's safety rules unchanged (FR-008); the VPC version's behavior unchanged (SC-005)
+**Constraints**: no network input or resource in no-VPC mode, only the three attachment settings in attached mode, and the stack never creates network resources (FR-001/002/012); independent stack, no name collisions (FR-003); direct-invoke operations only (FR-004); no public address, IAM-only callers (FR-006); HTTPS required unless the override is on (FR-007); 001's safety rules unchanged (FR-008); the VPC version's behavior unchanged (SC-005)
 
 **Scale/Scope**: one function, one layer, one stack; tens of calls per hour
 
@@ -66,6 +68,7 @@ docs/
 tests/unit/
 ├── test_template_standalone.py     # NEW
 ├── test_transport.py               # NEW
+└── test_secret_store.py            # NEW: bounded, structured failure when Secrets Manager is unreachable (FR-013)
 └── test_deploy_script.py           # + standalone cases
 README.md, docs/DEPLOYMENT.md       # pointers
 ```
@@ -77,4 +80,5 @@ README.md, docs/DEPLOYMENT.md       # pointers
 | Item | Why needed | Simpler alternative rejected because |
 |---|---|---|
 | Two ERP-address parameters (`SytelineWsdlHttps`, `SytelineWsdlHttp`) instead of one | CloudFormation can validate a parameter's own pattern but cannot test a prefix of one parameter against another | One `SytelineWsdl` parameter would make the "http:// needs the override" rule unenforceable at deployment time; the run-time guard alone would still protect, but the deployment would succeed and fail later |
+| An explicit IAM role instead of SAM `Policies` | SAM adds the VPC network-interface permission whenever a `VpcConfig` exists, even a conditional one, so no-VPC deployments would carry permissions they do not use | Accepting SAM's default would break least privilege in no-VPC mode |
 | A run-time guard in shared application code | The spec requires refusal "at deployment and at run time" (FR-007), and the address can change after deployment | Deployment-time checks only would leave the functions willing to send credentials over HTTP |

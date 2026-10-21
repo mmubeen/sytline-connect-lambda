@@ -1,8 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >-
-  SyteLine integration, STAND-ALONE (no VPC): the connectivity check and notes functions with default public
-  networking. No network resources, no public address (callable only with IAM-permitted cloud credentials).
+  SyteLine integration, STAND-ALONE: the connectivity check and notes functions. Runs outside any VPC (default
+  public networking) or, optionally, attached to an EXISTING VPC, subnets and security group. Creates no network
+  resources and has no public address (callable only with IAM-permitted cloud credentials; no API gateway).
 
 Parameters:
   # Exactly one of the two addresses. The scheme is carried by WHICH parameter is used, because CloudFormation
@@ -43,6 +44,24 @@ Parameters:
     Default: "true"
     AllowedValues: ["false", "true"]
     Description: Verify the ERP's TLS certificate. "false" only for a self-signed test ERP.
+  # --- Optional attachment to an EXISTING network: supply ALL THREE, or none to run outside any VPC. ---
+  AttachVpcId:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^vpc-[0-9a-f]+$'
+    Description: Existing VPC to attach the functions to. Empty (with the other two) = run outside any VPC.
+  AttachSubnetIds:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^subnet-[0-9a-f]+(,subnet-[0-9a-f]+)*$'
+    Description: >-
+      Existing subnets of that VPC, comma-separated. They need a route to the ERP and a private path to Secrets
+      Manager (an endpoint or a NAT route); this stack creates neither.
+  AttachSecurityGroupIds:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^sg-[0-9a-f]+(,sg-[0-9a-f]+)*$'
+    Description: Existing security group(s), comma-separated. They must allow outbound access to the ERP and to Secrets Manager.
   UseFipsEndpoints:
     Type: String
     Default: "true"
@@ -67,6 +86,17 @@ Rules:
             - !Equals [!Ref SytelineWsdlHttps, ""]
             - !Not [!Equals [!Ref SytelineWsdlHttp, ""]]
         AssertDescription: Give exactly one of SytelineWsdlHttps or SytelineWsdlHttp.
+  AttachmentAllOrNothing:
+    RuleCondition: !Or
+      - !Not [!Equals [!Ref AttachVpcId, ""]]
+      - !Not [!Equals [!Ref AttachSubnetIds, ""]]
+      - !Not [!Equals [!Ref AttachSecurityGroupIds, ""]]
+    Assertions:
+      - Assert: !And
+          - !Not [!Equals [!Ref AttachVpcId, ""]]
+          - !Not [!Equals [!Ref AttachSubnetIds, ""]]
+          - !Not [!Equals [!Ref AttachSecurityGroupIds, ""]]
+        AssertDescription: Supply all three of AttachVpcId, AttachSubnetIds and AttachSecurityGroupIds, or none of them to run outside any VPC.
   PlainHttpNeedsOverride:
     RuleCondition: !Not [!Equals [!Ref SytelineWsdlHttp, ""]]
     Assertions:
@@ -74,6 +104,11 @@ Rules:
         AssertDescription: An http:// ERP address needs AllowPlainHttp=true (credentials would cross the network unencrypted).
 
 Conditions:
+  # true only when all three attachment settings are supplied (the rule below refuses partial sets)
+  AttachToVpc: !And
+    - !Not [!Equals [!Ref AttachVpcId, ""]]
+    - !Not [!Equals [!Ref AttachSubnetIds, ""]]
+    - !Not [!Equals [!Ref AttachSecurityGroupIds, ""]]
   UsePlainHttp: !Not [!Equals [!Ref SytelineWsdlHttp, ""]]
 
 Resources:
@@ -88,7 +123,35 @@ Resources:
       CompatibleRuntimes: [python3.13]
       CompatibleArchitectures: [x86_64]
 
-  # No VpcConfig, no Events, no function URL: the only way in is lambda:Invoke by a permitted IAM principal.
+  # Explicit role (least privilege): logging, the one secret, and - only when attached to a VPC - network-interface
+  # access. (SAM would add the VPC permission in both modes because it cannot evaluate the condition.)
+  DirectFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !If
+          - AttachToVpc
+          - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: read-the-erp-secret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref SytelineSecretArn
+
+  # No Events, no function URL, no API: the only way in is lambda:Invoke by a permitted IAM principal.
+  # VpcConfig is present only when all three attachment settings are supplied.
   DirectFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -100,8 +163,14 @@ Resources:
       CodeUri: .
       Timeout: 60
       MemorySize: 256
+      Role: !GetAtt DirectFunctionRole.Arn
       Layers:
         - !Ref DepsLayer
+      VpcConfig: !If
+        - AttachToVpc
+        - SubnetIds: !Split [",", !Ref AttachSubnetIds]
+          SecurityGroupIds: !Split [",", !Ref AttachSecurityGroupIds]
+        - !Ref AWS::NoValue
       Environment:
         Variables:
           SYTELINE_WSDL: !If [UsePlainHttp, !Ref SytelineWsdlHttp, !Ref SytelineWsdlHttps]
@@ -113,13 +182,14 @@ Resources:
           SYTELINE_ALLOW_HTTP: !Ref AllowPlainHttp
           SYTELINE_VERIFY_TLS: !Ref VerifyTls
           AWS_USE_FIPS_ENDPOINT: !Ref UseFipsEndpoints
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref SytelineSecretArn
 
 Outputs:
+  NetworkMode:
+    Description: '"attached" = running in the existing VPC you supplied; "no-vpc" = outside any VPC'
+    Value: !If [AttachToVpc, attached, no-vpc]
+  AttachedVpcId:
+    Condition: AttachToVpc
+    Value: !Ref AttachVpcId
   DirectFunctionName:
     Value: !Ref DirectFunction
   DirectFunctionArn:

@@ -365,3 +365,52 @@ def test_standalone_live_writes_need_an_approval_reference(run):
 def test_the_default_mode_is_unchanged_by_the_standalone_option(run):
     p, calls = run({**BASE, **SUPPLY})
     assert p.returncode == 0 and "--config-env" not in calls and "SytelineWsdlHttps" not in calls
+
+
+# ---- stand-alone: attach to an existing network (all three settings or none) -------------
+ATTACH = {"ATTACH_VPC_ID": "vpc-0abc1234", "ATTACH_SUBNET_IDS": "subnet-0a1,subnet-0b2", "ATTACH_SG_IDS": "sg-0c3"}
+
+
+def test_attached_settings_are_passed_and_no_other_network_resource_is_requested(run):
+    p, calls = sa(run, ATTACH)
+    assert p.returncode == 0, p.stderr
+    o = overrides(calls)
+    assert o["AttachVpcId"] == "vpc-0abc1234" and o["AttachSubnetIds"] == "subnet-0a1,subnet-0b2"
+    assert o["AttachSecurityGroupIds"] == "sg-0c3"
+    assert "ATTACHED to existing VPC vpc-0abc1234" in p.stdout and "Secrets Manager" in p.stdout
+    assert not any(k in o for k in ("WorkerVpcId", "HostNetworkCidr", "ApiVpcEndpointId", "CreateVpcEndpoints"))
+
+
+def test_no_attachment_means_no_attach_parameters(run):
+    p, calls = sa(run)
+    o = overrides(calls)
+    assert not any(k.startswith("Attach") for k in o) and "no VPC" in p.stdout
+
+
+@pytest.mark.parametrize("missing", list(ATTACH))
+def test_a_partial_attachment_is_refused_naming_what_is_missing(run, missing):
+    settings = {k: v for k, v in ATTACH.items() if k != missing}
+    p, calls = sa(run, settings)
+    assert p.returncode != 0 and missing in p.stderr and "or none of them to run outside any VPC" in p.stderr
+    assert "SAM" not in calls
+
+
+@pytest.mark.parametrize("name,value", [("ATTACH_VPC_ID", "subnet-0a1"), ("ATTACH_VPC_ID", "vpc-"),
+                                        ("ATTACH_SUBNET_IDS", "subnet-0a1, subnet-0b2"), ("ATTACH_SUBNET_IDS", "sg-1"),
+                                        ("ATTACH_SG_IDS", "subnet-1"), ("ATTACH_SG_IDS", "sg-1;rm")])
+def test_malformed_attachment_identifiers_are_refused(run, name, value):
+    p, calls = sa(run, {**ATTACH, name: value})
+    assert p.returncode != 0 and name in p.stderr and "SAM" not in calls
+
+
+def test_other_network_settings_are_still_not_applicable_even_when_attaching(run):
+    p, calls = sa(run, {**ATTACH, "WORKER_ROUTE_TABLE_IDS": "rtb-1", "API_VPCE_ID": "vpce-1"})
+    assert p.returncode != 0 and "not applicable" in p.stderr and "WORKER_ROUTE_TABLE_IDS" in p.stderr
+    assert "SAM" not in calls
+
+
+def test_attached_mode_keeps_the_https_rule_and_the_live_write_approval(run):
+    p, calls = sa(run, {**ATTACH, "SYTELINE_WSDL": "http://erp.plant.local/x?wsdl"})
+    assert p.returncode != 0 and "ALLOW_PLAIN_HTTP=true" in p.stderr and "SAM" not in calls
+    p, calls = sa(run, {**ATTACH, "LIVE_WRITES": "true"})
+    assert p.returncode != 0 and "LIVE_APPROVAL_REF" in p.stderr

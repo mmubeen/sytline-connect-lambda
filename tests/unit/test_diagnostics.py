@@ -178,7 +178,14 @@ def test_private_erp_address_from_a_function_outside_a_vpc():
 
 
 def test_erp_ok_but_the_secret_store_unreachable():
-    assert "cannot reach Secrets Manager" in text(diag(True, True, True, False))
+    t = text(diag(True, True, True, False))
+    assert "cannot reach the credentials store (Secrets Manager)" in t and "even though the ERP itself is reachable" in t
+    assert "Secrets Manager endpoint" in t and "NAT route" in t
+
+
+def test_secret_store_unreachable_is_reported_whatever_the_erp_result():
+    assert "credentials store" in text(diag(False, False, True, False))
+    assert "credentials store" not in text(diag(True, True, True, True))
 
 
 def test_everything_ok_points_at_the_failing_stage():

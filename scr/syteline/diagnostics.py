@@ -165,9 +165,12 @@ def findings(d):
             out.append("The ERP resolves to a private address but this function is not attached to a VPC, so it cannot "
                        "reach it: use the VPC deployment, or a publicly reachable ERP address.")
 
-    if erp_dns and erp_tcp and aws_known and not aws.get("connected"):
-        out.append("The ERP is reachable but the AWS endpoint is not: the function cannot reach Secrets Manager "
-                   "(in a VPC: add the Secrets Manager endpoint or a NAT route).")
+    if aws_known and not aws.get("connected"):
+        out.append("The function cannot reach the credentials store (Secrets Manager), so it cannot read the ERP password"
+                   + (" even though the ERP itself is reachable" if erp_dns and erp_tcp else "")
+                   + ". When attached to a VPC, add a Secrets Manager endpoint (private DNS on, HTTPS allowed from this "
+                   "function's security group) or a NAT route; outside a VPC check the function's outbound access.")
+
     if erp_dns and erp_tcp and (not aws_known or aws.get("connected")):
         out.append("Name resolution and connections to the ERP"
                    + (" and the AWS endpoint" if aws_known else "") + " all succeeded: if a health stage still fails, "

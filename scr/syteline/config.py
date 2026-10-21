@@ -18,13 +18,29 @@ def load_config(skip_secret=False):
     }
     arn = os.environ.get("SYTELINE_SECRET_ARN")
     if arn and not skip_secret:
-        import boto3  # bundled in the Lambda runtime
-
-        secret = boto3.client("secretsmanager").get_secret_value(SecretId=arn)
-        for k, v in json.loads(secret["SecretString"]).items():
+        for k, v in _read_secret(arn).items():
             if k in cfg and v:
                 cfg[k] = v
     return cfg
+
+
+SECRET_PATH_HINT = ("could not read the credentials secret from Secrets Manager; check the secret ARN and that this "
+                    "function has a network path to Secrets Manager (when attached to a VPC: an endpoint or a NAT route)")
+
+
+def _read_secret(arn):
+    """Read the secret with short timeouts so an unreachable store fails promptly instead of hanging (FR-013)."""
+    from .errors import SecretStoreUnavailable
+
+    try:
+        import boto3  # bundled in the Lambda runtime
+        from botocore.config import Config
+
+        client = boto3.client("secretsmanager", config=Config(
+            connect_timeout=3, read_timeout=5, retries={"max_attempts": 1, "mode": "standard"}))
+        return json.loads(client.get_secret_value(SecretId=arn)["SecretString"])
+    except Exception as exc:  # unreachable, denied, missing, malformed: all the same to the caller
+        raise SecretStoreUnavailable(f"{SECRET_PATH_HINT} ({type(exc).__name__})") from None
 
 
 def live_writes_enabled():

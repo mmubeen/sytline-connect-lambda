@@ -16,7 +16,8 @@ import time
 
 from syteline import config as cfgmod
 from syteline import errors
-from syteline.errors import ErpError, ErpUnreachable, InsecureTransport, IntegrationError, failure
+from syteline.errors import (ErpError, ErpUnreachable, InsecureTransport, IntegrationError, SecretStoreUnavailable,
+                              failure)
 from syteline.health import run_health
 
 log = logging.getLogger()
@@ -42,11 +43,14 @@ def _note_action(action, event):
     problems = notes.validate_note_request(event, need_text=(action == "add_note"))
     if problems:
         return failure(action, *problems)
-    if cfgmod.require_https():  # stand-alone deployment: check the (possibly secret-supplied) address first
-        problem = cfgmod.transport_problem(cfgmod.load_config()["SYTELINE_WSDL"])
-        if problem:
-            return failure(action, errors.error(errors.INSECURE_TRANSPORT, problem))
-    soap = _make_client()
+    try:
+        if cfgmod.require_https():  # stand-alone deployment: check the (possibly secret-supplied) address first
+            problem = cfgmod.transport_problem(cfgmod.load_config()["SYTELINE_WSDL"])
+            if problem:
+                return failure(action, errors.error(errors.INSECURE_TRANSPORT, problem))
+        soap = _make_client()
+    except SecretStoreUnavailable as exc:  # unreachable or unreadable credentials store (FR-013)
+        return failure(action, errors.error(errors.SECRET_STORE_UNREACHABLE, str(exc)))
     try:
         if action == "add_note":
             return notes.add_note(soap, event["record_type"], event["record_key"], event["text"],

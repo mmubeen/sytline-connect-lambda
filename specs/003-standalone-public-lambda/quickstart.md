@@ -10,3 +10,8 @@ Steps 1-4 run offline; nothing deploys unless a step says so.
 6. **Deploy (needs your account and a reachable ERP)**: fill `deploy.standalone.env`, run `./deploy.sh --standalone --profile <name>`. Confirm in the console that the function shows "no VPC", then invoke the dry-run health check with permitted credentials; expect `load, dns, tcp, wsdl`. Invoke it with credentials lacking `lambda:InvokeFunction`; expect denial.
 7. **Coexistence**: with the VPC stack also deployed, deploy and delete the stand-alone stack; the VPC stack's resources and outputs are unchanged (SC-005).
 8. **Teardown**: `sam delete --stack-name sytline-connect-standalone --config-env standalone`.
+
+## Attached mode (revision 2026-10-21)
+
+- Offline: `pytest tests/unit/test_template_standalone.py tests/unit/test_secret_store.py tests/unit/test_deploy_script.py -k "attach or secret"` — all three settings give exactly those subnets and security group; any partial set is refused; the VPC-access permission exists only when attached; no API, URL or event source in either mode; an unreachable secret store gives `SECRET_STORE_UNREACHABLE` promptly, and `diagnose` shows the store's address.
+- Deploy (needs an existing network, BLOCKED here): fill the three `ATTACH_*` settings; the console shows exactly those subnets and security group; run the dry-run health check with `"diagnose": true`; expect the ERP name to resolve from the plant DNS and a connection to the ERP and to the Secrets Manager address.

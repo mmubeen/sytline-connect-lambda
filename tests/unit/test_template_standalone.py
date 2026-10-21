@@ -2,7 +2,7 @@
 
 import pytest
 
-from cfn_eval import Evaluator
+from cfn_eval import NOVALUE, Evaluator
 from cfn_template import load_template
 
 HTTPS = "https://erp.example.com/IDORequestService/IDOWebService.asmx?wsdl"
@@ -19,8 +19,11 @@ def fn(t):
 
 
 # ---- structure (US1) --------------------------------------------------------------------
-def test_resources_are_exactly_the_layer_and_the_function(standalone_template):
-    assert set(standalone_template["Resources"]) == {"DepsLayer", "DirectFunction"}
+ATTACH = dict(AttachVpcId="vpc-0abc1234", AttachSubnetIds="subnet-0a1,subnet-0b2", AttachSecurityGroupIds="sg-0c3")
+
+
+def test_resources_are_exactly_the_layer_the_role_and_the_function(standalone_template):
+    assert set(standalone_template["Resources"]) == {"DepsLayer", "DirectFunctionRole", "DirectFunction"}
     assert standalone_template["Resources"]["DepsLayer"]["Type"] == "AWS::Serverless::LayerVersion"
     assert standalone_template["Resources"]["DirectFunction"]["Type"] == "AWS::Serverless::Function"
 
@@ -35,18 +38,22 @@ def test_logical_ids_match_the_vpc_template_so_one_makefile_builds_both(standalo
             key, vpc["Globals"]["Function"].get(key))
 
 
-def test_no_vpc_no_network_resource_of_any_kind(standalone_template):
-    assert "VpcConfig" not in fn(standalone_template)
-    assert "VpcConfig" not in str(standalone_template["Globals"]) if "Globals" in standalone_template else True
+def test_no_vpc_mode_has_no_vpc_configuration_and_no_network_resource(standalone_template):
+    e = ev(standalone_template, SytelineWsdlHttps=HTTPS)
+    assert e.resolve(fn(standalone_template)["VpcConfig"]) is NOVALUE  # AWS::NoValue: not attached to any VPC
+    assert e.condition("AttachToVpc") is False
     for name, r in standalone_template["Resources"].items():
         assert not r["Type"].startswith("AWS::EC2::"), f"{name} is {r['Type']}"
 
 
-def test_no_network_parameters_exist(standalone_template):
+def test_only_the_three_attachment_parameters_exist_as_network_settings(standalone_template):
     bad = [p for p in standalone_template["Parameters"]
            if p.startswith(("Worker", "Host", "Plant")) or p in (
                "ApiVpcEndpointId", "CreateApiEndpoint", "CreateVpcEndpoints", "DynamoDbPrefixListId")]
     assert bad == []
+    assert {"AttachVpcId", "AttachSubnetIds", "AttachSecurityGroupIds"} <= set(standalone_template["Parameters"])
+    for p in ("AttachVpcId", "AttachSubnetIds", "AttachSecurityGroupIds"):
+        assert standalone_template["Parameters"][p]["Default"] == ""
 
 
 def test_it_can_coexist_with_the_vpc_stack(standalone_template):
@@ -68,12 +75,82 @@ def test_no_public_exposure(standalone_template):
     assert "*" not in str({k: v for k, v in f.items() if k != "Policies"})
 
 
-def test_the_only_permission_is_reading_the_one_secret(standalone_template):
-    pol = fn(standalone_template)["Policies"]
-    assert len(pol) == 1
-    st = pol[0]["Statement"]
+def role(t):
+    return t["Resources"]["DirectFunctionRole"]["Properties"]
+
+
+def test_the_function_uses_the_explicit_least_privilege_role(standalone_template):
+    assert fn(standalone_template)["Role"] == {"Fn::GetAtt": ["DirectFunctionRole", "Arn"]}
+    assert "Policies" not in fn(standalone_template)  # SAM would add the VPC permission in both modes
+    trust = role(standalone_template)["AssumeRolePolicyDocument"]["Statement"]
+    assert trust == [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]
+
+
+def test_the_only_permission_besides_logging_is_reading_the_one_secret(standalone_template):
+    pols = role(standalone_template)["Policies"]
+    assert len(pols) == 1
+    st = pols[0]["PolicyDocument"]["Statement"]
     assert len(st) == 1 and st[0]["Effect"] == "Allow"
     assert st[0]["Action"] == "secretsmanager:GetSecretValue" and st[0]["Resource"] == {"Ref": "SytelineSecretArn"}
+
+
+def managed(t, **p):
+    e = ev(t, SytelineWsdlHttps=HTTPS, **p)
+    return [m.rsplit("/", 1)[-1] for m in e.resolve(role(t)["ManagedPolicyArns"])]
+
+
+def test_network_interface_permission_is_granted_only_when_attached(standalone_template):
+    assert managed(standalone_template) == ["AWSLambdaBasicExecutionRole"]
+    assert managed(standalone_template, **ATTACH) == ["AWSLambdaBasicExecutionRole", "AWSLambdaVPCAccessExecutionRole"]
+
+
+# ---- US4: attach to an existing network (FR-012, FR-002) -------------------------------
+def test_attached_mode_uses_exactly_the_supplied_subnets_and_security_groups(standalone_template):
+    e = ev(standalone_template, SytelineWsdlHttps=HTTPS, **ATTACH)
+    assert e.violations() == [] and e.parameter_errors() == [] and e.condition("AttachToVpc") is True
+    assert e.resolve(fn(standalone_template)["VpcConfig"]) == {
+        "SubnetIds": ["subnet-0a1", "subnet-0b2"], "SecurityGroupIds": ["sg-0c3"]}
+
+
+@pytest.mark.parametrize("missing", ["AttachVpcId", "AttachSubnetIds", "AttachSecurityGroupIds"])
+def test_a_partial_attachment_is_refused_naming_all_three(standalone_template, missing):
+    p = {**ATTACH, missing: ""}
+    msgs = ev(standalone_template, SytelineWsdlHttps=HTTPS, **p).violations()
+    assert any("Supply all three of AttachVpcId, AttachSubnetIds and AttachSecurityGroupIds" in m for m in msgs)
+
+
+@pytest.mark.parametrize("name,value,ok", [
+    ("AttachVpcId", "vpc-0abc1234", True), ("AttachVpcId", "subnet-0a1", False), ("AttachVpcId", "vpc-", False),
+    ("AttachSubnetIds", "subnet-0a1", True), ("AttachSubnetIds", "subnet-0a1,subnet-0b2", True),
+    ("AttachSubnetIds", "subnet-0a1, subnet-0b2", False), ("AttachSubnetIds", "sg-0c3", False),
+    ("AttachSecurityGroupIds", "sg-0c3,sg-0d4", True), ("AttachSecurityGroupIds", "subnet-1", False)])
+def test_attachment_identifier_patterns(standalone_template, name, value, ok):
+    assert (ev(standalone_template, SytelineWsdlHttps=HTTPS, **{name: value}).parameter_errors() == []) is ok
+
+
+def test_attaching_adds_no_way_to_call_the_functions_and_creates_no_network(standalone_template):
+    e = ev(standalone_template, SytelineWsdlHttps=HTTPS, **ATTACH)
+    assert e.active() == {"DepsLayer", "DirectFunctionRole", "DirectFunction"}
+    f = fn(standalone_template)
+    assert "Events" not in f and "FunctionUrlConfig" not in f
+    assert not [r for r in standalone_template["Resources"].values() if r["Type"].startswith("AWS::EC2::")]
+
+
+def test_the_https_rule_and_safe_defaults_hold_in_attached_mode_too(standalone_template):
+    assert any("needs AllowPlainHttp=true" in m for m in
+               ev(standalone_template, SytelineWsdlHttp=HTTP, **ATTACH).violations())
+    assert ev(standalone_template, SytelineWsdlHttp=HTTP, AllowPlainHttp="true", **ATTACH).violations() == []
+    env = fn(standalone_template)["Environment"]["Variables"]
+    assert env["SYTELINE_REQUIRE_HTTPS"] == "true" and env["SYTELINE_LIVE_WRITES"] == {"Ref": "LiveWrites"}
+
+
+def test_network_mode_outputs(standalone_template):
+    out = standalone_template["Outputs"]
+    plain = ev(standalone_template, SytelineWsdlHttps=HTTPS)
+    att = ev(standalone_template, SytelineWsdlHttps=HTTPS, **ATTACH)
+    assert plain.resolve(out["NetworkMode"]["Value"]) == "no-vpc" and att.resolve(out["NetworkMode"]["Value"]) == "attached"
+    assert out["AttachedVpcId"]["Condition"] == "AttachToVpc" and att.condition("AttachToVpc")
+    assert not plain.condition("AttachToVpc")
 
 
 def test_safe_defaults(standalone_template):

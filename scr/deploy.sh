@@ -81,13 +81,31 @@ if [[ "$standalone" == "true" ]]; then
   done
   if (( ${#missing[@]} )); then die "missing in $env_file: ${missing[*]}"; fi
 
-  # no network setting applies to this version
+  # optional attachment to an EXISTING network: all three settings, or none (no VPC)
+  att_vars=(ATTACH_VPC_ID ATTACH_SUBNET_IDS ATTACH_SG_IDS)
+  att_given=(); att_absent=()
+  for v in "${att_vars[@]}"; do
+    if [[ -n "${!v:-}" ]]; then att_given+=("$v"); else att_absent+=("$v"); fi
+  done
+  if (( ${#att_given[@]} > 0 && ${#att_absent[@]} > 0 )); then
+    die "supply all three of ${att_vars[*]}, or none of them to run outside any VPC (missing: ${att_absent[*]})"
+  fi
+  if (( ${#att_given[@]} == 3 )); then
+    [[ "$ATTACH_VPC_ID" =~ ^vpc-[0-9a-f]+$ ]] || die "ATTACH_VPC_ID must look like vpc-0123abcd"
+    [[ "$ATTACH_SUBNET_IDS" =~ ^subnet-[0-9a-f]+(,subnet-[0-9a-f]+)*$ ]] || die "ATTACH_SUBNET_IDS must be comma-separated subnet-... ids, no spaces"
+    [[ "$ATTACH_SG_IDS" =~ ^sg-[0-9a-f]+(,sg-[0-9a-f]+)*$ ]] || die "ATTACH_SG_IDS must be comma-separated sg-... ids, no spaces"
+    attached="true"
+  else
+    attached="false"
+  fi
+
+  # every other network setting does not apply to this version
   na=()
   for v in WORKER_VPC_ID WORKER_SUBNET_IDS WORKER_SG_IDS WORKER_ROUTE_TABLE_IDS HOST_NETWORK_CIDR PLANT_CIDR_1 \
            PLANT_CIDR_2 PLANT_CIDR_3 DYNAMODB_PREFIX_LIST_ID API_VPCE_ID CREATE_API_ENDPOINT CREATE_VPC_ENDPOINTS; do
     [[ -z "${!v:-}" ]] || na+=("$v")
   done
-  if (( ${#na[@]} )); then die "not applicable to the stand-alone version (it has no network): ${na[*]}"; fi
+  if (( ${#na[@]} )); then die "not applicable to the stand-alone version (it only attaches to an existing VPC, subnets and security group): ${na[*]}"; fi
 
   # ERP address: the scheme decides which template parameter carries it; http:// needs the explicit override
   [[ "$SYTELINE_WSDL" =~ ^https?://[^/]*@ ]] && die "SYTELINE_WSDL must not contain credentials (user:password@host)"
@@ -116,7 +134,16 @@ if [[ "$standalone" == "true" ]]; then
   fi
 
   q() { printf '%s="%s"' "$1" "$2"; }
-  echo "Deploying the STAND-ALONE version (no VPC): stack sytline-connect-standalone. No network resources are created."
+  attach_overrides=()
+  if [[ "$attached" == "true" ]]; then
+    attach_overrides=("$(q AttachVpcId "$ATTACH_VPC_ID")" "$(q AttachSubnetIds "$ATTACH_SUBNET_IDS")" "$(q AttachSecurityGroupIds "$ATTACH_SG_IDS")")
+  fi
+  if [[ "$attached" == "true" ]]; then
+    echo "Deploying the STAND-ALONE version ATTACHED to existing VPC $ATTACH_VPC_ID (stack sytline-connect-standalone). No network resources are created."
+    echo "Reminder: this network must give the functions a route to the ERP and a private path to Secrets Manager (an endpoint or a NAT route)."
+  else
+    echo "Deploying the STAND-ALONE version (no VPC): stack sytline-connect-standalone. No network resources are created."
+  fi
   sam build "${cfg_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
   sam deploy "${cfg_args[@]}" ${profile_args[@]+"${profile_args[@]}"} --parameter-overrides \
     "$(q "$wsdl_param" "$SYTELINE_WSDL")" \
@@ -125,7 +152,8 @@ if [[ "$standalone" == "true" ]]; then
     "$(q SytelineUser "$SYTELINE_USER")" \
     "$(q SytelineSecretArn "$SYTELINE_SECRET_ARN")" \
     "$(q SytelineConfig "${SYTELINE_CONFIG:-CCT}")" \
-    "$(q LiveWrites "$live")"
+    "$(q LiveWrites "$live")" \
+    ${attach_overrides[@]+"${attach_overrides[@]}"}
   exit 0
 fi
 

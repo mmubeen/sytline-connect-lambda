@@ -113,6 +113,8 @@ class Evaluator:
             return [x for x in (self.resolve(i) for i in e) if x is not NOVALUE]
         if not isinstance(e, dict):
             return e
+        if len(e) != 1:  # a plain mapping of properties
+            return {k: v for k, v in ((k, self.resolve(v)) for k, v in e.items()) if v is not NOVALUE}
         (k, v), = e.items()
         if k == "Ref":
             if v == "AWS::NoValue":

@@ -16,6 +16,7 @@ STALE_RUNNING = "STALE_RUNNING"
 TIME_BUDGET_EXHAUSTED = "TIME_BUDGET_EXHAUSTED"
 STORE_UNAVAILABLE = "STORE_UNAVAILABLE"
 INSECURE_TRANSPORT = "INSECURE_TRANSPORT"
+SECRET_STORE_UNREACHABLE = "SECRET_STORE_UNREACHABLE"
 
 
 class ErpError(Exception):
@@ -36,6 +37,10 @@ class ErpUnreachable(ErpError):
 
 class InsecureTransport(Exception):
     """The ERP address (or the service address declared in its WSDL) is plain http:// while HTTPS is required."""
+
+
+class SecretStoreUnavailable(Exception):
+    """The credentials secret could not be read from Secrets Manager (unreachable, denied or missing)."""
 
 
 class LiveWritesDisabled(Exception):
