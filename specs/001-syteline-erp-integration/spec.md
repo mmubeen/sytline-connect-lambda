@@ -16,6 +16,8 @@ Today the Lambda only proves that the SyteLine ERP is reachable and that credent
 
 ### Session 2026-10-20
 
+- Q: May the diagnostics contact anything other than the ERP, to tell "no outbound network at all" apart from "only the ERP is unreachable"? → A: Only the ERP host and the function's own regional AWS endpoint (the secret store): a name lookup and a connection test to each, nothing else, no data sent and no credentials.
+- Q: When should the extra connectivity diagnostics of the health check run? → A: Only when asked: `"diagnose": true` in the event. A check without the flag, passing or failing, gives no extra detail and its stage list and result are unchanged. The diagnostics are reported in a separate `diagnostics` section, never inside `stages`.
 - Q: Which AWS region should the stack deploy to? → A: us-gov-east-1 (GovCloud). It is a single value in the deploy configuration; partition-specific ARNs use `aws-us-gov`.
 - Q: Should the SAM setup define one deployment, or separate staging and production deployments? → A: One deployment: a single stack with one configuration (`default`). Live writes stay off in the configuration, and turning them on is a deliberate, approved change (FR-016).
 - Q: Through which channel may the system access SyteLine's database? → A: Only through the SyteLine web service (IDO SOAP). The system makes no direct SQL connection and holds no database credentials. (Source: user direction; supersedes the SQL steps in instruction sheet section 4 and the SQL-based customer lookup, number allocation and notes in the earlier answers.)
@@ -106,6 +108,7 @@ An operator runs the existing health check to find where connectivity breaks (ne
 - **FR-011**: The system MUST log each request (type, record identifiers, outcome, duration) so operators can trace what was written to the ERP.
 - **FR-012**: The system MUST target a configurable SyteLine company/configuration so test and production can be separated.
 - **FR-016**: The system MUST NOT perform any write to the live ERP unless live writes are explicitly enabled by configuration, and the dry run MUST NOT send credentials, log in or write anything. Live writes are enabled only for an explicitly approved test.
+- **FR-019**: The health check MUST offer an opt-in `diagnose` option that adds a separate `diagnostics` section without changing `stages` or the overall result. The diagnostics MUST (a) report the resolver settings the function sees, (b) look up the ERP host name, retrying a few times on transient errors and reporting every attempt, (c) test a connection to each resolved ERP address and port, (d) do the same lookup and connection test for the function's own regional AWS endpoint (secret store), and (e) state in plain words what the combination of results most likely means. They MUST contact only the ERP host and that AWS endpoint, send no data and no credentials, read no secret, and be skipped (with the reason) when the HTTPS rule refuses the ERP address.
 - **FR-018**: The system MUST read and write SyteLine data only through the SyteLine web service. It MUST NOT open a direct database (SQL) connection, and no database credentials are configured.
 - **FR-017**: The system MUST accept only requests authenticated with an approved AWS identity, MUST require `uploaded_by` on every order, MUST accept only operator-confirmed records, and MUST record `uploaded_by` and the caller identity with the upload and in the request log.
 - **FR-013**: The system MUST create one job per customer-order line, using that line's item and quantity, and link each job to its line. The response MUST list every job created.
@@ -132,6 +135,7 @@ An operator runs the existing health check to find where connectivity breaks (ne
 - **SC-005**: Notes added to a record are retrievable within 5 seconds and match the submitted text exactly.
 - **SC-006**: Every failed request names the failing step and includes the ERP's message, so an operator can act without reading ERP logs.
 - **SC-007**: The connectivity health check produces the same stage results as before the change.
+- **SC-008**: From one health invocation with `diagnose` set, an operator can tell whether name resolution works at all, whether the ERP name resolves, and whether a connection to the ERP and to the AWS endpoint succeeds, without reading logs or running anything else.
 
 ## Assumptions
 

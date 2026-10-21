@@ -94,6 +94,7 @@ aws lambda invoke --region us-gov-east-1 --function-name <DirectFunctionName> \
 ```
 
 - Dry run: expect stages `load`, `dns`, `tcp`, `wsdl`. Full check (`{"action":"health"}`): `dns`, `tcp`, `wsdl`, `token`.
+- If a stage fails, add `"diagnose": true` to the payload for a `diagnostics` section with plain-language `findings` (for example: "general name resolution works but the ERP name did not resolve", or "the ERP resolves to a private address but this function is not attached to a VPC"). It contacts only the ERP host and the regional Secrets Manager endpoint.
 - Console: the function's configuration shows **no VPC**.
 - Without `lambda:InvokeFunction`, the call is denied.
 - An `http://` address without the override returns `{"ok": false, "errors": [{"code": "INSECURE_TRANSPORT", ...}]}` and sends nothing to the ERP.

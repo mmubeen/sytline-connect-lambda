@@ -162,6 +162,7 @@ aws cloudformation describe-stacks --region us-gov-east-1 --stack-name sytline-c
        --payload '{"action":"health","dry_run":true}' --cli-binary-format raw-in-base64-out out.json && cat out.json
    ```
    Expected stages: `load`, `dns`, `tcp`, `wsdl`. A failing stage names where connectivity breaks (DNS, routing, security group, VPN).
+   **To find out why a stage fails, add `"diagnose": true`** to the payload (`'{"action":"health","dry_run":true,"diagnose":true}'`): the result then carries a separate `diagnostics` section (resolver settings, the ERP name lookup with retries, a connection test to each ERP address, the same for the function's regional AWS endpoint, and plain-language `findings`). It contacts only the ERP host and that AWS endpoint and sends no data or credentials; the stages are unchanged.
 2. **Full health check** (logs in with the secret): same call with `'{"action":"health"}'`; expected stages `dns`, `tcp`, `wsdl`, `token`.
 3. **API from an approved client** (inside the VPC that has the `execute-api` endpoint, with IAM credentials):
    ```

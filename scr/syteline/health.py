@@ -12,6 +12,11 @@ no credentials are read or sent and the token stage is skipped. Stages: load, dn
 The wsdl stage is a plain GET: HTTP 401/403 counts as a PASS ("reachable, authentication
 required"); 2xx is parsed with zeep; any other status fails.
 
+Opt-in diagnostics (event {"diagnose": true}): adds a separate `diagnostics` section (resolver, ERP name lookup with
+retries, connection tests, the same for the function's regional AWS endpoint, plain-language findings). It never changes
+`stages` or `ok`, contacts only the ERP host and that AWS endpoint, and sends no data or credentials. Without the flag the
+result is exactly as before.
+
 The password is never logged or returned.
 """
 
@@ -21,7 +26,7 @@ import time
 from urllib.parse import urlparse
 
 from . import config as cfgmod
-from . import errors
+from . import diagnostics, errors
 from .client import config_service_address
 
 
@@ -44,6 +49,7 @@ def _stage(name, fn, results):
 
 def run_health(event, context=None):
     event = event if isinstance(event, dict) else {}
+    diagnose = cfgmod.truthy(event.get("diagnose", False))
     dry_run = cfgmod.truthy(event.get("dry_run", os.environ.get("SYTELINE_DRY_RUN", "false")))
     timeout = cfgmod.timeout()
     verify = cfgmod.verify_tls()
@@ -53,14 +59,21 @@ def run_health(event, context=None):
     required = ("SYTELINE_WSDL",) if dry_run else ("SYTELINE_WSDL", "SYTELINE_USER", "SYTELINE_PASS")
     missing = [k for k in required if not cfg[k]]
     if missing:
-        return {"ok": False, "dry_run": dry_run, "error": f"missing config: {', '.join(missing)}", "stages": []}
+        out = {"ok": False, "dry_run": dry_run, "error": f"missing config: {', '.join(missing)}", "stages": []}
+        if diagnose:
+            out["diagnostics"] = {"skipped": "no ERP address is configured"} if not cfg["SYTELINE_WSDL"] else \
+                diagnostics.run_diagnostics(cfg, timeout)
+        return out
 
     # Stand-alone deployment: HTTPS required unless explicitly overridden. Checked after the configuration
     # is resolved (the secret may supply the address) and before ANY traffic to the ERP, dry run included.
     problem = cfgmod.transport_problem(cfg["SYTELINE_WSDL"])
     if problem:
-        return {"ok": False, "dry_run": dry_run, "error": problem,
-                "errors": [errors.error(errors.INSECURE_TRANSPORT, problem)], "stages": []}
+        out = {"ok": False, "dry_run": dry_run, "error": problem,
+               "errors": [errors.error(errors.INSECURE_TRANSPORT, problem)], "stages": []}
+        if diagnose:  # nothing is sent to the ERP when the HTTPS rule refuses its address
+            out["diagnostics"] = {"skipped": "the HTTPS rule refused the ERP address; the ERP was not contacted"}
+        return out
     warnings = [cfgmod.PLAIN_HTTP_WARNING] if cfgmod.plain_http_in_use(cfg["SYTELINE_WSDL"]) else []
 
     parsed = urlparse(cfg["SYTELINE_WSDL"])
@@ -142,4 +155,6 @@ def run_health(event, context=None):
         out["errors"] = [errors.error(errors.INSECURE_TRANSPORT, cfgmod.INSECURE_MESSAGE)]
     if warnings:
         out["warnings"] = warnings
+    if diagnose:
+        out["diagnostics"] = diagnostics.run_diagnostics(cfg, timeout)
     return out

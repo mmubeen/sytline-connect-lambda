@@ -5,6 +5,24 @@ Direct Lambda invoke with a JSON event (`scr/lambda_function.py`). `action` defa
 ## health
 `{"action":"health","dry_run":false}` → `{ok, dry_run, host, config, stages[]}`. Stages: `dns, tcp, wsdl, token`. Dry run: `load, dns, tcp, wsdl`; sends no credentials and does not log in. There is no database connection of any kind (FR-018).
 
+### Diagnostics (opt-in): `{"action":"health","diagnose":true}`
+Adds a `diagnostics` object to the result; `stages`, `ok` and every other key are unchanged, and without the flag nothing is added.
+```
+"diagnostics": {
+  "resolver": {"nameservers": ["..."], "search": ["..."]},
+  "local": {"local_address": "...", "likely_vpc_attached": true|false|null},
+  "erp": {"host": "...", "port": 80, "ok": false,
+          "attempts": [{"ok": false, "ms": 3, "error": "OSError: [Errno 16] ...", "errno": 16}, ...],
+          "addresses": [], "connections": [{"address": "...", "port": 80, "ok": false, "ms": 5000, "error": "...", "errno": 110}],
+          "connected": false},
+  "aws": {"host": "secretsmanager[-fips].<region>.amazonaws.com", "port": 443, "ok": true, "...": "same shape as erp"},
+  "findings": ["plain-language conclusions"]
+}
+```
+- Contacts only the ERP host and the function's own regional AWS endpoint (name lookup + a TCP connection test, no data sent), reads no secret and uses no credentials; works with `dry_run`.
+- The ERP lookup is retried up to 3 times on transient errors (every attempt is reported); other lookup errors are not retried. At most 4 addresses are tested per host (IPv4 first).
+- `"diagnostics": {"skipped": "..."}` when no ERP address is configured, or when the HTTPS rule (stand-alone version) refused the address (the ERP is then not contacted). `aws` is `null` with `aws_skipped` when the region is not in the environment.
+
 ## add_note  (write — requires `SYTELINE_LIVE_WRITES=true`)
 `{"action":"add_note","record_type":"co|job","record_key":"…","text":"…","internal":true}` → `{"ok":true,"note_token":123}`. Errors: `VALIDATION`, `NOT_FOUND`, `LIVE_WRITES_DISABLED`, `ERP_REJECTED`.
 
