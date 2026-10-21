@@ -21,3 +21,27 @@ resolve_s3 = true
 fail_on_empty_changeset = false
 # Live ERP writes stay OFF unless ./deploy.sh is run with an approval reference (FR-016).
 tags = "project=sytline-connect"
+
+# ---- Stand-alone (no VPC) deployment: ./deploy.sh --standalone (stack, template and build directory are separate
+# ---- from the default configuration so the two deployments never share a build or a stack)
+[standalone.global.parameters]
+stack_name = "sytline-connect-standalone"
+region = "us-gov-east-1"
+
+[standalone.validate.parameters]
+template_file = "template-standalone.yaml"
+lint = true
+
+[standalone.build.parameters]
+template_file = "template-standalone.yaml"
+build_dir = ".aws-sam/standalone"
+cached = false
+parallel = true
+
+[standalone.deploy.parameters]
+template_file = ".aws-sam/standalone/template.yaml"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+fail_on_empty_changeset = false
+tags = "project=sytline-connect-standalone"

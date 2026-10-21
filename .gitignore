@@ -53,3 +53,6 @@ htmlcov/
 scr/.aws-sam/
 scr/deploy.env
 scr/sam-installation
+
+# stand-alone deployment settings
+scr/deploy.standalone.env

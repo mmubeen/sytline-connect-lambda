@@ -43,8 +43,9 @@ def run(tmp_path):
     log.write_text("")
 
     def go(settings, args=(), stack_status="", host_vpc="", with_aws=True, profiles="default govcloud-prod",
-           profiles_fail=False):
-        (work / "deploy.env").write_text("".join(f'{k}="{v}"\n' for k, v in settings.items()))
+           profiles_fail=False, env_name="deploy.env", write_env=True):
+        if write_env:
+            (work / env_name).write_text("".join(f'{k}="{v}"\n' for k, v in settings.items()))
         env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "STUB_LOG": str(log), "STUB_STACK_STATUS": stack_status,
                "STUB_HOSTVPC": host_vpc, "STUB_PROFILES": profiles, "STUB_PROFILES_FAIL": "1" if profiles_fail else ""}
         if not with_aws:
@@ -254,3 +255,113 @@ def test_profile_check_is_skipped_with_a_warning_if_profiles_cannot_be_listed(ru
 def test_profile_works_without_the_aws_cli_installed(run):
     p, calls = run({**BASE, **SUPPLY}, args=["--profile", "govcloud-prod"], with_aws=False)
     assert p.returncode == 0 and "SAM deploy --profile govcloud-prod" in calls
+
+
+# ---- stand-alone (no VPC) mode ----------------------------------------------------------
+SA = {"SYTELINE_WSDL": "https://erp.example.com/IDORequestService/IDOWebService.asmx?wsdl", "SYTELINE_USER": "svc",
+      "SYTELINE_SECRET_ARN": "arn:aws-us-gov:secretsmanager:us-gov-east-1:1:secret:x"}
+NETWORK_SETTINGS = ["WORKER_VPC_ID", "WORKER_SUBNET_IDS", "WORKER_SG_IDS", "WORKER_ROUTE_TABLE_IDS", "HOST_NETWORK_CIDR",
+                    "PLANT_CIDR_1", "PLANT_CIDR_2", "PLANT_CIDR_3", "DYNAMODB_PREFIX_LIST_ID", "API_VPCE_ID",
+                    "CREATE_API_ENDPOINT", "CREATE_VPC_ENDPOINTS"]
+
+
+def sa(run, settings=None, args=(), **kw):
+    return run({**SA, **(settings or {})}, args=["--standalone", *args], env_name="deploy.standalone.env", **kw)
+
+
+def test_standalone_uses_its_own_config_environment_and_settings_file(run):
+    p, calls = sa(run)
+    assert p.returncode == 0, p.stderr
+    assert "SAM build --config-env standalone" in calls and "SAM deploy --config-env standalone" in calls
+    assert "describe-stacks" not in calls  # no create/supply mode guard
+    o = overrides(calls)
+    assert o["SytelineWsdlHttps"] == SA["SYTELINE_WSDL"] and "SytelineWsdlHttp" not in o
+    assert o["AllowPlainHttp"] == "false" and o["VerifyTls"] == "true" and o["LiveWrites"] == "false"
+    assert o["SytelineUser"] == "svc" and o["SytelineConfig"] == "CCT"
+    assert not any(k in o for k in ("WorkerVpcId", "HostNetworkCidr", "ApiVpcEndpointId", "CreateVpcEndpoints"))
+    assert "STAND-ALONE" in p.stdout
+
+
+def test_standalone_does_not_read_the_vpc_settings_file(run, tmp_path):
+    p, calls = run({**SA}, args=["--standalone"], env_name="deploy.env")  # only deploy.env exists
+    assert p.returncode != 0 and "deploy.standalone.env missing" in p.stdout and not deployed(calls)
+
+
+def test_standalone_build_and_validate_need_no_settings_file(run):
+    p, calls = run({}, args=["--standalone", "--validate"], write_env=False)
+    assert p.returncode == 0 and "SAM validate --lint --config-env standalone" in calls
+    p, calls = run({}, args=["--standalone", "--build"], write_env=False)
+    assert p.returncode == 0 and "SAM build --config-env standalone" in calls and not deployed(calls)
+
+
+def test_standalone_honors_the_profile_flag_and_the_settings_file(run):
+    p, calls = sa(run, args=["--profile", "govcloud-prod"])
+    assert p.returncode == 0 and "SAM deploy --config-env standalone --profile govcloud-prod" in calls
+    p, calls = sa(run, {"AWS_PROFILE_NAME": "govcloud-prod"})
+    assert p.returncode == 0 and "--profile govcloud-prod" in calls
+    p, calls = sa(run, {"AWS_PROFILE_NAME": "govcloud-prod"}, args=["--profile", "default"])
+    assert "--profile default" in calls and "govcloud-prod" not in calls
+
+
+@pytest.mark.parametrize("name", NETWORK_SETTINGS)
+def test_standalone_refuses_each_network_setting_as_not_applicable(run, name):
+    p, calls = sa(run, {name: "x"})
+    assert p.returncode != 0 and "not applicable to the stand-alone version" in p.stderr and name in p.stderr
+    assert "SAM" not in calls
+
+
+def test_standalone_missing_required_settings(run):
+    p, calls = run({"SYTELINE_USER": "svc"}, args=["--standalone"], env_name="deploy.standalone.env")
+    assert p.returncode != 0 and "SYTELINE_WSDL" in p.stderr and "SYTELINE_SECRET_ARN" in p.stderr
+
+
+# -- HTTPS by default / override / TLS / approval (US3) --
+def test_http_address_without_the_override_is_refused_before_any_sam_call(run):
+    p, calls = sa(run, {"SYTELINE_WSDL": "http://erp.example.com/x?wsdl"})
+    assert p.returncode != 0 and "ALLOW_PLAIN_HTTP=true" in p.stderr and "SAM" not in calls
+
+
+def test_http_address_with_the_override_uses_the_http_parameter_and_warns(run):
+    p, calls = sa(run, {"SYTELINE_WSDL": "http://erp.example.com/x?wsdl", "ALLOW_PLAIN_HTTP": "true"})
+    assert p.returncode == 0, p.stderr
+    o = overrides(calls)
+    assert o["SytelineWsdlHttp"] == "http://erp.example.com/x?wsdl" and "SytelineWsdlHttps" not in o
+    assert o["AllowPlainHttp"] == "true"
+    assert "UNENCRYPTED" in p.stdout
+
+
+def test_override_with_an_https_address_still_warns_that_https_is_not_enforced(run):
+    p, calls = sa(run, {"ALLOW_PLAIN_HTTP": "true"})
+    assert p.returncode == 0 and "no longer enforced" in p.stdout and overrides(calls)["AllowPlainHttp"] == "true"
+
+
+@pytest.mark.parametrize("url", ["ftp://erp/x", "erp.example.com/x", "file:///etc/x.wsdl"])
+def test_other_schemes_are_refused(run, url):
+    p, calls = sa(run, {"SYTELINE_WSDL": url})
+    assert p.returncode != 0 and "must start with https://" in p.stderr and "SAM" not in calls
+
+
+@pytest.mark.parametrize("url", ["https://user:pw@erp.example.com/x", "http://user@erp.example.com/x"])
+def test_credentials_in_the_address_are_refused(run, url):
+    p, calls = sa(run, {"SYTELINE_WSDL": url, "ALLOW_PLAIN_HTTP": "true"})
+    assert p.returncode != 0 and "must not contain credentials" in p.stderr and "pw" not in p.stdout + p.stderr
+    assert "SAM" not in calls
+
+
+def test_verify_tls_defaults_true_and_can_be_switched_off(run):
+    assert overrides(sa(run)[1])["VerifyTls"] == "true"
+    assert overrides(sa(run, {"VERIFY_TLS": "false"})[1])["VerifyTls"] == "false"
+    p, calls = sa(run, {"VERIFY_TLS": "maybe"})
+    assert p.returncode != 0 and "VERIFY_TLS" in p.stderr
+
+
+def test_standalone_live_writes_need_an_approval_reference(run):
+    p, calls = sa(run, {"LIVE_WRITES": "true"})
+    assert p.returncode != 0 and "LIVE_APPROVAL_REF" in p.stderr and "SAM" not in calls
+    p, calls = sa(run, {"LIVE_WRITES": "true", "LIVE_APPROVAL_REF": "ERP-OWNER-9"})
+    assert p.returncode == 0 and overrides(calls)["LiveWrites"] == "true"
+
+
+def test_the_default_mode_is_unchanged_by_the_standalone_option(run):
+    p, calls = run({**BASE, **SUPPLY})
+    assert p.returncode == 0 and "--config-env" not in calls and "SytelineWsdlHttps" not in calls

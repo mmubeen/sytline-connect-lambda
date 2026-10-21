@@ -15,6 +15,7 @@ UNCERTAIN_OUTCOME = "UNCERTAIN_OUTCOME"
 STALE_RUNNING = "STALE_RUNNING"
 TIME_BUDGET_EXHAUSTED = "TIME_BUDGET_EXHAUSTED"
 STORE_UNAVAILABLE = "STORE_UNAVAILABLE"
+INSECURE_TRANSPORT = "INSECURE_TRANSPORT"
 
 
 class ErpError(Exception):
@@ -31,6 +32,10 @@ class ErpUncertain(ErpError):
 
 class ErpUnreachable(ErpError):
     """The ERP could not be reached (nothing was sent that could have been written)."""
+
+
+class InsecureTransport(Exception):
+    """The ERP address (or the service address declared in its WSDL) is plain http:// while HTTPS is required."""
 
 
 class LiveWritesDisabled(Exception):

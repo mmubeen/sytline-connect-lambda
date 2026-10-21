@@ -4,20 +4,24 @@
 #   ./deploy.sh --build                  build only
 #   ./deploy.sh --validate               lint the template only
 #   ./deploy.sh --allow-network-change   permit switching between "create" and "supply" host-network mode
-#   ./deploy.sh --profile NAME           use this AWS credentials profile (flag > AWS_PROFILE_NAME in deploy.env > default chain)
+#   ./deploy.sh --profile NAME           use this AWS credentials profile (flag > AWS_PROFILE_NAME in the settings file > default chain)
+#   ./deploy.sh --standalone             the STAND-ALONE (no VPC) deployment: stack "sytline-connect-standalone",
+#                                        settings in deploy.standalone.env (no network settings; https:// ERP required)
 # Flags can be combined, e.g. ./deploy.sh --profile govcloud-prod --validate
-# Settings come from deploy.env (copy deploy.env.example). Nothing secret is stored there.
+# Settings come from deploy.env (copy deploy.env.example), or deploy.standalone.env with --standalone. Nothing secret is stored there.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 mode="deploy"
 allow_network_change="false"
 profile=""
+standalone="false"
 while (( $# )); do
   case "$1" in
     --build) mode="build" ;;
     --validate) mode="validate" ;;
     --allow-network-change) allow_network_change="true" ;;
+    --standalone) standalone="true" ;;
     --profile) [[ $# -ge 2 && -n "${2:-}" && "${2:0:2}" != "--" ]] || { echo "ERROR: --profile needs a profile name" >&2; exit 2; }
                profile="$2"; shift ;;
     --profile=*) profile="${1#--profile=}"; [[ -n "$profile" ]] || { echo "ERROR: --profile needs a profile name" >&2; exit 2; } ;;
@@ -26,9 +30,15 @@ while (( $# )); do
   shift
 done
 
-# deploy.env is optional for --build/--validate; read it early only for AWS_PROFILE_NAME
-if [[ -z "$profile" && -f deploy.env ]]; then
-  profile="$(set -a; . ./deploy.env; printf '%s' "${AWS_PROFILE_NAME:-}")"
+# the settings file is optional for --build/--validate; read it early only for AWS_PROFILE_NAME
+env_file="deploy.env"
+cfg_args=()
+if [[ "$standalone" == "true" ]]; then
+  env_file="deploy.standalone.env"
+  cfg_args=(--config-env standalone)   # separate stack, template and build directory (samconfig.toml)
+fi
+if [[ -z "$profile" && -f "$env_file" ]]; then
+  profile="$(set -a; . "./$env_file"; printf '%s' "${AWS_PROFILE_NAME:-}")"
 fi
 
 # --- AWS credentials profile: one switch, applied to every AWS-facing step ---------------
@@ -50,16 +60,74 @@ fi
 command -v sam >/dev/null || { echo "sam CLI not found (https://docs.aws.amazon.com/serverless-application-model/)"; exit 1; }
 
 if [[ "$mode" == "validate" ]]; then
-  sam validate --lint ${profile_args[@]+"${profile_args[@]}"}
+  sam validate --lint ${cfg_args[@]+"${cfg_args[@]}"} ${profile_args[@]+"${profile_args[@]}"}
   exit 0
 fi
 
-if [[ "$mode" == "build" ]]; then sam build ${profile_args[@]+"${profile_args[@]}"}; exit 0; fi
+if [[ "$mode" == "build" ]]; then sam build ${cfg_args[@]+"${cfg_args[@]}"} ${profile_args[@]+"${profile_args[@]}"}; exit 0; fi
 
-[[ -f deploy.env ]] || { echo "deploy.env missing: copy deploy.env.example and fill it in"; exit 1; }
-set -a; . ./deploy.env; set +a
+[[ -f "$env_file" ]] || { echo "$env_file missing: copy $env_file.example and fill it in"; exit 1; }
+set -a; . "./$env_file"; set +a
 
 die() { echo "ERROR: $*" >&2; exit 1; }
+
+# =========================================================================================
+# Stand-alone (no VPC) deployment
+# =========================================================================================
+if [[ "$standalone" == "true" ]]; then
+  missing=()
+  for v in SYTELINE_WSDL SYTELINE_USER SYTELINE_SECRET_ARN; do
+    [[ -n "${!v:-}" ]] || missing+=("$v")
+  done
+  if (( ${#missing[@]} )); then die "missing in $env_file: ${missing[*]}"; fi
+
+  # no network setting applies to this version
+  na=()
+  for v in WORKER_VPC_ID WORKER_SUBNET_IDS WORKER_SG_IDS WORKER_ROUTE_TABLE_IDS HOST_NETWORK_CIDR PLANT_CIDR_1 \
+           PLANT_CIDR_2 PLANT_CIDR_3 DYNAMODB_PREFIX_LIST_ID API_VPCE_ID CREATE_API_ENDPOINT CREATE_VPC_ENDPOINTS; do
+    [[ -z "${!v:-}" ]] || na+=("$v")
+  done
+  if (( ${#na[@]} )); then die "not applicable to the stand-alone version (it has no network): ${na[*]}"; fi
+
+  # ERP address: the scheme decides which template parameter carries it; http:// needs the explicit override
+  [[ "$SYTELINE_WSDL" =~ ^https?://[^/]*@ ]] && die "SYTELINE_WSDL must not contain credentials (user:password@host)"
+  allow_http="${ALLOW_PLAIN_HTTP:-false}"
+  [[ "$allow_http" == "true" || "$allow_http" == "false" ]] || die "ALLOW_PLAIN_HTTP must be true or false"
+  verify_tls="${VERIFY_TLS:-true}"
+  [[ "$verify_tls" == "true" || "$verify_tls" == "false" ]] || die "VERIFY_TLS must be true or false"
+  wsdl_param=""
+  case "$SYTELINE_WSDL" in
+    https://*) wsdl_param="SytelineWsdlHttps" ;;
+    http://*)
+      [[ "$allow_http" == "true" ]] || die "SYTELINE_WSDL is plain http://. The stand-alone version requires https:// (set ALLOW_PLAIN_HTTP=true only if you accept sending the ERP password unencrypted)"
+      wsdl_param="SytelineWsdlHttp"
+      echo "WARNING: PLAIN HTTP OVERRIDE IS ON. The ERP password will cross the network UNENCRYPTED."
+      ;;
+    *) die "SYTELINE_WSDL must start with https:// (or http:// with ALLOW_PLAIN_HTTP=true)" ;;
+  esac
+  [[ "$allow_http" == "false" ]] || echo "WARNING: ALLOW_PLAIN_HTTP=true: https is no longer enforced for the ERP connection."
+
+  live="${LIVE_WRITES:-false}"
+  if [[ "$live" == "true" ]]; then
+    [[ -n "${LIVE_APPROVAL_REF:-}" ]] || die "LIVE_WRITES=true requires LIVE_APPROVAL_REF (the ERP owner's approval reference)"
+    echo "WARNING: deploying with LIVE ERP WRITES ENABLED (approval ref: $LIVE_APPROVAL_REF). Set LIVE_WRITES=false and redeploy afterwards."
+  else
+    live="false"
+  fi
+
+  q() { printf '%s="%s"' "$1" "$2"; }
+  echo "Deploying the STAND-ALONE version (no VPC): stack sytline-connect-standalone. No network resources are created."
+  sam build "${cfg_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
+  sam deploy "${cfg_args[@]}" ${profile_args[@]+"${profile_args[@]}"} --parameter-overrides \
+    "$(q "$wsdl_param" "$SYTELINE_WSDL")" \
+    "$(q AllowPlainHttp "$allow_http")" \
+    "$(q VerifyTls "$verify_tls")" \
+    "$(q SytelineUser "$SYTELINE_USER")" \
+    "$(q SytelineSecretArn "$SYTELINE_SECRET_ARN")" \
+    "$(q SytelineConfig "${SYTELINE_CONFIG:-CCT}")" \
+    "$(q LiveWrites "$live")"
+  exit 0
+fi
 
 # --- always required ---------------------------------------------------------------------
 missing=()

@@ -11,4 +11,6 @@ Direct Lambda invoke with a JSON event (`scr/lambda_function.py`). `action` defa
 ## get_notes  (read-only)
 `{"action":"get_notes","record_type":"co|job","record_key":"…","since":"2026-10-01"}` → `{"ok":true,"notes":[{"token","text","internal","created_at","created_by"}]}`.
 
+Stand-alone (no VPC) deployment only (feature 003): error code `INSECURE_TRANSPORT` is returned by every action, before any ERP access, when the ERP address (or the service address declared in its WSDL) is `http://` and the plain-HTTP override is off; `health` may add `"warnings": ["plain HTTP override is on: credentials cross the network unencrypted"]` when the override is on. The stage list never changes.
+
 Error codes: `VALIDATION`, `NOT_FOUND`, `LIVE_WRITES_DISABLED`, `ERP_UNREACHABLE`, `ERP_REJECTED`, `UNKNOWN_ACTION`, `NOT_IMPLEMENTED`.

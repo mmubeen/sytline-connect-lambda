@@ -84,6 +84,12 @@ the default credential chain).
 - Full step-by-step guide (prerequisites, verification, enabling live writes, troubleshooting, teardown): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 - Console deployment of only the direct-invoke function: [`DEPLOY_PORTAL.md`](DEPLOY_PORTAL.md).
 
+## Stand-alone version (no VPC)
+`./deploy.sh --standalone` deploys only the connectivity check and the notes operations as a separate stack with **no VPC and no network
+resources**, callable only with IAM-permitted cloud credentials (no public address). It needs an ERP reachable from the internet, requires
+**HTTPS** to the ERP (plain HTTP only with an explicit override that sends credentials unencrypted), and cannot use ERP source-address
+allow-listing. See [`docs/STANDALONE.md`](docs/STANDALONE.md).
+
 ## Invoke (direct actions)
 `aws lambda invoke --function-name <name> --payload '{"action":"health"}' --cli-binary-format raw-in-base64-out out.json && cat out.json`
 (omit `--payload` for the default `health` action).

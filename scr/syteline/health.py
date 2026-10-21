@@ -21,6 +21,8 @@ import time
 from urllib.parse import urlparse
 
 from . import config as cfgmod
+from . import errors
+from .client import config_service_address
 
 
 def _stage(name, fn, results):
@@ -30,10 +32,13 @@ def _stage(name, fn, results):
         results.append({"stage": name, "ok": True, "ms": int((time.monotonic() - start) * 1000), "detail": detail})
         return True
     except Exception as exc:  # report, don't raise: we want a structured result
-        results.append({
+        entry = {
             "stage": name, "ok": False, "ms": int((time.monotonic() - start) * 1000),
             "error": f"{type(exc).__name__}: {exc}",
-        })
+        }
+        if isinstance(exc, errors.InsecureTransport):
+            entry["code"] = errors.INSECURE_TRANSPORT
+        results.append(entry)
         return False
 
 
@@ -49,6 +54,14 @@ def run_health(event, context=None):
     missing = [k for k in required if not cfg[k]]
     if missing:
         return {"ok": False, "dry_run": dry_run, "error": f"missing config: {', '.join(missing)}", "stages": []}
+
+    # Stand-alone deployment: HTTPS required unless explicitly overridden. Checked after the configuration
+    # is resolved (the secret may supply the address) and before ANY traffic to the ERP, dry run included.
+    problem = cfgmod.transport_problem(cfg["SYTELINE_WSDL"])
+    if problem:
+        return {"ok": False, "dry_run": dry_run, "error": problem,
+                "errors": [errors.error(errors.INSECURE_TRANSPORT, problem)], "stages": []}
+    warnings = [cfgmod.PLAIN_HTTP_WARNING] if cfgmod.plain_http_in_use(cfg["SYTELINE_WSDL"]) else []
 
     parsed = urlparse(cfg["SYTELINE_WSDL"])
     host = parsed.hostname
@@ -87,16 +100,24 @@ def run_health(event, context=None):
         transport = Transport(session=session, cache=None, timeout=timeout, operation_timeout=timeout)
         return Client(cfg["SYTELINE_WSDL"], transport=transport)
 
+    def _check_declared_address(client):
+        """The SOAP calls go to the address declared in the WSDL, not necessarily the WSDL's own address."""
+        problem = cfgmod.transport_problem(config_service_address(client), must_have_value=True)
+        if problem:
+            raise errors.InsecureTransport(problem)
+
     def wsdl():
         session = _session()
         if not dry_run:
-            state["client"] = _zeep_client(session)
+            client = _zeep_client(session)
+            _check_declared_address(client)  # before the token stage sends the password
+            state["client"] = client
             return "WSDL loaded"
         resp = session.get(cfg["SYTELINE_WSDL"], timeout=timeout)
         if resp.status_code in (401, 403):
             return f"HTTP {resp.status_code}: endpoint reachable, authentication required"
         if resp.ok:
-            _zeep_client(session)
+            _check_declared_address(_zeep_client(session))
             return f"HTTP {resp.status_code}: WSDL downloaded and parsed"
         raise RuntimeError(f"unexpected HTTP {resp.status_code}")
 
@@ -115,4 +136,10 @@ def run_health(event, context=None):
             break  # later stages depend on earlier ones
 
     ok = len(results) == len(plan) and all(r["ok"] for r in results)
-    return {"ok": ok, "dry_run": dry_run, "host": host, "config": cfg["SYTELINE_CONFIG"], "stages": results}
+    out = {"ok": ok, "dry_run": dry_run, "host": host, "config": cfg["SYTELINE_CONFIG"], "stages": results}
+    insecure = [r for r in results if r.get("code") == errors.INSECURE_TRANSPORT]
+    if insecure:
+        out["errors"] = [errors.error(errors.INSECURE_TRANSPORT, cfgmod.INSECURE_MESSAGE)]
+    if warnings:
+        out["warnings"] = warnings
+    return out

@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  SyteLine integration, STAND-ALONE (no VPC): the connectivity check and notes functions with default public
+  networking. No network resources, no public address (callable only with IAM-permitted cloud credentials).
+
+Parameters:
+  # Exactly one of the two addresses. The scheme is carried by WHICH parameter is used, because CloudFormation
+  # rules cannot test the start of a string: an http:// address needs the explicit override below.
+  SytelineWsdlHttps:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^https://[^@ ]+$'
+    Description: >-
+      https:// address of the SyteLine web service WSDL (must be reachable from the internet). Must not contain
+      credentials.
+  SytelineWsdlHttp:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^http://[^@ ]+$'
+    Description: >-
+      Plain http:// address. Only with AllowPlainHttp=true: the ERP password then crosses the network UNENCRYPTED.
+  AllowPlainHttp:
+    Type: String
+    Default: "false"
+    AllowedValues: ["false", "true"]
+    Description: Explicit opt-in to a plain http:// ERP address (credentials cross the network unencrypted).
+  SytelineUser:
+    Type: String
+  SytelineSecretArn:
+    Type: String
+    Description: Secrets Manager secret (JSON) with SYTELINE_PASS
+  SytelineConfig:
+    Type: String
+    Default: CCT
+  LiveWrites:
+    Type: String
+    Default: "false"
+    AllowedValues: ["false", "true"]
+    Description: Leave "false" except for an ERP-owner-approved test window (FR-008)
+  VerifyTls:
+    Type: String
+    Default: "true"
+    AllowedValues: ["false", "true"]
+    Description: Verify the ERP's TLS certificate. "false" only for a self-signed test ERP.
+  UseFipsEndpoints:
+    Type: String
+    Default: "true"
+    AllowedValues: ["false", "true"]
+    Description: Use FIPS AWS service endpoints (GovCloud)
+
+# cfn-lint warns (W1030) that the empty defaults do not match the address patterns; empty means "not given".
+Metadata:
+  cfn-lint:
+    config:
+      ignore_checks: [W1030]
+
+# Refused before anything is created.
+Rules:
+  ExactlyOneWsdl:
+    Assertions:
+      - Assert: !Or
+          - !And
+            - !Not [!Equals [!Ref SytelineWsdlHttps, ""]]
+            - !Equals [!Ref SytelineWsdlHttp, ""]
+          - !And
+            - !Equals [!Ref SytelineWsdlHttps, ""]
+            - !Not [!Equals [!Ref SytelineWsdlHttp, ""]]
+        AssertDescription: Give exactly one of SytelineWsdlHttps or SytelineWsdlHttp.
+  PlainHttpNeedsOverride:
+    RuleCondition: !Not [!Equals [!Ref SytelineWsdlHttp, ""]]
+    Assertions:
+      - Assert: !Equals [!Ref AllowPlainHttp, "true"]
+        AssertDescription: An http:// ERP address needs AllowPlainHttp=true (credentials would cross the network unencrypted).
+
+Conditions:
+  UsePlainHttp: !Not [!Equals [!Ref SytelineWsdlHttp, ""]]
+
+Resources:
+  # Dependencies built for Linux x86_64 / Python 3.13 by scr/Makefile (shared with the VPC template: same logical IDs)
+  DepsLayer:
+    Type: AWS::Serverless::LayerVersion
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      LayerName: sytline-connect-standalone-deps
+      ContentUri: .
+      CompatibleRuntimes: [python3.13]
+      CompatibleArchitectures: [x86_64]
+
+  # No VpcConfig, no Events, no function URL: the only way in is lambda:Invoke by a permitted IAM principal.
+  DirectFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.13
+      Architectures: [x86_64]
+      CodeUri: .
+      Timeout: 60
+      MemorySize: 256
+      Layers:
+        - !Ref DepsLayer
+      Environment:
+        Variables:
+          SYTELINE_WSDL: !If [UsePlainHttp, !Ref SytelineWsdlHttp, !Ref SytelineWsdlHttps]
+          SYTELINE_USER: !Ref SytelineUser
+          SYTELINE_CONFIG: !Ref SytelineConfig
+          SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
+          SYTELINE_LIVE_WRITES: !Ref LiveWrites
+          SYTELINE_REQUIRE_HTTPS: "true"          # run-time guard (also covers the address declared in the WSDL)
+          SYTELINE_ALLOW_HTTP: !Ref AllowPlainHttp
+          SYTELINE_VERIFY_TLS: !Ref VerifyTls
+          AWS_USE_FIPS_ENDPOINT: !Ref UseFipsEndpoints
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref SytelineSecretArn
+
+Outputs:
+  DirectFunctionName:
+    Value: !Ref DirectFunction
+  DirectFunctionArn:
+    Value: !GetAtt DirectFunction.Arn
+  PlainHttpOverride:
+    Description: '"true" means credentials cross the network unencrypted'
+    Value: !Ref AllowPlainHttp
+  LiveWrites:
+    Value: !Ref LiveWrites
