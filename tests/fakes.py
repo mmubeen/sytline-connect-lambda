@@ -289,3 +289,167 @@ def po_fields(n=2, **over):
          "lines": [{"part_number": chr(ord("A") + i), "quantity": i + 1, "uom": "EA"} for i in range(n)]}
     f.update(over)
     return f
+
+
+# ---- a fake SQL Server (DB-API shaped), for the database calls of feature 005 --------------------------
+import threading as _threading  # noqa: E402
+
+_SQL_ERR = {n: type(n, (Exception,), {}) for n in ("LoginError", "DatabaseError", "ClosedConnectionError",
+                                                    "TimeoutError", "InterfaceError")}
+LoginError, DatabaseError, ClosedConnectionError, SqlTimeoutError, InterfaceError = (
+    _SQL_ERR["LoginError"], _SQL_ERR["DatabaseError"], _SQL_ERR["ClosedConnectionError"], _SQL_ERR["TimeoutError"],
+    _SQL_ERR["InterfaceError"])
+
+DB_CFG = {"SQL_SERVER": "sql.plant.example", "SQL_DATABASE": "SL_PROD", "SQL_USER": "svc-login",
+          "SQL_PASS": "S3cr3t-DB-Pass", "SQL_PORT": "1433",
+          "SQL_CA_PEM": "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"}
+
+
+class FakeSqlServer:
+    """Records every statement; serves the two numbering routines and the two SELECTs of syteline.sqlserver.
+
+    scenarios: {("batch", nth) | ("commit", nth) | ("select", nth): action}, nth counted per kind from 1.
+      batch:  "error" (routine raises a database error), "drop" (connection lost after the batch), "null" (NULL key),
+              "bad" (unreadable key), "empty" (no row)
+      commit: "drop" (connection lost during the commit)
+      select: "error" (database error), "drop" (connection lost)
+    connect_error: None | "connect_fail" | "login_fail".  key_format: "{n}", "^{n}^", "^{n},{m}^" ({m} = n + 1).
+    custaddr: list of dicts with cust_num, cust_seq, name, addr1..addr4, city, state, zip, country.
+    co_rows: list of dicts with co_num, cust_num, cust_seq, terms_code, ship_code.
+    """
+
+    def __init__(self, co_start=100, job_start=5000, key_format="{n}", custaddr=None, co_rows=None, scenarios=None,
+                 connect_error=None, infobar=""):
+        self._lock = _threading.Lock()
+        self.counters = {"NextCoSp": co_start, "NextWOSp": job_start}
+        self.key_format, self.infobar = key_format, infobar
+        self.custaddr, self.co_rows = list(custaddr or []), list(co_rows or [])
+        self.scenarios, self.connect_error = dict(scenarios or {}), connect_error
+        self.statements = []      # (sql, params) in order, across all connections
+        self.connect_kwargs = []  # keyword arguments of every connect call
+        self.opened = self.closed = 0
+        self.committed, self.rolled_back = [], 0
+        self._n = {"batch": 0, "commit": 0, "select": 0}
+
+    def install(self, monkeypatch):
+        from syteline import sqlserver
+
+        monkeypatch.setattr(sqlserver, "_connect", self.connect)
+        return self
+
+    def connect(self, **kw):
+        self.connect_kwargs.append(kw)
+        if self.connect_error == "connect_fail":
+            raise OSError("connection refused")
+        if self.connect_error == "login_fail":
+            raise LoginError(f"Login failed for user '{kw.get('user')}' password '{kw.get('password')}'")
+        with self._lock:
+            self.opened += 1
+        return _FakeSqlConnection(self)
+
+    def _scenario(self, kind):
+        with self._lock:
+            self._n[kind] += 1
+            return self.scenarios.get((kind, self._n[kind]))
+
+    def statements_text(self):
+        return [s for s, _ in self.statements]
+
+
+class _FakeSqlConnection:
+    def __init__(self, server):
+        self._s, self._open = server, True
+
+    def cursor(self):
+        return _FakeSqlCursor(self._s)
+
+    def close(self):
+        if self._open:
+            self._open = False
+            with self._s._lock:
+                self._s.closed += 1
+
+
+class _FakeSqlCursor:
+    def __init__(self, server):
+        self._s, self.description, self._rows = server, None, []
+
+    def close(self):
+        pass
+
+    def nextset(self):
+        return False
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return list(self._rows)
+
+    def execute(self, sql, params=()):
+        import re
+
+        s = self._s
+        with s._lock:
+            s.statements.append((sql, tuple(params)))
+        self.description, self._rows = None, []
+        if sql.startswith("SET NOCOUNT ON"):
+            routine = re.search(r"EXEC \[dbo\]\.\[(\w+)\]", sql).group(1)
+            action = s._scenario("batch")
+            if action == "error":
+                raise DatabaseError(f"{routine} failed: site not found")
+            if action == "drop":
+                raise ClosedConnectionError("connection closed by the server")
+            with s._lock:
+                n = s.counters[routine]
+                s.counters[routine] += 1
+            self.description = [("key_val",), ("infobar",)]
+            if action == "empty":
+                return
+            key = {"null": None, "bad": "abc"}.get(action, s.key_format.format(n=n, m=n + 1))
+            self._rows = [(key, s.infobar)]
+            s._last = n
+            return
+        if sql == "COMMIT TRANSACTION":
+            if s._scenario("commit") == "drop":
+                raise ClosedConnectionError("connection lost during commit")
+            with s._lock:
+                s.committed.append(getattr(s, "_last", None))
+            return
+        if sql.startswith("IF @@TRANCOUNT"):
+            with s._lock:
+                s.rolled_back += 1
+            return
+        action = s._scenario("select")
+        if action == "error":
+            raise DatabaseError("Invalid object name")
+        if action == "drop":
+            raise ClosedConnectionError("connection lost")
+        if sql == "SELECT 1":
+            self.description, self._rows = [("",)], [(1,)]
+        elif "FROM custaddr" in sql:
+            clauses = re.findall(r"(LOWER\(name\) LIKE %s|zip LIKE %s)", sql)
+            hit = []
+            for row in s.custaddr:
+                for clause, p in zip(clauses, params):
+                    if clause.startswith("LOWER"):
+                        ok = p.strip("%") in str(row.get("name", "")).lower()
+                    else:
+                        ok = str(row.get("zip", "")).startswith(p.rstrip("%"))
+                    if ok:
+                        hit.append(row)
+                        break
+            cols = ["cust_num", "cust_seq", "name", "addr1", "addr2", "addr3", "addr4", "city", "state", "zip",
+                    "country"]
+            cap = int(re.search(r"SELECT TOP (\d+)", sql).group(1))
+            hit.sort(key=lambda r: (str(r["cust_num"]), r["cust_seq"]))
+            self.description = [(c,) for c in cols]
+            self._rows = [tuple(r.get(c, "") for c in cols) for r in hit[:cap]]
+        elif "FROM co " in sql or "FROM co\n" in sql or "FROM co WHERE" in sql:
+            cust = params[0]
+            rows = [r for r in s.co_rows if str(r["cust_num"]).strip() == cust]
+            if len(params) > 1:
+                rows = [r for r in rows if r["cust_seq"] == params[1]]
+            rows.sort(key=lambda r: r["co_num"], reverse=True)
+            self.description = [("terms_code",), ("ship_code",)]
+            self._rows = [(r["terms_code"], r["ship_code"]) for r in rows[:1]]
