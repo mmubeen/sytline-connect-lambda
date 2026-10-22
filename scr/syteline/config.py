@@ -15,6 +15,13 @@ def load_config(skip_secret=False):
         "SYTELINE_CONFIG": os.environ.get("SYTELINE_CONFIG", "") or "CCT",
         "SYTELINE_DEFAULT_WHSE": os.environ.get("SYTELINE_DEFAULT_WHSE", ""),
         "SYTELINE_DEFAULT_ORDTYPE": os.environ.get("SYTELINE_DEFAULT_ORDTYPE", ""),
+        # database settings (feature 005): normally supplied by the secret; the environment is for local tests
+        "SQL_SERVER": os.environ.get("SQL_SERVER", ""),
+        "SQL_DATABASE": os.environ.get("SQL_DATABASE", ""),
+        "SQL_USER": os.environ.get("SQL_USER", ""),
+        "SQL_PASS": os.environ.get("SQL_PASS", ""),
+        "SQL_PORT": os.environ.get("SQL_PORT", "") or "1433",
+        "SQL_CA_PEM": os.environ.get("SQL_CA_PEM", ""),
     }
     arn = os.environ.get("SYTELINE_SECRET_ARN")
     if arn and not skip_secret:
@@ -103,3 +110,32 @@ def timeout():
 
 def verify_tls():
     return os.environ.get("SYTELINE_VERIFY_TLS", "false").lower() == "true"
+
+
+# -- database settings (feature 005) ---------------------------------------------------------
+SQL_REQUIRED = ("SQL_SERVER", "SQL_DATABASE", "SQL_USER", "SQL_PASS", "SQL_CA_PEM")
+
+
+def sql_missing(cfg):
+    """Names (never values) of the required database settings that are not set."""
+    return [k for k in SQL_REQUIRED if not str(cfg.get(k) or "").strip()]
+
+
+def sql_verify_hostname():
+    """False only when SYTELINE_SQL_VERIFY_HOSTNAME is exactly `false` (the certificate chain is verified regardless)."""
+    return os.environ.get("SYTELINE_SQL_VERIFY_HOSTNAME", "true").strip().lower() != "false"
+
+
+def sql_timeouts():
+    """(login timeout, query timeout) in seconds."""
+    return (float(os.environ.get("SYTELINE_SQL_LOGIN_TIMEOUT", "5")), float(os.environ.get("SYTELINE_SQL_TIMEOUT", "10")))
+
+
+def site_id():
+    return int(os.environ.get("SYTELINE_SITE_ID", "10"))
+
+
+def match_settings():
+    """(minimum confident score, ambiguity margin, candidate cap) of the customer search; the demo's defaults."""
+    return (float(os.environ.get("SYTELINE_MATCH_MIN_SCORE", "70")), float(os.environ.get("SYTELINE_MATCH_MARGIN", "3")),
+            int(os.environ.get("SYTELINE_MATCH_CAP", "1000")))

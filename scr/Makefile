@@ -9,8 +9,8 @@ FUNCTIONS = IntakeFunction StatusFunction WorkerFunction SweeperFunction DirectF
 build-DepsLayer:
 	mkdir -p "$(ARTIFACTS_DIR)/python"
 	python3 -m pip install -r requirements.txt -t "$(ARTIFACTS_DIR)/python" \
-		--platform manylinux2014_x86_64 --implementation cp --python-version 3.13 \
-		--only-binary=:all: --upgrade
+		--platform manylinux2014_x86_64 --platform manylinux_2_28_x86_64 --implementation cp --python-version 3.13 \
+		--only-binary=:all: --ignore-requires-python --upgrade
 	@# --ignore-requires-python: an old host pip checks Requires-Python against the host interpreter, not 3.13, and
 	@# then backtracks for minutes; the pinned versions are the ones the SDK was checked against on 3.13
 	python3 -m pip install -r requirements-idp.txt -t "$(ARTIFACTS_DIR)/python" \

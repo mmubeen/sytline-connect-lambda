@@ -2,3 +2,7 @@ zeep
 lxml
 requests
 urllib3
+python-tds
+pyOpenSSL
+cryptography
+rapidfuzz
