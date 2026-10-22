@@ -6,8 +6,9 @@ import logging
 import pytest
 
 import lambda_function as lf
-from fakes import FakeJobsTable, FakeLambda, FakeSoap
+from fakes import FakeIdp, FakeJobsTable, FakeLambda, FakeSoap, po_fields
 from handlers import intake, reserve, save_intake, status, sweeper, worker
+from syteline import idp
 from syteline.jobs import JobStore
 from syteline.reservations import ReservationStore
 
@@ -38,6 +39,8 @@ def env(monkeypatch, caplog, live_writes):
     monkeypatch.setattr(worker, "_clients_factory", lambda: (soap, {}))
     monkeypatch.setattr(lf, "_client_factory", lambda: soap)
     rstore = ReservationStore(FakeJobsTable())
+    fake_idp = FakeIdp().add("batch-1/PO-1.pdf", po_fields(1))
+    monkeypatch.setattr(idp, "_client_factory", lambda: fake_idp)
     for m in (reserve, save_intake):
         monkeypatch.setattr(m, "_store_factory", lambda: rstore)
     monkeypatch.setattr(reserve, "_clients_factory", lambda: soap)
@@ -75,12 +78,10 @@ def test_failures_are_logged_with_their_code(env, caplog):
 
 def test_the_reservation_handlers_log_type_identifiers_outcome_and_duration(env, caplog):
     ident = {"requestContext": {"identity": {"userArn": "arn:x"}}}
-    rb = {"request_ref": "res-1", "confirmed": True, "uploaded_by": "jdoe", "customer": {"name": "ACME"},
-          "po_number": "PO-1", "line_count": 1}
+    rb = {"request_ref": "res-1", "confirmed": True, "uploaded_by": "jdoe", "document_id": "batch-1/PO-1.pdf"}
     r = reserve.handler(dict({"body": json.dumps(rb)}, **ident), None)
     rid = json.loads(r["body"])["reservation_id"]
-    sb = {"confirmed": True, "uploaded_by": "jdoe", "customer": {"name": "ACME"}, "po_number": "PO-1",
-          "lines": [{"item": "A", "quantity": 1, "uom": "EA"}]}
+    sb = {"confirmed": True, "uploaded_by": "jdoe", "document_id": "batch-1/PO-1.pdf"}
     save_intake.handler(dict({"body": json.dumps(sb), "pathParameters": {"id": rid}}, **ident), None)
     worker.handler({"reservation_id": rid}, None)
     by_type = {l["type"]: l for l in lines(caplog)}

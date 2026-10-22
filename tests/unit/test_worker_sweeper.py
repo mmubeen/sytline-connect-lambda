@@ -122,9 +122,12 @@ def test_sweeper_leaves_needs_reconciliation_alone(env):
     assert sweeper.handler({}, None) == {"redriven": [], "parked": []} and lam.invocations == []
 
 
-# ---- job-number workflow: the save run (feature 004) ------------------------------------------
-SAVE_REQ = {"confirmed": True, "uploaded_by": "u", "customer": {"name": "ACME"}, "po_number": "PO-1",
-            "lines": [{"item": "A", "quantity": 1, "uom": "EA"}, {"item": "B", "quantity": 2, "uom": "EA"}]}
+# ---- job-number workflow: the save run (feature 004, PO details read from the IDP document) ------
+from fakes import FakeIdp, po_fields  # noqa: E402
+from syteline import idp, validation  # noqa: E402
+
+DOC = "batch-1/PO-1.pdf"
+FP = validation.fingerprint({"name": "ACME"}, "PO-1", 2)
 
 
 @pytest.fixture
@@ -132,6 +135,8 @@ def renv(monkeypatch):
     now = [1000]
     rstore = ReservationStore(FakeJobsTable(), clock=lambda: now[0])
     soap = FakeSoap(customers=CUST)
+    fake_idp = FakeIdp().add(DOC, po_fields(2))
+    monkeypatch.setattr(idp, "_client_factory", lambda: fake_idp)
     monkeypatch.setattr(worker, "_reservation_store_factory", lambda: rstore)
     monkeypatch.setattr(worker, "_clients_factory", lambda: (soap, CFG))
     lam = FakeLambda()
@@ -139,17 +144,18 @@ def renv(monkeypatch):
     monkeypatch.setattr(sweeper, "_store_factory", lambda: JobStore(FakeJobsTable()))
     monkeypatch.setattr(sweeper, "_lambda_factory", lambda: lam)
     monkeypatch.setenv("WORKER_FUNCTION_NAME", "w")
+    rstore.fake_idp = fake_idp
     return rstore, soap, lam, now
 
 
-def accepted(rstore, req=SAVE_REQ, ref="r1"):
-    item, _ = rstore.create_reservation({"request_ref": ref, "po_number": "PO-1", "line_count": 2}, "h", "fp", "u", "arn")
+def accepted(rstore, ref="r1", params=None):
+    item, _ = rstore.create_reservation({"request_ref": ref, "document_id": DOC, "line_count": 2}, "h", FP, "u", "arn")
     rid = item["reservation_id"]
     rstore.set_customer(rid, {"cust_num": "C1", "cust_seq": 0})
     rstore.set_co_num(rid, "100")
     rstore.add_job_number(rid, [{"line": 1, "job": "5000"}, {"line": 2, "job": "5001"}])
     rstore.mark_reserved(rid)
-    rstore.accept_save(rid, "sh", req)
+    rstore.accept_save(rid, params or {"document_id": DOC})
     return rid
 
 
@@ -189,6 +195,62 @@ def test_save_worker_live_writes_off_is_a_clean_failure(renv):
     assert rstore.get(rid)["failure"]["code"] == "LIVE_WRITES_DISABLED" and soap.writes() == []
 
 
+def test_the_worker_writes_what_the_document_says_now_not_a_stored_copy(renv, live_writes):
+    rstore, soap, _, _ = renv
+    rid = accepted(rstore, params={"document_id": DOC, "warehouse": "W9", "order_type": "S", "order_date": "2026-10-20"})
+    corrected = po_fields(2)
+    corrected["lines"][1]["quantity"] = 7  # a line corrected in review after the save was accepted
+    rstore.fake_idp.add(DOC, corrected)
+    assert worker.handler({"reservation_id": rid}, None) == {"state": "saved"}
+    assert soap.rows["CCT_Coitems"][1]["QtyOrdered"] == 7.0
+    assert soap.rows["SLCos"][0]["OrderDate"] == "2026-10-20"
+    assert soap.rows["CCTJobs"][0]["Whse"] == "W9" and soap.rows["CCTJobs"][0]["OrdType"] == "S"
+    assert [c for c in soap.calls if c[0] == "invoke"] == []
+
+
+def test_a_document_that_changed_identity_fails_the_save_with_nothing_written(renv, live_writes):
+    rstore, soap, _, _ = renv
+    rid = accepted(rstore)
+    rstore.fake_idp.add(DOC, po_fields(2, cust_po="PO-2"))
+    assert worker.handler({"reservation_id": rid}, None) == {"state": "failed"}
+    item = rstore.get(rid)
+    assert item["failure"]["code"] == "DOCUMENT_CHANGED" and soap.writes() == []
+
+
+@pytest.mark.parametrize("change,code", [
+    (lambda f: f.update(DOC, status="HITL_IN_PROGRESS"), "DOCUMENT_NOT_READY"),
+    (lambda f: f.add(DOC, po_fields(2), low={"cust_po"}), "DOCUMENT_NEEDS_REVIEW"),
+    (lambda f: f.docs.pop(DOC), "DOCUMENT_NOT_FOUND")])
+def test_a_document_that_became_unusable_fails_the_save_with_nothing_written(renv, live_writes, change, code):
+    rstore, soap, _, _ = renv
+    rid = accepted(rstore)
+    change(rstore.fake_idp)
+    assert worker.handler({"reservation_id": rid}, None) == {"state": "failed"}
+    assert rstore.get(rid)["failure"]["code"] == code and soap.writes() == []
+
+
+def test_an_unavailable_idp_source_is_retried_later_and_gives_up_after_five_attempts(renv, live_writes):
+    rstore, soap, lam, now = renv
+    rid = accepted(rstore)
+    rstore.fake_idp.raise_for[DOC] = RuntimeError("down")
+    for attempt in range(1, 5):
+        assert worker.handler({"reservation_id": rid}, None) == {"state": "save_accepted"}
+        assert rstore.get(rid)["state"] == "save_accepted" and rstore.get(rid)["attempts"] == attempt
+    assert worker.handler({"reservation_id": rid}, None) == {"state": "failed"}  # the 5th attempt gives up
+    assert rstore.get(rid)["failure"]["code"] == "IDP_UNAVAILABLE" and soap.writes() == []
+
+
+def test_the_sweeper_starts_a_released_save_again(renv, live_writes):
+    rstore, soap, lam, now = renv
+    rid = accepted(rstore)
+    rstore.fake_idp.raise_for[DOC] = RuntimeError("down")
+    worker.handler({"reservation_id": rid}, None)
+    now[0] = 1300
+    assert sweeper.handler({}, None)["redriven"] == [rid]
+    rstore.fake_idp.raise_for.clear()
+    assert worker.handler({"reservation_id": rid}, None) == {"state": "saved"}
+
+
 def test_save_worker_unexpected_error_never_retries(renv, live_writes, monkeypatch):
     rstore, soap, _, _ = renv
     rid = accepted(rstore)
@@ -203,7 +265,7 @@ def test_sweeper_redrives_only_old_save_accepted_reservations(renv):
     old = accepted(rstore, ref="old")
     now[0] = 1150
     new = accepted(rstore, ref="new")
-    reserved_only = rstore.create_reservation({"request_ref": "z", "po_number": "P", "line_count": 1}, "h", "f", "u", "a")[0]
+    reserved_only = rstore.create_reservation({"request_ref": "z", "document_id": DOC, "line_count": 1}, "h", "f", "u", "a")[0]
     rstore.mark_reserved(reserved_only["reservation_id"])  # reserved but never saved: never driven
     now[0] = 1200
     out = sweeper.handler({}, None)

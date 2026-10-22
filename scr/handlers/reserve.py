@@ -5,12 +5,12 @@ import time
 
 from syteline import config, errors, validation
 from syteline.client import SoapIdoClient
-from syteline.errors import SecretStoreUnavailable
+from syteline.errors import IntegrationError, SecretStoreUnavailable
 from syteline.jobs import RefConflict
 from syteline.reservations import ReservationStore, effective_state, numbers_report
 from syteline.reserve import run_reserve
 
-from ._common import caller_identity, log_event, response
+from ._common import caller_identity, document_refusal, log_event, response
 
 # Overridable factories (tests inject fakes).
 _store_factory = None
@@ -38,6 +38,7 @@ def _body(item, duplicate):
     now = int(time.time())
     report = numbers_report(item, now)
     out = {"reservation_id": item["reservation_id"], "state": effective_state(item, now), "duplicate": duplicate,
+           "document_id": item["document_id"], "line_count": int(item["line_count"]),
            "co_num": report["co_num"], "jobs": [{"line": j["line"], "job": j["job"]} for j in report["jobs"]]}
     if item.get("customer_match"):
         out["customer_match"] = {k: item["customer_match"][k] for k in ("cust_num", "cust_seq")
@@ -80,6 +81,10 @@ def handler(event, context):
 
     try:
         out = run_reserve(body, soap, store, caller, _remaining(context))
+    except IntegrationError as exc:  # the document cannot be used: nothing was recorded or reserved
+        log_event("reserve", started, outcome=str(document_refusal(exc)["statusCode"]), code=exc.err["code"],
+                  request_ref=body["request_ref"], document_id=body["document_id"])
+        return document_refusal(exc)
     except RefConflict:
         log_event("reserve", started, outcome="409", request_ref=body["request_ref"])
         return response(409, {"errors": [errors.error(

@@ -109,43 +109,36 @@ def today():
     return date.today().isoformat()
 
 
-MAX_RESERVATION_LINES = 25
+# The PO details (customer, PO number, lines) are NOT part of a reservation request: they are read from the IDP
+# document the request names (syteline.idp). Sending them is refused rather than silently ignored.
+DETAIL_FIELDS = ("customer", "po_number", "line_count", "lines")
 
 
-def _is_int(v):
-    return isinstance(v, int) and not isinstance(v, bool)
-
-
-def _common_confirmation(body, bad):
+def _document_request(body, bad):
     if body.get("confirmed") is not True:
         bad("confirmed", "only operator-confirmed requests are accepted (confirmed must be true)")
     if not _nonempty(body.get("uploaded_by")):
         bad("uploaded_by", "uploaded_by is required (the confirming operator)")
-    _check_customer(body.get("customer"), bad)
-    if not _nonempty(body.get("po_number")):
-        bad("po_number", "po_number is required")
+    if not _nonempty(body.get("document_id")):
+        bad("document_id", "document_id is required (the IDP document the PO details are read from)")
+    for k in DETAIL_FIELDS:
+        if k in body:
+            bad(k, f"{k} is not accepted: it is read from the IDP document")
 
 
 def validate_reserve(body):
     """Errors for POST /job-reservations (empty when valid); all problems are reported together."""
-    from .errors import TOO_MANY_LINES
-
     errs = []
 
-    def bad(field, msg, code=VALIDATION):
-        errs.append(error(code, msg, field=field))
+    def bad(field, msg):
+        errs.append(error(VALIDATION, msg, field=field))
 
     if not isinstance(body, dict):
         return [error(VALIDATION, "body must be a JSON object")]
     ref = body.get("request_ref")
     if not isinstance(ref, str) or not 1 <= len(ref) <= 128:
         bad("request_ref", "request_ref is required and must be 1-128 characters")
-    _common_confirmation(body, bad)
-    n = body.get("line_count")
-    if not _is_int(n) or n < 1:
-        bad("line_count", "line_count must be a whole number of at least 1")
-    elif n > MAX_RESERVATION_LINES:
-        bad("line_count", f"at most {MAX_RESERVATION_LINES} lines can be reserved at once", TOO_MANY_LINES)
+    _document_request(body, bad)
     return errs
 
 
@@ -158,23 +151,10 @@ def validate_save(body):
 
     if not isinstance(body, dict):
         return [error(VALIDATION, "body must be a JSON object")]
-    _common_confirmation(body, bad)
+    _document_request(body, bad)
     for k in ("order_date", "received_date"):
         if k in body and not _is_date(body[k]):
             bad(k, f"{k} must be YYYY-MM-DD")
-    lines = body.get("lines")
-    if not isinstance(lines, list) or not lines:
-        bad("lines", "lines must contain at least one line")
-        lines = []
-    elif len(lines) > MAX_RESERVATION_LINES:
-        bad("lines", f"at most {MAX_RESERVATION_LINES} lines are accepted")
-    for i, ln in enumerate(lines):
-        pre = f"lines[{i}]"
-        _check_line(ln, pre, bad)
-        if isinstance(ln, dict):
-            for k in ("engine_sn", "serial_num", "packing"):
-                if k in ln and not isinstance(ln[k], str):
-                    bad(f"{pre}.{k}", f"{k} must be a string")
     for k in ("warehouse", "order_type"):
         if k in body and not _nonempty(body[k]):
             bad(k, f"{k} must be a non-empty string when supplied")

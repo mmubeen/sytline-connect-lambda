@@ -38,6 +38,9 @@ class ReservationStore:
     def create_reservation(self, request, payload_hash, fingerprint, uploaded_by, caller_identity):
         """Create the reservation (state `reserving`) and its request_ref index atomically.
 
+        `request` carries request_ref, document_id and line_count (counted from the IDP document); the PO details
+        (customer, PO number, lines) are never stored.
+
         Returns (reservation, duplicate). Same ref + same hash -> (existing reservation, True).
         Same ref + different hash -> RefConflict.
         """
@@ -45,7 +48,7 @@ class ReservationStore:
         now = self._now()
         rid = str(uuid.uuid4())
         item = {"pk": f"{PK}{rid}", "reservation_id": rid, "request_ref": ref, "payload_hash": payload_hash,
-                "fingerprint": fingerprint, "po_number": request["po_number"], "line_count": request["line_count"],
+                "fingerprint": fingerprint, "document_id": request["document_id"], "line_count": request["line_count"],
                 "uploaded_by": uploaded_by, "caller_identity": caller_identity, "state": RESERVING,
                 "job_numbers": [], "attempts": 0, "created_at": now, "updated_at": now}
         index = {"pk": f"{REF_PK}{ref}", "request_ref": ref, "reservation_id": rid, "payload_hash": payload_hash}
@@ -106,10 +109,14 @@ class ReservationStore:
                                 {"failure": {"code": code, "message": message, "step": step}})
 
     # save
-    def accept_save(self, reservation_id, payload_hash, request):
-        """reserved -> save_accepted. False if the reservation is not `reserved` (a reservation is used once)."""
+    def accept_save(self, reservation_id, params):
+        """reserved -> save_accepted. False if the reservation is not `reserved` (a reservation is used once).
+
+        `params` is the document ID and the few optional non-PO values of the request (order_date, received_date,
+        warehouse, order_type); the PO details are read from IDP again when the save runs.
+        """
         return self._transition(reservation_id, RESERVED, SAVE_ACCEPTED, {
-            "save": {"requested_at": self._now(), "payload_hash": payload_hash, "request": request}})
+            "save": dict(params, requested_at=self._now())})
 
     def claim(self, reservation_id):
         """save_accepted -> saving. False if not save_accepted (never re-run a save)."""
@@ -119,6 +126,11 @@ class ReservationStore:
                                 UpdateExpression="SET attempts = attempts + :one",
                                 ExpressionAttributeValues={":one": 1})
         return ok
+
+    def release_claim(self, reservation_id):
+        """saving -> save_accepted, only for a run that wrote nothing (the IDP source was unavailable): the sweeper
+        starts it again later."""
+        return self._transition(reservation_id, SAVING, SAVE_ACCEPTED)
 
     def record_progress(self, reservation_id, possibly_written, results=None):
         """Persist what may exist in the ERP so far (used if the worker dies mid-save)."""

@@ -2,8 +2,9 @@ import json
 import logging
 
 import lambda_function as lf
-from fakes import FakeJobsTable, FakeLambda, FakeSoap
+from fakes import FakeIdp, FakeJobsTable, FakeLambda, FakeSoap, po_fields
 from handlers import intake, reserve, save_intake, status, sweeper, worker
+from syteline import idp
 from syteline.jobs import JobStore
 from syteline.reservations import ReservationStore
 
@@ -25,6 +26,8 @@ def test_no_password_in_any_response_or_log(monkeypatch, caplog, live_writes):
     monkeypatch.setattr(worker, "_clients_factory", lambda: (soap, {}))
     monkeypatch.setattr(lf, "_client_factory", lambda: soap)
     rstore = ReservationStore(FakeJobsTable())
+    fake_idp = FakeIdp().add("batch-1/PO-1.pdf", po_fields(1))
+    monkeypatch.setattr(idp, "_client_factory", lambda: fake_idp)
     for mod in (reserve, save_intake):
         monkeypatch.setattr(mod, "_store_factory", lambda: rstore)
     monkeypatch.setattr(reserve, "_clients_factory", lambda: soap)
@@ -40,12 +43,10 @@ def test_no_password_in_any_response_or_log(monkeypatch, caplog, live_writes):
     outs += [r, worker.handler({"upload_id": jid}, None), status.handler({"pathParameters": {"id": jid}}, None),
              sweeper.handler({}, None)]
     ident = {"requestContext": {"identity": {"userArn": "arn"}}}
-    rb = {"request_ref": "rr", "confirmed": True, "uploaded_by": "u", "customer": {"name": "ACME"},
-          "po_number": "PO-1", "line_count": 1}
+    rb = {"request_ref": "rr", "confirmed": True, "uploaded_by": "u", "document_id": "batch-1/PO-1.pdf"}
     rr = reserve.handler(dict({"body": json.dumps(rb)}, **ident), None)
     rid = json.loads(rr["body"])["reservation_id"]
-    sb = {"confirmed": True, "uploaded_by": "u", "customer": {"name": "ACME"}, "po_number": "PO-1",
-          "lines": [{"item": "A", "quantity": 1, "uom": "EA"}]}
+    sb = {"confirmed": True, "uploaded_by": "u", "document_id": "batch-1/PO-1.pdf"}
     outs += [rr, save_intake.handler(dict({"body": json.dumps(sb), "pathParameters": {"id": rid}}, **ident), None),
              worker.handler({"reservation_id": rid}, None)]
     text = json.dumps(outs, default=str) + caplog.text

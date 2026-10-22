@@ -8,15 +8,16 @@ Stored in the existing DynamoDB jobs table (partition key `pk`, TTL attribute `t
 | reservation_id | UUID returned to the caller |
 | request_ref | caller's idempotency key (1-128 chars) |
 | payload_hash | SHA-256 of the canonical reserve request (detects ref reuse with a different payload) |
-| fingerprint | SHA-256 of normalized customer name and address, PO number, line count (binds save to this PO) |
-| po_number, line_count | as requested (line_count 1..25) |
+| fingerprint | SHA-256 of normalized customer name and address, PO number and line count, computed from the document (binds save to this PO; the values themselves are not stored) |
+| document_id | the IDP document the reservation is bound to (S3 key `batch-id/filename`) |
+| line_count | counted from the document at reserve time (1..25); the PO number, customer and lines are not stored |
 | uploaded_by, caller_identity | confirming operator; caller principal (session name removed for assumed roles) |
 | customer_match | `{cust_num, cust_seq}` resolved at reserve time; the only source of the customer on save |
 | co_num | reserved CO number (set when obtained) |
 | job_numbers | list in line order: `{line, job}`, appended as each is obtained |
 | state | see below |
 | failure | `{code, message, step}` when failed / needs_reconciliation / partly_saved |
-| save | present once a save was accepted: `{requested_at, payload_hash, request}` (the request is what the worker saves) |
+| save | present once a save was accepted: `{requested_at, document_id}` plus the optional `order_date`, `received_date`, `warehouse`, `order_type` of the request; the PO details are fetched from IDP when the worker runs and are never stored |
 | results | per-line results, top level, recorded by the save run |
 | erp_records | `{possibly_written: [{kind, key}]}` while saving and on needs_reconciliation |
 | attempts, created_at, updated_at, ttl | as in the upload job; ttl set only once terminal |
@@ -47,3 +48,11 @@ reserving ──► reserved ──► save_accepted ──► saving ──► 
 ## Validation rules
 - Reserve: `request_ref`, `confirmed: true`, `uploaded_by`, `customer` (name required, address fields optional strings, no customer-number keys), `po_number` (non-empty string), `line_count` (integer 1..25). All problems reported together.
 - Save: same customer and PO number as reserved (via fingerprint), `lines` count equals `line_count`, each line `item`, `quantity > 0`, `uom`; optional `due_date`, `price`, `teardown`, `engine_sn`, `serial_num`, `packing`, header `order_date`, `received_date`, `warehouse`, `order_type`.
+
+
+## Revision 2026-10-21: document source
+- `payload_hash` for the reserve request is the hash of `{request_ref, confirmed, uploaded_by, document_id}`.
+- **Document Result (not stored)**: `{document_id, status, document_class, fields, confidence}` read through the IDP SDK; mapped to PO Details in memory by `idp_fields.py`.
+- **PO Details (not stored)**: `{customer:{name,address1,city,state,postal_code}, po_number, received_date?, order_date?, lines:[{item, quantity, uom, due_date?, price?, teardown?, engine_sn?, serial_num?, packing?}]}`.
+- Validation (verbatim from the spec): document status must be `COMPLETED`; every needed field present; every needed field at or above its threshold unless reviewed; at most 25 lines; fingerprint of the mapped details must equal the stored fingerprint at save and at write.
+- New failure codes: `DOCUMENT_NOT_FOUND`, `DOCUMENT_NOT_READY`, `DOCUMENT_INCOMPLETE`, `DOCUMENT_NEEDS_REVIEW`, `DOCUMENT_CHANGED`, `IDP_UNAVAILABLE`.

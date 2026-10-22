@@ -239,6 +239,16 @@ else
   live="false"
 fi
 
+# Job-number workflow: where the PO details are read from (an IDP accelerator stack). IDP_REPO is the checkout whose
+# idp_sdk and idp_common are packaged with the functions (never installed by name: `idp-common` on PyPI is not ours).
+if [[ -n "${IDP_STACK_NAME:-}" ]]; then
+  [[ -n "${IDP_OUTPUT_BUCKET:-}" && -n "${IDP_TRACKING_TABLE:-}" ]] || die "IDP_STACK_NAME needs IDP_OUTPUT_BUCKET and IDP_TRACKING_TABLE too"
+  [[ -n "${IDP_REPO:-}" ]] || echo "WARNING: IDP_REPO is not set: the IDP SDK will not be packaged, so reserve and save will answer IDP_UNAVAILABLE."
+else
+  echo "Note: IDP_STACK_NAME is empty: the job-number workflow (reserve / save) will answer IDP_UNAVAILABLE."
+fi
+[[ -z "${IDP_REPO:-}" ]] || export IDP_REPO
+
 sam build ${profile_args[@]+"${profile_args[@]}"}
 
 # Every value is double-quoted so commas (list parameters) and other characters are kept literally.
@@ -254,6 +264,11 @@ overrides=(
   "$(q DefaultOrdType "${SYTELINE_DEFAULT_ORDTYPE:-}")"
   "$(q LiveWrites "$live")"
   "$(q CreateApiEndpoint "$api_endpoint_option")"
+  # always passed (empty clears a value an earlier deployment set: sam keeps old values for parameters it is not given)
+  "$(q IdpStackName "${IDP_STACK_NAME:-}")"
+  "$(q IdpRegion "${IDP_REGION:-}")"
+  "$(q IdpOutputBucketName "${IDP_OUTPUT_BUCKET:-}")"
+  "$(q IdpTrackingTableName "${IDP_TRACKING_TABLE:-}")"
 )
 [[ -z "${API_VPCE_ID:-}" ]] || overrides+=("$(q ApiVpcEndpointId "$API_VPCE_ID")")
 

@@ -32,3 +32,15 @@ def caller_identity(event):
             parts[5] = "/".join(pieces[:2])
             return ":".join(parts)
     return arn
+
+
+DOCUMENT_STATUS = {"DOCUMENT_NOT_FOUND": 404, "DOCUMENT_NOT_READY": 409, "DOCUMENT_INCOMPLETE": 422,
+                   "DOCUMENT_NEEDS_REVIEW": 422, "DOCUMENT_CHANGED": 422, "TOO_MANY_LINES": 422,
+                   "IDP_UNAVAILABLE": 502}
+
+
+def document_refusal(exc):
+    """The HTTP response for a refusal raised while reading the IDP document (nothing was reserved or written)."""
+    body = {"errors": [exc.err]}
+    body.update(exc.extra)  # state / fields
+    return response(DOCUMENT_STATUS.get(exc.err["code"], 502), body)

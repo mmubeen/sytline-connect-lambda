@@ -72,12 +72,69 @@ def test_no_new_network_resource_and_worker_stays_serialized(template):
     assert props(template, "WorkerFunction")["EventInvokeConfig"]["MaximumRetryAttempts"] == 0
 
 
-def test_save_intake_is_like_the_order_intake_and_the_worker_serves_both(template):
+def test_save_intake_reads_idp_so_it_is_in_the_plant_network_and_hands_the_save_to_the_worker(template):
     assert ("/job-reservations/{id}/save", "post") in api_routes(template)
     p, upload = props(template, "SaveIntakeFunction"), props(template, "IntakeFunction")
     assert p["Handler"] == "handlers.save_intake.handler" and p["Timeout"] == upload["Timeout"]
-    assert p["Environment"] == upload["Environment"] and p["Policies"] == upload["Policies"]
-    assert "VpcConfig" not in p  # records and hands over only; the worker (in the VPC) writes to the ERP
+    assert p["Environment"]["Variables"]["WORKER_FUNCTION_NAME"] == {"Ref": "WorkerFunction"}
+    assert {"DynamoDBCrudPolicy", "LambdaInvokePolicy"} <= set(policy_names(template, "SaveIntakeFunction"))
+    for mode in (CREATE, SUPPLY):  # it now reads the IDP document, so it needs the same network as the worker
+        e = Evaluator(template, **mode)
+        assert e.resolve(p["VpcConfig"]) == e.resolve(props(template, "WorkerFunction")["VpcConfig"])
+
+
+IDP_FUNCTIONS = ("ReserveFunction", "SaveIntakeFunction", "WorkerFunction")
+
+
+def test_the_functions_that_read_idp_get_its_settings_and_read_only_permissions(template):
+    for fn in IDP_FUNCTIONS:
+        env = props(template, fn)["Environment"]["Variables"]
+        assert env["IDP_STACK_NAME"] == {"Ref": "IdpStackName"} and env["IDP_REGION"] == {"Ref": "IdpRegion"}
+        cond = [x for x in props(template, fn)["Policies"] if "Fn::If" in x]
+        assert len(cond) == 1 and cond[0]["Fn::If"][0] == "HasIdp" and cond[0]["Fn::If"][2] == {"Ref": "AWS::NoValue"}
+        actions = {a for st in cond[0]["Fn::If"][1]["Statement"] for a in
+                   (st["Action"] if isinstance(st["Action"], list) else [st["Action"]])}
+        assert actions == {"cloudformation:DescribeStacks", "cloudformation:DescribeStackResource",
+                           "cloudformation:DescribeStackResources", "cloudformation:ListStackResources",
+                           "s3:GetObject", "dynamodb:GetItem", "dynamodb:Query", "dynamodb:BatchGetItem"}  # read only
+    assert "IDP_STACK_NAME" not in props(template, "ReservationStatusFunction").get("Environment", {}).get(
+        "Variables", {})  # the status view never reads IDP
+
+
+def test_idp_parameters_are_optional_and_all_or_nothing(template):
+    for name in ("IdpStackName", "IdpRegion", "IdpOutputBucketName", "IdpTrackingTableName"):
+        assert template["Parameters"][name]["Default"] == ""
+    rule = template["Rules"]["IdpAllOrNothing"]
+    assert "Supply all three" in rule["Assertions"][0]["AssertDescription"]
+    e = Evaluator(template, **SUPPLY)
+    assert e.condition("HasIdp") is False
+    assert Evaluator(template, **dict(SUPPLY, IdpStackName="idp")).condition("HasIdp") is True
+
+
+def test_every_function_has_a_makefile_build_target():
+    """`sam build` fails for a function built with the makefile method when the Makefile has no target for it."""
+    import os
+    import re
+
+    from cfn_template import load_template
+
+    template = load_template()
+    makefile = open(os.path.join(os.path.dirname(__file__), "..", "..", "scr", "Makefile")).read()
+    listed = set(re.search(r"^FUNCTIONS\s*=((?:.*\\\n)*.*)$", makefile, re.M).group(1).replace("\\", " ").split())
+    functions = {n for n, r in template["Resources"].items() if r["Type"] == "AWS::Serverless::Function"
+                 and (r.get("Metadata") or {}).get("BuildMethod") == "makefile"}
+    assert functions <= listed, f"no Makefile target for {sorted(functions - listed)}"
+
+
+def test_the_idp_sdk_is_packaged_from_a_checkout_never_installed_by_name():
+    import os
+
+    scr = os.path.join(os.path.dirname(__file__), "..", "..", "scr")
+    makefile = open(os.path.join(scr, "Makefile")).read()
+    assert "IDP_REPO" in makefile and "idp_sdk" in makefile and "idp_common" in makefile
+    for f in ("requirements.txt", "requirements-idp.txt"):  # the squatted PyPI name must never be requested
+        lines = [l.split("#")[0].strip().lower() for l in open(os.path.join(scr, f))]
+        assert not [l for l in lines if l.replace("_", "-").startswith(("idp-common", "idp-sdk"))]
 
 
 def test_reservation_status_is_read_only_like_the_upload_status(template):

@@ -5,7 +5,7 @@ from syteline import reservations as rs
 from syteline.jobs import RefConflict
 from syteline.reservations import ReservationStore
 
-REQ = {"request_ref": "r1", "po_number": "PO-1", "line_count": 2}
+REQ = {"request_ref": "r1", "document_id": "b/PO-1.pdf", "line_count": 2}
 
 
 def mk(clock=None):
@@ -21,7 +21,7 @@ def test_create_is_atomic_and_starts_reserving():
     s = mk()
     r, dup = new(s)
     assert dup is False and r["state"] == rs.RESERVING and r["job_numbers"] == []
-    assert s.get(r["reservation_id"])["po_number"] == "PO-1"
+    assert s.get(r["reservation_id"])["document_id"] == "b/PO-1.pdf"
     assert "RESREF#r1" in s._t.items and "ttl" not in r
 
 
@@ -49,17 +49,20 @@ def test_numbers_are_recorded_as_obtained_only_while_reserving():
 def test_accept_save_works_once():
     s = mk()
     rid = new(s)[0]["reservation_id"]
-    assert s.accept_save(rid, "sh", {"x": 1}) is False  # still reserving
+    assert s.accept_save(rid, {"document_id": "b/PO-1.pdf", "warehouse": "W"}) is False  # still reserving
     s.mark_reserved(rid)
-    assert s.accept_save(rid, "sh", {"x": 1}) is True
-    assert s.accept_save(rid, "sh", {"x": 1}) is False
-    assert s.get(rid)["state"] == rs.SAVE_ACCEPTED and s.get(rid)["save"]["request"] == {"x": 1}
+    assert s.accept_save(rid, {"document_id": "b/PO-1.pdf", "warehouse": "W"}) is True
+    assert s.accept_save(rid, {"document_id": "b/PO-1.pdf", "warehouse": "W"}) is False
+    got = s.get(rid)
+    assert got["state"] == rs.SAVE_ACCEPTED and got["save"]["document_id"] == "b/PO-1.pdf"
+    assert got["save"]["warehouse"] == "W" and "requested_at" in got["save"]
+    assert got["document_id"] == "b/PO-1.pdf"
 
 
 def ready(s):
     rid = new(s)[0]["reservation_id"]
     s.mark_reserved(rid)
-    s.accept_save(rid, "sh", {})
+    s.accept_save(rid, {"document_id": "d"})
     return rid
 
 
@@ -80,7 +83,7 @@ def test_terminal_states_set_ttl_and_needs_reconciliation_is_final():
     assert got["erp_records"]["possibly_written"] == [{"kind": "co", "key": "100"}]
     for move in (lambda: s.finish_saved(rid, []), lambda: s.fail_save(rid, "c", "m", "s"),
                  lambda: s.finish_partly_saved(rid, "c", "m", "s", []), lambda: s.claim(rid),
-                 lambda: s.mark_failed(rid, "c", "m", "s"), lambda: s.accept_save(rid, "h", {})):
+                 lambda: s.mark_failed(rid, "c", "m", "s"), lambda: s.accept_save(rid, {"document_id": "d"})):
         assert move() is False
     assert s.get(rid)["state"] == rs.NEEDS_RECONCILIATION
 
@@ -89,7 +92,7 @@ def test_failed_reservation_cannot_be_saved():
     s = mk()
     rid = new(s)[0]["reservation_id"]
     assert s.mark_failed(rid, "ERP_REJECTED", "m", "number_co")
-    assert s.mark_reserved(rid) is False and s.accept_save(rid, "h", {}) is False
+    assert s.mark_reserved(rid) is False and s.accept_save(rid, {"document_id": "d"}) is False
     assert s.get(rid)["failure"]["code"] == "ERP_REJECTED"
 
 
@@ -119,7 +122,7 @@ def test_sweeper_lists_only_the_matching_state_and_age():
 
 # ---- numbers_report: what became of each reserved number ------------------------------------
 def reserved_item(s, n=2, ref="r9"):
-    rid = s.create_reservation({"request_ref": ref, "po_number": "P", "line_count": n}, "h", "f", "u", "a")[0]["reservation_id"]
+    rid = s.create_reservation({"request_ref": ref, "document_id": "d", "line_count": n}, "h", "f", "u", "a")[0]["reservation_id"]
     s.set_co_num(rid, "100")
     s.add_job_number(rid, [{"line": i, "job": str(5000 + i - 1)} for i in range(1, n + 1)])
     return rid
@@ -134,7 +137,7 @@ def test_numbers_are_reserved_until_saved_and_then_used():
     rid = reserved_item(s)
     s.mark_reserved(rid)
     assert usage(s.get(rid)) == ["reserved", "reserved"]
-    s.accept_save(rid, "h", {})
+    s.accept_save(rid, {"document_id": "d"})
     s.claim(rid)
     assert usage(s.get(rid)) == ["reserved", "reserved"]
     s.finish_saved(rid, [{"line": 1, "status": "saved"}, {"line": 2, "status": "saved"}])
@@ -153,12 +156,12 @@ def test_a_failed_reservation_reports_every_number_consumed_unused():
 def test_partly_saved_and_needs_reconciliation_report_per_line():
     s = mk()
     a = reserved_item(s, ref="a")
-    s.mark_reserved(a); s.accept_save(a, "h", {}); s.claim(a)
+    s.mark_reserved(a); s.accept_save(a, {"document_id": "d"}); s.claim(a)
     s.finish_partly_saved(a, "ERP_REJECTED", "m", "create_line_2", [
         {"line": 1, "status": "saved"}, {"line": 2, "status": "failed"}])
     assert usage(s.get(a)) == ["used", "consumed_unused"]
     b = reserved_item(s, ref="b")
-    s.mark_reserved(b); s.accept_save(b, "h", {}); s.claim(b)
+    s.mark_reserved(b); s.accept_save(b, {"document_id": "d"}); s.claim(b)
     s.park(b, "UNCERTAIN_OUTCOME", "m", "create_job_2", [], [{"line": 1, "status": "saved"},
                                                            {"line": 2, "status": "unverified"}])
     assert usage(s.get(b)) == ["used", "unverified"]
@@ -179,3 +182,20 @@ def test_decimals_from_the_table_are_handled():
     item = {"state": "reserved", "updated_at": Decimal(1000), "co_num": "100",
             "job_numbers": [{"line": Decimal(1), "job": "5000"}]}
     assert rs.numbers_report(item, 1000)["jobs"] == [{"line": 1, "job": "5000", "usage": "reserved"}]
+
+
+def test_release_claim_returns_a_run_that_wrote_nothing_to_save_accepted():
+    s = mk()
+    rid = ready(s)
+    assert s.release_claim(rid) is False  # not saving yet
+    s.claim(rid)
+    assert s.release_claim(rid) is True and s.get(rid)["state"] == rs.SAVE_ACCEPTED
+    assert s.claim(rid) is True and s.get(rid)["attempts"] == 2
+
+
+def test_no_po_details_are_ever_stored():
+    s = mk()
+    rid = ready(s)
+    text = repr(s._t.items)
+    for detail in ("ACME", "'PO-1'", "po_number", "lines", "quantity"):
+        assert detail not in text

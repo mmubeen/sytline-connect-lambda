@@ -1,6 +1,6 @@
 # Saving order data to SyteLine: how the workflow works
 
-This describes exactly what happens when order information is saved to the ERP using reserved numbers (stage 2 of the job-number workflow). For the reserve step and the states, see [RESERVATIONS.md](RESERVATIONS.md). The code is `scr/syteline/savewf.py` (the steps), `scr/handlers/save_intake.py` (accepting the request) and `scr/handlers/worker.py` (running it).
+This describes exactly what happens when order information is saved to the ERP using reserved numbers (stage 2 of the job-number workflow). For the reserve step and the states, see [RESERVATIONS.md](RESERVATIONS.md). The code is `scr/syteline/savewf.py` (the steps), `scr/handlers/save_intake.py` (accepting the request), `scr/handlers/worker.py` (running it) and `scr/syteline/idp.py` (reading the PO details from the IDP document).
 
 > **Status of the field names.** The SyteLine property names and the update call below are best guesses until the read-only discovery task has run on the plant network (`scr/syteline/idos.py`, `SoapIdoClient.update`). Do not enable live writes before then.
 
@@ -31,21 +31,23 @@ Saving is asynchronous. The request returns `202` as soon as it is recorded; the
 
 | Problem | Status / code |
 |---|---|
-| Body invalid (missing `confirmed: true`, `uploaded_by`, `po_number`, customer name, lines; bad quantity, UOM, dates, prices; more than 25 lines) | `400 VALIDATION` (all problems listed together) |
+| Body invalid (missing `confirmed: true`, `uploaded_by`, `document_id`; bad dates; `customer`, `po_number` or `lines` sent, which are refused because they come from the document) | `400 VALIDATION` (all problems listed together) |
 | No such reservation | `404 NOT_FOUND` |
 | Made by a different caller (same role with another session is fine) or a different `uploaded_by` | `403 RESERVATION_FORBIDDEN` |
 | Still being reserved, or the reservation failed | `409 RESERVATION_NOT_READY` |
 | Already saved, or a save is already queued, running or finished | `409 RESERVATION_USED` |
-| Customer, PO number or number of lines differ from the reservation (case and spacing are ignored) | `422 RESERVATION_MISMATCH` |
+| `document_id` differs from the reserved document | `422 RESERVATION_MISMATCH` |
+| The IDP document cannot be used now: not found, not finished, a needed field missing, needed fields below their confidence threshold, more than 25 lines, or IDP unreachable | `404/409/422/502` with `DOCUMENT_NOT_FOUND`, `DOCUMENT_NOT_READY`, `DOCUMENT_INCOMPLETE`, `DOCUMENT_NEEDS_REVIEW`, `TOO_MANY_LINES`, `IDP_UNAVAILABLE` |
+| The document's customer, PO number or number of lines differ from the reservation (case and spacing are ignored) | `422 DOCUMENT_CHANGED` |
 | The save request could not be recorded | `503 STORE_UNAVAILABLE` (the reservation stays usable) |
 
-Otherwise the reservation moves from `reserved` to `save_accepted` in one conditional step (this is what makes it single-use), the worker is started, and the caller gets `202`. The customer is **not** taken from the request: it is the customer matched when the numbers were reserved.
+Otherwise the reservation moves from `reserved` to `save_accepted` in one conditional step (this is what makes it single-use), the worker is started, and the caller gets `202`. The customer is **not** taken from the request or the document at write time: it is the customer matched when the numbers were reserved. Nothing from the document is stored; the request records only the document ID and the optional order date, received date, warehouse and order type.
 
 If the worker cannot be started, the reservation stays `save_accepted` and a scheduled sweeper starts it after about two minutes. Nothing can have been written at that point, so this is safe.
 
 ## 2. What the worker writes, in order
 
-The worker claims the reservation (`save_accepted` to `saving`; a second claim is refused, so a save never runs twice). It then does the following. It **never obtains a new number**; the CO and job numbers come from the reservation.
+The worker claims the reservation (`save_accepted` to `saving`; a second claim is refused, so a save never runs twice). It then **reads the PO details from the IDP document again** (so it writes what the document says now, for example a quantity corrected in review) and checks that its customer, PO number and line count still match the reservation: if the document is no longer usable or no longer matches, the reservation ends `failed` with nothing written (an IDP source that is merely unavailable puts the save back to `save_accepted`; the sweeper retries it, up to 5 attempts). It then does the following. It **never obtains a new number**; the CO and job numbers come from the reservation.
 
 | # | Step | What is written | If it fails |
 |---|---|---|---|
@@ -90,17 +92,12 @@ Rules that always hold:
 
 ## 4. Calling it
 
-Request (the reservation id is in the path; `customer`, `po_number` and the number of `lines` must match the reservation):
+Request (the reservation id is in the path; `document_id` must be the one the numbers were reserved for; the other fields are optional and not PO data):
 
 ```json
 POST /job-reservations/6f1c.../save
-{"confirmed": true, "uploaded_by": "jdoe",
- "customer": {"name": "ACME AEROSPACE", "address1": "1 MAIN ST", "city": "PHOENIX", "state": "AZ", "postal_code": "85001"},
- "po_number": "PO-77812", "order_date": "2026-10-20", "received_date": "2026-10-19",
- "lines": [
-   {"item": "ABC-100", "quantity": 5, "uom": "EA", "due_date": "2026-11-01", "price": 12.5,
-    "teardown": "2026-10-25", "engine_sn": "E123", "serial_num": "S456", "packing": "BOX"},
-   {"item": "XYZ-200", "quantity": 1, "uom": "EA"}]}
+{"confirmed": true, "uploaded_by": "jdoe", "document_id": "batch-20261021/PO-77812.pdf",
+ "order_date": "2026-10-20", "received_date": "2026-10-19", "warehouse": "MAIN", "order_type": "J"}
 ```
 
 Immediate answer: `202 {"reservation_id": "6f1c...", "state": "save_accepted"}`.
@@ -108,7 +105,7 @@ Immediate answer: `202 {"reservation_id": "6f1c...", "state": "save_accepted"}`.
 Poll `GET /job-reservations/6f1c...` until the state is final (`saved`, `partly_saved`, `failed` or `needs_reconciliation`):
 
 ```json
-{"reservation_id": "6f1c...", "state": "saved", "co_num": "100",
+{"reservation_id": "6f1c...", "document_id": "batch-20261021/PO-77812.pdf", "state": "saved", "co_num": "100",
  "jobs": [{"line": 1, "job": "5000", "usage": "used"}, {"line": 2, "job": "5001", "usage": "used"}],
  "lines": [
    {"line": 1, "job": "5000", "co_line": 1, "item": "ABC-100", "status": "saved", "warnings": []},
@@ -123,6 +120,7 @@ A warning looks like `"teardown date not set: <ERP text>"`. Every request and th
 |---|---|---|
 | Numbers | obtained inside the upload, after the order is accepted | reserved first and returned to the caller, then used by the save |
 | Teardown date | part of the CO line insert | separate update; a rejection is only a warning |
+| PO details | sent by the caller and stored with the order | read from the IDP document; never sent, never stored |
 | Extra fields | none | PO number and received date on the header; engine serial, serial number, packing on the job |
 | Link check | line and job rows exist | also that the line references its job and the job points back |
 | Failure outcomes | `failed` or `needs_reconciliation` | adds `partly_saved` |
@@ -134,7 +132,9 @@ Both use the same ERP safety rules, the same single worker and the same jobs tab
 | Symptom | Likely cause |
 |---|---|
 | `409 RESERVATION_USED` on a first attempt | a save was already accepted (a retry that crossed with the first request); poll the status instead |
-| `422 RESERVATION_MISMATCH` | the PO details differ from what was reserved; reserve again for the changed PO |
+| `422 DOCUMENT_CHANGED` | the document's customer, PO number or line count changed after reserving; reserve again for the changed document |
+| `422 DOCUMENT_NEEDS_REVIEW` / `409 DOCUMENT_NOT_READY` | fields are below their confidence threshold or the document is still in review; finish the review in IDP and try again |
+| `failed` with `IDP_UNAVAILABLE` after several attempts | the IDP source could not be read; check its network path and permissions, then reserve again |
 | Stays `save_accepted` for more than a few minutes | the worker could not start; the sweeper retries every 5 minutes; check the worker's logs |
 | `failed` with `LIVE_WRITES_DISABLED` | live writes are off for the deployment |
 | `needs_reconciliation` with `STALE_RUNNING` | the worker stopped mid-run; check SyteLine for the rows in `possibly_written` |

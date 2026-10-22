@@ -2,8 +2,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from fakes import FakeJobsTable, FakeSoap
-from syteline import errors, reservations as rs
+from fakes import FakeIdp, FakeJobsTable, FakeSoap, po_fields
+from syteline import errors, idp, reservations as rs
+from syteline.errors import IntegrationError
 from syteline.jobs import RefConflict
 from syteline.reservations import ReservationStore
 from syteline.reserve import run_reserve
@@ -11,9 +12,18 @@ from syteline.reserve import run_reserve
 CUST = [{"cust_num": "C1", "cust_seq": 0, "name": "ACME"}]
 
 
-def req(n=3, ref="r1", **kw):
-    r = {"request_ref": ref, "confirmed": True, "uploaded_by": "jdoe", "customer": {"name": "ACME"},
-         "po_number": "PO-1", "line_count": n}
+DOC = "batch-1/PO-1.pdf"
+
+
+@pytest.fixture(autouse=True)
+def fake_idp(monkeypatch):
+    f = FakeIdp().add(DOC, po_fields(3))
+    monkeypatch.setattr(idp, "_client_factory", lambda: f)
+    return f
+
+
+def req(ref="r1", doc=DOC, **kw):
+    r = {"request_ref": ref, "confirmed": True, "uploaded_by": "jdoe", "document_id": doc}
     r.update(kw)
     return r
 
@@ -27,6 +37,7 @@ def go(r=None, soap=None, store=None, **kw):
 def test_numbers_come_back_in_line_order_and_nothing_else_is_written(live_writes):
     out, soap, store = go()
     item = out["reservation"]
+    assert item["document_id"] == DOC and item["line_count"] == 3 and "po_number" not in item
     assert out["duplicate"] is False and "failure" not in out and item["state"] == rs.RESERVED
     assert item["co_num"] == "100"
     assert item["job_numbers"] == [{"line": 1, "job": "5000"}, {"line": 2, "job": "5001"}, {"line": 3, "job": "5002"}]
@@ -60,10 +71,11 @@ def test_same_request_ref_and_payload_returns_the_same_numbers_without_allocatin
     assert len(soap.writes()) == before
 
 
-def test_same_request_ref_with_a_different_request_conflicts(live_writes):
+def test_same_request_ref_with_a_different_request_conflicts(live_writes, fake_idp):
     _, soap, store = go()
+    fake_idp.add("batch-1/OTHER.pdf", po_fields(3))
     with pytest.raises(RefConflict):
-        go(req(po_number="PO-2"), soap=soap, store=store)
+        go(req(doc="batch-1/OTHER.pdf"), soap=soap, store=store)
 
 
 def test_erp_failure_midway_reports_the_numbers_already_obtained_as_consumed(live_writes):
@@ -104,10 +116,41 @@ def test_twenty_concurrent_reservations_never_share_a_number(live_writes):
     store = ReservationStore(FakeJobsTable(), clock=lambda: 1000)
 
     def one(i):
-        return run_reserve(req(n=2, ref=f"ref-{i}"), soap, store, "arn")["reservation"]
+        return run_reserve(req(ref=f"ref-{i}"), soap, store, "arn")["reservation"]
 
     with ThreadPoolExecutor(20) as pool:
         items = list(pool.map(one, range(20)))
     cos = [i["co_num"] for i in items]
     jobs = [j["job"] for i in items for j in i["job_numbers"]]
-    assert len(set(cos)) == 20 and len(jobs) == 40 and len(set(jobs)) == 40
+    assert len(set(cos)) == 20 and len(jobs) == 60 and len(set(jobs)) == 60
+
+
+# ---- the PO details come from the IDP document, never from the caller or our table ---------------
+def test_the_reserved_line_count_and_customer_come_from_the_document(live_writes, fake_idp):
+    fake_idp.add(DOC, po_fields(2, customer_name="ACME"))
+    out, soap, _ = go()
+    assert [j["line"] for j in out["reservation"]["job_numbers"]] == [1, 2]
+    assert soap.calls.count(("invoke", "NextWOSp")) == 2
+
+
+@pytest.mark.parametrize("setup,code", [
+    (lambda f: f.add(DOC, po_fields(3), status="HITL_IN_PROGRESS"), errors.DOCUMENT_NOT_READY),
+    (lambda f: f.add(DOC, {"lines": []}), errors.DOCUMENT_INCOMPLETE),
+    (lambda f: f.add(DOC, po_fields(3), low={"cust_po"}), errors.DOCUMENT_NEEDS_REVIEW),
+    (lambda f: f.add(DOC, po_fields(26)), errors.TOO_MANY_LINES),
+    (lambda f: f.docs.pop(DOC), errors.DOCUMENT_NOT_FOUND),
+    (lambda f: f.raise_for.update({DOC: RuntimeError("down")}), errors.IDP_UNAVAILABLE)])
+def test_an_unusable_document_reserves_nothing_and_records_nothing(live_writes, fake_idp, setup, code):
+    setup(fake_idp)
+    soap, store = FakeSoap(customers=CUST), ReservationStore(FakeJobsTable(), clock=lambda: 1000)
+    with pytest.raises(IntegrationError) as ei:
+        run_reserve(req(), soap, store, "arn")
+    assert ei.value.err["code"] == code
+    assert soap.calls == [] and store._t.items == {}  # not even the customer lookup, no reservation item
+
+
+def test_reserved_items_hold_no_po_details(live_writes):
+    out, _, store = go()
+    text = repr(store._t.items)
+    for detail in ("ACME", "'PO-1'", "po_number", "quantity", "part_number", "lines", "'A'"):  # (the matched ERP customer number is not PO data)
+        assert detail not in text

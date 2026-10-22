@@ -1,0 +1,10 @@
+# Runtime dependencies of the IDP SDK (idp_sdk) and the part of idp_common it imports, pinned to the versions the
+# SDK was checked against (a loose range made pip's resolver spin for many minutes). boto3 comes with the Lambda runtime.
+# The SDK and idp_common themselves are copied from the IDP accelerator checkout (see Makefile, IDP_REPO), never installed by name.
+pydantic==2.14.1
+jsonschema==4.26.0
+deepdiff==9.1.0
+PyYAML==6.0.3
+click==8.5.0
+rich==15.0.0
+anyio==4.15.1

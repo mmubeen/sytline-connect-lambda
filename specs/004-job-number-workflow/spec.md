@@ -14,6 +14,15 @@ In the PO OCR demo program, a job number is never looked up: SyteLine's own numb
 
 Feature 001 already saves a confirmed order in one step and obtains its numbers inside that step. This feature adds a **two-stage workflow** built on the demo's flow: the caller first gets the job number(s) from the ERP, sees them, and then saves the order information using those numbers. The existing one-step upload is unchanged.
 
+## Clarifications
+
+### Session 2026-10-21 (document source)
+
+- Q: Where do the customer, PO number and lines come from? → A: From the document's inference result in the IDP (intelligent document processing) solution, fetched through the IDP SDK by **document ID**. The caller sends the document ID, not the PO details, and the PO details are **not stored** in the reservation record (only the document ID, a fingerprint and the per-line outcomes).
+- Q: Which results may be saved? → A: The document must have finished processing. If every field the save uses meets its confidence threshold, the inference result is used as it is. If any such field is below its threshold, the result is used only once a person has reviewed it; until then reserving and saving are refused.
+- Q: Does the document ID go to reserve, to save, or both? → A: Both. Reserve fetches the result, resolves the customer and binds the document (customer, PO number, line count) to the reservation; save names the same document, fetches the result again and refuses it if it no longer matches.
+- Pending: the IDP document class and the field names for customer, PO number and line items are to be supplied; until they are, the mapping is configurable and its names are unconfirmed.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Get job numbers from the ERP (Priority: P1)
@@ -96,6 +105,8 @@ The caller can ask for the state of a reservation and its save at any time: rese
 
 ### Functional Requirements
 
+*Revision 2026-10-21 (document source): FR-018 to FR-022 change where the PO details come from; FR-001, FR-003, FR-004 and FR-009 read "the PO details obtained from the document" wherever they say "the PO" or "the supplied details", and reserve and save requests carry a document ID instead of customer, PO number and line details.*
+
 - **FR-001**: The system MUST offer a **reserve** step that, for a confirmed PO, resolves the customer and obtains from the ERP one customer order number and one job number per PO line, using the ERP's own numbering so that numbers never collide with other users or requests.
 - **FR-002**: The reserve step MUST return the CO number and the job numbers in line order, each tied to its line, and MUST NOT create any order, line or job record.
 - **FR-003**: The reserve step MUST resolve the customer from the PO's identifying details against ERP customer data and MUST refuse, before reserving any number, when there is no match, more than one match, or a match that is not confident enough.
@@ -114,12 +125,19 @@ The caller can ask for the state of a reservation and its save at any time: rese
 - **FR-016**: The system MUST accept only requests from approved cloud identities, MUST require an identifier of who confirmed the PO, and MUST record every reserve and save (identifiers, outcome, duration) so what reached the ERP can be traced.
 - **FR-017**: The existing one-step order upload, notes and connectivity actions MUST keep working unchanged.
 
+- **FR-018**: The reserve and save requests MUST identify the PO by an IDP **document ID**. The system MUST obtain the customer details, PO number and lines from that document's inference result through the IDP SDK; callers MUST NOT supply them.
+- **FR-019**: The system MUST refuse to reserve or save, writing nothing, when the document does not exist, has not finished processing, is missing a field the save needs, or has a needed field below its confidence threshold that has not been reviewed. The refusal MUST name the document state or the fields concerned.
+- **FR-020**: Reserve MUST bind the document to the reservation (document ID and a fingerprint of the customer, PO number and line count). Save MUST name the same document, obtain its result again, and refuse, writing nothing, if the document or its result no longer matches what was reserved.
+- **FR-021**: The system MUST NOT store the PO details (customer, PO number, lines) in its own records; it MUST store only the document ID, the fingerprint, the reserved numbers and the per-line results.
+- **FR-022**: An unavailable or failing IDP source MUST be reported clearly and MUST NOT cause any number to be reserved or any record to be written.
+
 ### Key Entities
 
 - **Reservation**: The set of numbers obtained from the ERP for one PO: one CO number and one job number per line, tied to the PO, the caller and the time. It has a state (reserved, saving, saved, partly saved, failed, needs reconciliation) and can be used for one save.
 - **Job Number**: The ERP's work order number for one CO line, reserved before the line and job are saved and used as the link between them.
 - **Line Result**: For one PO line: job number, CO line number, item, saved or failed, and any warning (such as the teardown date).
-- **PO Details**: The confirmed purchase order data supplied by the caller: customer details, PO number, received date and the lines (item, quantity, serial and engine details, packing).
+- **Document Result**: The inference result of one IDP document (its status, extracted fields and per-field confidence), identified by the document ID. It is the only source of the PO details.
+- **PO Details**: The purchase order data taken from the document result: customer details, PO number, received date and the lines (item, quantity, serial and engine details, packing).
 - **Customer Match**: The result of resolving the PO's customer details to exactly one ERP customer.
 
 ## Success Criteria *(mandatory)*
@@ -138,7 +156,8 @@ The caller can ask for the state of a reservation and its save at any time: rese
 
 - "Get the job number from ERP" means reserving the next free job number from the ERP, as the demo does, not looking up an existing job. Looking up the job number of an already-saved order is out of scope.
 - The save step follows the demo's order and field mapping (CO header, CO line carrying the job number, teardown date, job record) and uses this project's existing rules: ERP access through the web service only, confirmed-only requests, per-request safety states, no automatic delete or retry.
-- The caller supplies the same confirmed PO details for the save as for the reservation; the system does not store the full PO between the two steps beyond what it needs to check they match.
+- The caller supplies only the document ID (and who is confirming); the PO details come from the IDP result, and the system keeps only what it needs to check that the save is for the document that was reserved.
+- A result that meets its confidence thresholds is trusted as it is; below a threshold it needs a person's review in the IDP solution first. How "reviewed" is recognised is to be confirmed against the IDP solution; until then a below-threshold field is refused.
 - Reserved numbers do not expire, because the ERP never reclaims them; unused numbers are accounted for, not recycled.
 - The demo's last step, filing a copy of the scanned PO in a job folder on a network share, is out of scope: this service has no access to that share. The caller can do it using the returned job numbers.
 - The demo's reporting by customer number and per-line tracker are covered by the per-line results and status request, not by a separate audit file.

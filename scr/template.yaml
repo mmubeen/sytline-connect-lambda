@@ -98,6 +98,29 @@ Parameters:
     AllowedValues: ["false", "true"]
     Description: Use FIPS AWS service endpoints (GovCloud)
 
+  # --- Job-number workflow (reserve / save): where the PO details are read from (an IDP accelerator stack) ---
+  IdpStackName:
+    Type: String
+    Default: ""
+    Description: >-
+      Name of the IDP accelerator CloudFormation stack the PO details are read from (through the IDP SDK) by the
+      job-number workflow. Empty = not configured: reserve and save then answer IDP_UNAVAILABLE. The functions need a
+      private path to S3 and CloudFormation from the plant network (endpoints or NAT); this stack creates neither.
+  IdpRegion:
+    Type: String
+    Default: ""
+    Description: Region of the IDP stack (empty = this stack's region).
+  IdpOutputBucketName:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    Description: The IDP stack's output bucket (the functions may read it); required with IdpStackName.
+  IdpTrackingTableName:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^[A-Za-z0-9_.-]{3,255}$'
+    Description: The IDP stack's document tracking table (the functions may read it); required with IdpStackName.
+
 # cfn-lint warns (W1030) that the empty defaults do not match the CIDR patterns; empty is intentional
 # ("not supplied"), so that one check is ignored.
 Metadata:
@@ -148,7 +171,22 @@ Rules:
       - Assert: !Equals [!Ref ApiVpcEndpointId, ""]
         AssertDescription: CreateApiEndpoint=true cannot be combined with an existing ApiVpcEndpointId.
 
+  IdpAllOrNothing:
+    RuleCondition: !Or
+      - !Not [!Equals [!Ref IdpStackName, ""]]
+      - !Not [!Equals [!Ref IdpOutputBucketName, ""]]
+      - !Not [!Equals [!Ref IdpTrackingTableName, ""]]
+    Assertions:
+      - Assert: !And
+          - !Not [!Equals [!Ref IdpStackName, ""]]
+          - !Not [!Equals [!Ref IdpOutputBucketName, ""]]
+          - !Not [!Equals [!Ref IdpTrackingTableName, ""]]
+        AssertDescription: Supply all three of IdpStackName, IdpOutputBucketName and IdpTrackingTableName, or none of them.
+
 Conditions:
+  # the job-number workflow can read its PO details (all three IDP identifiers supplied; the Rule refuses a partial set)
+  HasIdp: !Not [!Equals [!Ref IdpStackName, ""]]
+  IdpRegionGiven: !Not [!Equals [!Ref IdpRegion, ""]]
   # true only when none of the four network identifiers is supplied
   CreateNetwork: !And
     - !Equals [!Ref WorkerVpcId, ""]
@@ -462,6 +500,8 @@ Resources:
           SYTELINE_CONFIG: !Ref SytelineConfig
           SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
           SYTELINE_LIVE_WRITES: !Ref LiveWrites
+          IDP_STACK_NAME: !Ref IdpStackName
+          IDP_REGION: !Ref IdpRegion
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref JobsTable
@@ -469,6 +509,30 @@ Resources:
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
               Resource: !Ref SytelineSecretArn
+        - !If
+          - HasIdp
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:ListStackResources
+                Resource: !Sub
+                  - arn:${AWS::Partition}:cloudformation:${IdpRegionName}:${AWS::AccountId}:stack/${IdpStackName}*/*
+                  - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${IdpOutputBucketName}/*
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:BatchGetItem
+                Resource: !Sub
+                  - arn:${AWS::Partition}:dynamodb:${IdpRegionName}:${AWS::AccountId}:table/${IdpTrackingTableName}
+                  - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
+          - !Ref AWS::NoValue
       Events:
         Post:
           Type: Api
@@ -484,14 +548,43 @@ Resources:
     Properties:
       Handler: handlers.save_intake.handler
       Timeout: 15
+      VpcConfig:
+        SecurityGroupIds: !If [CreateNetwork, [!Ref FunctionSecurityGroup], !Split [",", !Ref WorkerSecurityGroupIds]]
+        SubnetIds: !If [CreateNetwork, [!Ref HostSubnetA, !Ref HostSubnetB], !Split [",", !Ref WorkerSubnetIds]]
       Environment:
         Variables:
           WORKER_FUNCTION_NAME: !Ref WorkerFunction
+          IDP_STACK_NAME: !Ref IdpStackName
+          IDP_REGION: !Ref IdpRegion
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref JobsTable
         - LambdaInvokePolicy:
             FunctionName: !Ref WorkerFunction
+        - !If
+          - HasIdp
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:ListStackResources
+                Resource: !Sub
+                  - arn:${AWS::Partition}:cloudformation:${IdpRegionName}:${AWS::AccountId}:stack/${IdpStackName}*/*
+                  - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${IdpOutputBucketName}/*
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:BatchGetItem
+                Resource: !Sub
+                  - arn:${AWS::Partition}:dynamodb:${IdpRegionName}:${AWS::AccountId}:table/${IdpTrackingTableName}
+                  - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
+          - !Ref AWS::NoValue
       Events:
         Post:
           Type: Api
@@ -540,6 +633,8 @@ Resources:
           SYTELINE_DEFAULT_WHSE: !Ref DefaultWhse
           SYTELINE_DEFAULT_ORDTYPE: !Ref DefaultOrdType
           SYTELINE_LIVE_WRITES: !Ref LiveWrites
+          IDP_STACK_NAME: !Ref IdpStackName
+          IDP_REGION: !Ref IdpRegion
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref JobsTable
@@ -547,6 +642,30 @@ Resources:
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
               Resource: !Ref SytelineSecretArn
+        - !If
+          - HasIdp
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:ListStackResources
+                Resource: !Sub
+                  - arn:${AWS::Partition}:cloudformation:${IdpRegionName}:${AWS::AccountId}:stack/${IdpStackName}*/*
+                  - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${IdpOutputBucketName}/*
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:BatchGetItem
+                Resource: !Sub
+                  - arn:${AWS::Partition}:dynamodb:${IdpRegionName}:${AWS::AccountId}:table/${IdpTrackingTableName}
+                  - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
+          - !Ref AWS::NoValue
 
   SweeperFunction:
     Type: AWS::Serverless::Function

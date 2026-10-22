@@ -1,6 +1,6 @@
 """Stage 1 of the job-number workflow: reserve one CO number and one job number per PO line.
 
-Order (research.md R5): record the reservation -> resolve the customer (read) -> live-writes gate ->
+Order (research.md R5, R12): read the IDP document (the PO details) -> record the reservation -> resolve the customer (read) -> live-writes gate ->
 NextCoSp -> NextWOSp per line (each number recorded as soon as it is obtained). Nothing is ever inserted:
 a CO header, line or job row is written only by the save stage. A number obtained is consumed even if a later
 step fails (SyteLine's own behavior), so failures report the numbers already obtained as consumed and unused.
@@ -8,7 +8,7 @@ step fails (SyteLine's own behavior), so failures report the numbers already obt
 
 import logging
 
-from . import config, errors, idos, resolver, validation
+from . import config, errors, idos, idp, resolver, validation
 from .errors import ErpError, ErpRejected, IntegrationError, LiveWritesDisabled
 from .pipeline import MIN_REMAINING_MS
 
@@ -20,16 +20,21 @@ class _Stop(Exception):
         self.code, self.message, self.step = code, message, step
 
 
-def run_reserve(request, soap, store, caller_identity, remaining_ms=None):
+def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source=None):
     """Return {"duplicate", "reservation", "failure"?, "consumed_unused"?}.
 
-    Raises jobs.RefConflict (same request_ref, different request) and whatever the store raises when the
-    reservation cannot be recorded at all (nothing was reserved in that case).
+    The PO details come from the IDP document `request["document_id"]` (`source`, default `idp.po_details`), never
+    from the caller. Raises IntegrationError when the document cannot be used (nothing is recorded or reserved),
+    jobs.RefConflict (same request_ref, different request) and whatever the store raises when the reservation
+    cannot be recorded at all (nothing was reserved in that case).
     """
     remaining_ms = remaining_ms or (lambda: 10 ** 9)
-    fp = validation.fingerprint(request["customer"], request["po_number"], request["line_count"])
+    doc = (source or idp.po_details)(request["document_id"])
+    details = doc["details"]
+    stored = {"request_ref": request["request_ref"], "document_id": request["document_id"],
+              "line_count": len(details["lines"])}
     reservation, duplicate = store.create_reservation(
-        request, validation.payload_hash(request), fp, request["uploaded_by"], caller_identity)
+        stored, validation.payload_hash(request), doc["fingerprint"], request["uploaded_by"], caller_identity)
     if duplicate:
         return {"duplicate": True, "reservation": reservation}
     rid = reservation["reservation_id"]
@@ -60,7 +65,7 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None):
     try:
         step = "resolve_customer"
         try:
-            customer = resolver.resolve_customer(soap, request["customer"])
+            customer = resolver.resolve_customer(soap, details["customer"])
         except IntegrationError as exc:
             raise _Stop(exc.err["code"], exc.err["message"], step)
         except ErpError as exc:
@@ -75,7 +80,7 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None):
         consumed.append({"kind": "co", "number": co_num})
         record(store.set_co_num, rid, co_num)
         jobs = []
-        for i in range(1, request["line_count"] + 1):
+        for i in range(1, len(details["lines"]) + 1):
             job = allocate(idos.next_job(), "job", f"number_job_{i}")
             consumed.append({"kind": "job", "line": i, "number": job})
             jobs.append({"line": i, "job": job})

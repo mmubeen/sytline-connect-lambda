@@ -50,3 +50,32 @@
 
 ## R11. Sweeper
 **Decision**: the sweeper re-drives `save_accepted` reservations older than 120 s (no write can have happened yet) and parks `saving` reservations older than the worker timeout plus 30 s as `needs_reconciliation` (`STALE_RUNNING`), exactly like uploads. `reserved` items never expire; unused ones are reported by the status request.
+
+
+## Revision 2026-10-21: document source (R12 to R17)
+
+## R12. Where the PO details come from
+**Decision**: the IDP solution's inference result, read with the IDP SDK (`IDPClient(stack_name, region).document.get_metadata(document_id, section_id=1)`: `fields`, `document_class`, `confidence`; `document.get_status(document_id)`: processing state; `assessment.get_confidence(document_id)`: per-field `confidence`, `confidence_threshold`, `meets_threshold`). The document ID is the S3 key `batch-id/filename`. Reserve and save both take it; neither accepts customer, PO number or lines. The reservation item no longer stores the save request or the PO number, only `document_id`, the line count, the fingerprint and the results.
+**Rationale**: the data already exists in the IDP stack; sending and storing a copy duplicates it and lets the two drift apart (FR-018, FR-021).
+**Note**: the SDK's `get_metadata` reads the section's `result.json` from the IDP output bucket (and resolves the stack's resources through CloudFormation), not our table.
+
+## R13. When a result may be used
+**Decision**: three checks, in order, before anything is reserved or written (FR-019): (1) the document exists and `get_status` says it finished (`COMPLETED`; `HITL_IN_PROGRESS` and the rest are refused with the state named); (2) every field the save needs is present in the mapped result; (3) every needed field meets its threshold (`assessment.get_confidence`); a field below its threshold is refused as `DOCUMENT_NEEDS_REVIEW` naming the fields, until review is recognised (below).
+**OPEN, to verify against the IDP solution**: how a human-reviewed result is recognised through the SDK. The SDK exposes no review operation; the HITL doc says the final review resolution updates tracking and re-triggers downstream steps, and a document waiting for review has state `HITL_IN_PROGRESS`. The plan assumes: `COMPLETED` after review means reviewed, and `get_metadata`/`get_confidence` then return the corrected values. If a reviewed field still reports `meets_threshold = false`, the rule needs a different signal (a review flag in the tracking record); do not enable live writes until checked.
+
+## R14. Field mapping
+**Decision**: a mapping table in one place (`scr/syteline/idp_fields.py`, names UNCONFIRMED like `idos.py`): the expected document class, the path of each header field (customer name, address lines, city, state, postal code, PO number, received date, order date) and of the line list with each line's item, quantity, unit of measure, due date, price, teardown, engine serial, serial number and packing. Paths are dotted names into `fields`; list items use the list's own key. The mapper normalises values (strings trimmed, quantity and price to numbers, dates to YYYY-MM-DD) and reports every missing or unreadable required field together.
+**Pending**: the class and field names from the owner of the IDP configuration.
+
+## R15. No PO data in our table, and no drift between reserve and save
+**Decision**: reserve fetches and maps the result, resolves the customer, and stores `document_id`, the fingerprint and the resolved customer match. Save intake fetches and maps again and compares fingerprints; the worker fetches a third time when it runs and compares again, then writes. A difference at either point refuses the save (`DOCUMENT_CHANGED`) before any write; at the worker it ends `failed` with nothing written. The fetched details live only in memory.
+**Rationale**: FR-020 and FR-021. The worker is the only thing that writes, so it must use the current result, and a re-review between reserve and save is caught.
+**Alternatives**: freeze a copy at reserve (stores PO data, the thing to avoid).
+
+## R16. Running the SDK inside the Lambda
+**Decision**: package `idp_sdk` with the functions that need it, behind one thin wrapper (`scr/syteline/idp.py`, `IdpSource`) that the rest of the code and the tests use, so the SDK is imported in one place only. Configuration: `IDP_STACK_NAME`, `IDP_REGION`. Permissions the SDK's calls need: read the IDP output bucket, read the IDP tracking table, describe the IDP stack (to find the buckets); across accounts, a role the functions assume.
+**Risks**: (a) `idp_sdk` requires `idp_common`, which is large; the Lambda layer limit may force a trimmed install. Fallback: read `<document_id>/sections/1/result.json` and the tracking record directly with boto3, the same layout the SDK uses, behind the same `IdpSource` interface. (b) The functions run in the plant-routed VPC: they need a private path to S3 (gateway endpoint), DynamoDB (already there) and CloudFormation (interface endpoint), or a NAT route. (c) GovCloud region and partition must match the IDP stack's.
+**Decided (T047)**: package the SDK. Measured: `idp_sdk` imports cleanly with only boto3, pydantic, jsonschema, deepdiff, PyYAML, click, rich and anyio installed (about 75 MB with boto3, which the Lambda runtime already provides); the two first-party packages are copied from a local checkout of the IDP accelerator (`IDP_REPO` in `scr/Makefile`) because `idp-common` on public PyPI belongs to someone else. No direct-read fallback is needed.
+
+## R17. Failures
+**Decision**: IDP errors map to refusals before any ERP work: `DOCUMENT_NOT_FOUND` (SDK `IDPResourceNotFoundError`), `DOCUMENT_NOT_READY` (state named), `DOCUMENT_INCOMPLETE` (missing fields named), `DOCUMENT_NEEDS_REVIEW` (low-confidence fields named), `DOCUMENT_CHANGED` (save only), `IDP_UNAVAILABLE` (any other SDK or network failure, FR-022). None reserves a number or writes a record.

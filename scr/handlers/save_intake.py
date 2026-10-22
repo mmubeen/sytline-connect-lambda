@@ -1,13 +1,20 @@
-"""POST /job-reservations/{id}/save: accept the PO details, start the save with the reserved numbers."""
+"""POST /job-reservations/{id}/save: name the IDP document, start the save with the reserved numbers.
+
+The PO details are read from the document (here to check it is still the reserved PO, and again by the worker when it
+writes); they are never stored.
+"""
 
 import json
 import time
 
-from syteline import errors, validation
+from syteline import errors, idp, validation
 from syteline.config import worker_function_name
+from syteline.errors import IntegrationError
 from syteline.reservations import RESERVED, SAVE_ACCEPTED, ReservationStore
 
-from ._common import caller_identity, log_event, response
+from ._common import caller_identity, document_refusal, log_event, response
+
+SAVE_PARAMS = ("document_id", "order_date", "received_date", "warehouse", "order_type")  # nothing that is PO data
 
 # Overridable factories (tests inject fakes).
 _store_factory = None
@@ -70,14 +77,24 @@ def handler(event, context):
     if refusal:
         log_event("save_intake", started, outcome="409", reservation_id=rid, state=item["state"])
         return response(409, refusal)
-    if validation.fingerprint(body["customer"], body["po_number"], len(body["lines"])) != item["fingerprint"]:
+    if body["document_id"] != item["document_id"]:
         log_event("save_intake", started, outcome="422", reservation_id=rid)
         return response(422, {"errors": [errors.error(
-            errors.RESERVATION_MISMATCH,
-            "the customer, PO number or number of lines differ from the reservation")]})
+            errors.RESERVATION_MISMATCH, "document_id differs from the document the reservation was made for")]})
+    try:
+        doc = idp.po_details(body["document_id"])
+    except IntegrationError as exc:  # the document cannot be used now: nothing was recorded or written
+        log_event("save_intake", started, outcome=str(document_refusal(exc)["statusCode"]), code=exc.err["code"],
+                  reservation_id=rid, document_id=body["document_id"])
+        return document_refusal(exc)
+    if doc["fingerprint"] != item["fingerprint"]:
+        log_event("save_intake", started, outcome="422", reservation_id=rid, code=errors.DOCUMENT_CHANGED)
+        return response(422, {"errors": [errors.error(
+            errors.DOCUMENT_CHANGED, "the document no longer matches the reservation (customer, PO number or number "
+            "of lines changed); reserve again for the changed document", step="document")]})
 
     try:
-        accepted = store.accept_save(rid, validation.payload_hash(body), body)
+        accepted = store.accept_save(rid, {k: body[k] for k in SAVE_PARAMS if k in body})
     except Exception:
         # nothing was recorded, so the reservation is still usable
         log_event("save_intake", started, outcome="503", reservation_id=rid)

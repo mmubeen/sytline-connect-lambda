@@ -223,3 +223,69 @@ class FakeLambda:
             raise RuntimeError("invoke failed")
         self.invocations.append((FunctionName, InvocationType, Payload))
         return {"StatusCode": 202}
+
+
+class FakeIdp:
+    """Stands in for idp_sdk.IDPClient: the document / assessment surface that syteline.idp uses.
+
+    add(document_id, fields, status="COMPLETED", document_class=None, low=(...)) registers a document; `low` lists
+    result names (top-level names or full paths) whose assessed confidence is below its threshold.
+    raise_for: {document_id: exception} makes any read of that document raise it; `calls` records every read.
+    """
+
+    class _Obj:
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    def __init__(self):
+        self.docs = {}
+        self.raise_for = {}
+        self.calls = []
+        self.document = self
+        self.assessment = self
+
+    def add(self, document_id, fields, status="COMPLETED", document_class=None, low=()):
+        self.docs[document_id] = {"fields": fields, "status": status, "class": document_class, "low": set(low)}
+        return self
+
+    def update(self, document_id, **changes):
+        self.docs[document_id].update(changes)
+
+    def _doc(self, document_id, op):
+        self.calls.append((op, document_id))
+        if document_id in self.raise_for:
+            raise self.raise_for[document_id]
+        if document_id not in self.docs:
+            err = type("IDPResourceNotFoundError", (Exception,), {})
+            raise err(f"Results not found for document: {document_id}")
+        return self.docs[document_id]
+
+    # document.*
+    def get_status(self, document_id, **kw):
+        d = self._doc(document_id, "status")
+        return self._Obj(document_id=document_id, status=self._Obj(value=d["status"]))
+
+    def get_metadata(self, document_id, section_id=1, **kw):
+        d = self._doc(document_id, "metadata")
+        return self._Obj(document_id=document_id, document_class=d["class"], fields=d["fields"], confidence=None)
+
+    # assessment.*
+    def get_confidence(self, document_id, section_id=1, **kw):
+        d = self._doc(document_id, "confidence")
+        attrs = {}
+        for name in set(_flat_names(d["fields"])) | d["low"]:
+            attrs[name] = self._Obj(confidence=0.4 if name in d["low"] else 0.97,
+                                    meets_threshold=name not in d["low"])
+        return self._Obj(document_id=document_id, section_id=section_id, attributes=attrs)
+
+
+def _flat_names(fields):
+    return [k for k in fields]
+
+
+def po_fields(n=2, **over):
+    """An IDP result `fields` dict in the default (UNCONFIRMED) mapping of syteline.idp_fields."""
+    f = {"customer_name": "ACME", "cust_po": "PO-1",
+         "lines": [{"part_number": chr(ord("A") + i), "quantity": i + 1, "uom": "EA"} for i in range(n)]}
+    f.update(over)
+    return f
