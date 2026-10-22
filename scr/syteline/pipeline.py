@@ -20,7 +20,7 @@ written to SLCos / CCT_Coitems / CCTJobs and the way the teardown value is store
 
 import logging
 
-from . import config, errors, idos, resolver
+from . import config, errors, idos, numbers, resolver
 from .errors import (ErpError, ErpRejected, ErpUncertain, ErpUnreachable, IntegrationError, LiveWritesDisabled)
 from .validation import today
 
@@ -50,6 +50,7 @@ class Upload:
         self.customer = None
         self.co_num = None
         self.lines = []  # [{"line","job"}]
+        self.numbers = numbers.NumberSource(soap, cfg)
 
     # -- outcome builders ----------------------------------------------------------------
     def _failed(self, code, message, step):
@@ -72,21 +73,23 @@ class Upload:
                         else self._failed(errors.TIME_BUDGET_EXHAUSTED, msg, step))
 
     # -- steps ---------------------------------------------------------------------------
-    def _allocate(self, method, kind, step):
-        """Allocate a CO/job number by calling SyteLine's routine through the web service."""
+    def _allocate(self, operation, kind, step):
+        """Reserve a CO/job number ("next_co" / "next_job") through the operation's route: the web service, or the
+        database when no endpoint is configured (syteline.routes, numbers.NumberSource)."""
         self._time(step)
+        out_fn = self._park if self.possibly else self._failed  # a number may be consumed, but no row exists unless earlier rows were written
         try:
-            out = self.soap.invoke(method[0], method[1], [])
+            key = self.numbers.next(operation)
         except LiveWritesDisabled:
             raise _Stop(self._failed(errors.LIVE_WRITES_DISABLED, "live ERP writes are disabled", step))
+        except IntegrationError as exc:  # DATABASE_NOT_CONFIGURED: refused before any connection
+            raise _Stop(out_fn(exc.err["code"], exc.err["message"], step))
+        except ErpUncertain as exc:  # the number may or may not be consumed; never retried
+            raise _Stop(out_fn(errors.UNCERTAIN_OUTCOME, f"{kind} number allocation, outcome unknown: {exc}", step))
         except ErpError as exc:
-            # a number may have been consumed but no ERP row exists unless earlier rows were written
             code = errors.ERP_REJECTED if isinstance(exc, ErpRejected) else errors.ERP_UNREACHABLE
-            out_fn = self._park if self.possibly else self._failed
             raise _Stop(out_fn(code, f"{kind} number allocation failed: {exc}", step))
-        key = str(out[0]).strip() if out else ""
         if not key:
-            out_fn = self._park if self.possibly else self._failed
             raise _Stop(out_fn(errors.ERP_REJECTED, f"{kind} number allocation returned no number", step))
         return key
 
@@ -170,7 +173,7 @@ class Upload:
                 raise _Stop(self._failed(errors.LIVE_WRITES_DISABLED,
                                          "live ERP writes are disabled; nothing was written", "live_writes_check"))
 
-            self.co_num = self._allocate(idos.next_co(), "CO", "number_co")
+            self.co_num = self._allocate("next_co", "CO", "number_co")
             self._insert(CO_IDO, {
                 "CoNum": self.co_num, "CustNum": self.customer["cust_num"], "CustSeq": self.customer["cust_seq"],
                 "OrderDate": req.get("order_date") or today(), "Stat": "O",
@@ -179,7 +182,7 @@ class Upload:
             whse = req.get("warehouse") or self.cfg.get("SYTELINE_DEFAULT_WHSE", "")
             ordtype = req.get("order_type") or self.cfg.get("SYTELINE_DEFAULT_ORDTYPE", "")
             for i, ln in enumerate(req["lines"], start=1):
-                job = self._allocate(idos.next_job(), "job", f"number_job_{i}")
+                job = self._allocate("next_job", "job", f"number_job_{i}")
                 vals = {"CoNum": self.co_num, "CoLine": i, "Item": ln["item"], "UM": ln["uom"],
                         "QtyOrdered": ln["quantity"]}
                 for src, dst in (("due_date", "DueDate"), ("price", "Price"), ("teardown", "Teardown")):
@@ -197,6 +200,8 @@ class Upload:
                     "customer_match": self.customer}
         except _Stop as stop:
             return stop.outcome
+        finally:
+            self.numbers.close()  # the database connection (if the numbers came from the database) ends with the upload
 
 
 def run_upload(request, soap, cfg, remaining_ms=None, on_progress=None):
