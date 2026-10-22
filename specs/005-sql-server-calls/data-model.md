@@ -8,8 +8,8 @@ Nothing new is stored: the database is read (and, for numbering, driven through 
 | Reserve the CO number | `SYTELINE_NEXT_CO_IDO` | the IDO that exposes `NextCoSp` | `database` or empty | legacy default name |
 | Reserve job numbers | `SYTELINE_NEXT_JOB_IDO` | the IDO that exposes `NextWOSp` | `database` or empty | legacy default name |
 | Find the customer | `SYTELINE_CUSTOMER_IDO` | the customer collection | `database` or empty | legacy default name |
-| Read customer defaults | `SYTELINE_DEFAULTS_IDO` | the order collection | `database` or empty | legacy: database |
-`routes.route(operation)` returns `("webservice", name)` or `("database", None)`; it reads only the settings above (FR-012). The template always sets all four (default `database`).
+| Read customer defaults | `SYTELINE_DEFAULTS_IDO` | the order collection | `database` or empty | **off**: no defaults are read |
+`routes.route(operation)` returns `("webservice", name)`, `("database", None)` or, for an unset `defaults` setting only, `("off", None)`; it reads only the settings above (FR-012). The template always sets all four (default `database`).
 
 ## Database Connection Settings (in the ERP credentials secret)
 | Key | Meaning | Rule |

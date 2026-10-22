@@ -95,7 +95,7 @@ def test_the_direct_handler_does_not_import_the_order_service():
     """The direct handler must not pull in the job store, order handlers, worker or sweeper (US2)."""
     code = ("import sys; sys.path.insert(0, %r); import lambda_function; "
             "bad=[m for m in sys.modules if m.startswith('handlers') or m in ('syteline.jobs','syteline.pipeline',"
-            "'syteline.resolver')]; print(','.join(bad))" % os.path.join(ROOT, "scr"))
+            "'syteline.resolver')]; print(','.join(bad))" % os.path.join(ROOT, "src"))
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env={"PATH": os.environ["PATH"]})
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "", f"direct handler imports order-service modules: {out.stdout}"

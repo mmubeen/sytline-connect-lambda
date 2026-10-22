@@ -124,7 +124,7 @@ def test_sweeper_leaves_needs_reconciliation_alone(env):
 
 # ---- job-number workflow: the save run (feature 004, PO details read from the IDP document) ------
 from fakes import FakeIdp, po_fields  # noqa: E402
-from syteline import idp, validation  # noqa: E402
+from syteline import idos, idp, validation  # noqa: E402
 
 DOC = "batch-1/PO-1.pdf"
 FP = validation.fingerprint({"name": "ACME"}, "PO-1", 2)
@@ -298,3 +298,13 @@ def test_sweeper_leaves_finished_reservations_alone(renv, live_writes):
     out = sweeper.handler({}, None)
     assert out == {"redriven": [], "parked": []} and lam.invocations == []
     assert rstore.get(parked)["state"] == "needs_reconciliation"
+
+
+def test_the_save_worker_stores_the_order_level_warnings(renv, live_writes, monkeypatch):
+    rstore, soap, _, _ = renv
+    monkeypatch.setenv(idos.DEFAULTS_SETTING, "database")  # no database settings in the worker's config: a warning only
+    rid = accepted(rstore)
+    assert worker.handler({"reservation_id": rid}, None) == {"state": "saved"}
+    item = rstore.get(rid)
+    assert item["state"] == "saved" and len(item["warnings"]) == 1
+    assert item["warnings"][0].startswith("customer defaults not available:")

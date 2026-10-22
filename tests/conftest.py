@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scr"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, os.path.dirname(__file__))
 
 
@@ -34,4 +34,4 @@ def standalone_template():
 
     from cfn_template import load_template
 
-    return load_template(os.path.join(os.path.dirname(__file__), "..", "scr", "template-standalone.yaml"))
+    return load_template(os.path.join(os.path.dirname(__file__), "..", "src", "template-standalone.yaml"))

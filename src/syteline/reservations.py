@@ -137,22 +137,26 @@ class ReservationStore:
         return self._transition(reservation_id, SAVING, SAVING, {
             "erp_records": {"possibly_written": possibly_written}, "results": results or []})
 
-    def finish_saved(self, reservation_id, results):
-        return self._transition(reservation_id, SAVING, SAVED, {"results": results})
+    def finish_saved(self, reservation_id, results, warnings=None):
+        return self._transition(reservation_id, SAVING, SAVED, {"results": results, "warnings": list(warnings or [])})
 
-    def finish_partly_saved(self, reservation_id, code, message, step, results):
+    def finish_partly_saved(self, reservation_id, code, message, step, results, warnings=None):
         return self._transition(reservation_id, SAVING, PARTLY_SAVED, {
-            "failure": {"code": code, "message": message, "step": step}, "results": results})
+            "failure": {"code": code, "message": message, "step": step}, "results": results,
+            "warnings": list(warnings or [])})
 
-    def park(self, reservation_id, code, message, step, possibly_written, results=None, expected=SAVING):
+    def park(self, reservation_id, code, message, step, possibly_written, results=None, expected=SAVING,
+             warnings=None):
         return self._transition(reservation_id, expected, NEEDS_RECONCILIATION, {
             "failure": {"code": code, "message": message, "step": step},
-            "erp_records": {"possibly_written": possibly_written}, "results": results or []})
+            "erp_records": {"possibly_written": possibly_written}, "results": results or [],
+            "warnings": list(warnings or [])})
 
-    def fail_save(self, reservation_id, code, message, step, results=None):
+    def fail_save(self, reservation_id, code, message, step, results=None, warnings=None):
         """A save that ended before anything was written."""
         return self._transition(reservation_id, SAVING, FAILED, {
-            "failure": {"code": code, "message": message, "step": step}, "results": results or []})
+            "failure": {"code": code, "message": message, "step": step}, "results": results or [],
+            "warnings": list(warnings or [])})
 
     # -- sweeper queries -----------------------------------------------------------------
     def _scan_state(self, state, older_than_seconds):

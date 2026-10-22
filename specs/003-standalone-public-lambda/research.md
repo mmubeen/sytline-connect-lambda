@@ -3,7 +3,7 @@
 A prototype of the new template was validated before planning (`cfn-lint`, `sam validate --lint`, `sam build` with the existing `Makefile`, and the existing rules evaluator): it builds with no VPC configuration, the rules are kept in the built template, and the parameter and rule logic behaves as described in R3. Outside the repository.
 
 ## R1 — Packaging and independence (FR-001, FR-003, SC-005)
-- **Decision**: A second SAM template, `scr/template-standalone.yaml`, deployed as its own stack (`sytline-connect-standalone`) with its own layer (`sytline-connect-standalone-deps`). It shares `scr/` as `CodeUri`/`ContentUri` and the existing `Makefile`.
+- **Decision**: A second SAM template, `src/template-standalone.yaml`, deployed as its own stack (`sytline-connect-standalone`) with its own layer (`sytline-connect-standalone-deps`). It shares `src/` as `CodeUri`/`ContentUri` and the existing `Makefile`.
 - **Rationale**: Resource logical IDs `DepsLayer` and `DirectFunction` are the same in both templates, so the Makefile's `build-DepsLayer` and `build-DirectFunction` targets build both. A separate stack deploys, updates and is deleted without touching the VPC deployment.
 - **Alternatives**: a conditional section inside the existing template (would still carry network parameters and rules and risk regressions in the VPC stack); a copied repository (duplicates code).
 

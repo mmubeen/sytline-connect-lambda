@@ -8,7 +8,7 @@
 
 **Revision 2026-10-21:** the stand-alone version can now optionally be **attached to an existing VPC, subnets and security group** (all three, or none; clarified in spec.md). Still direct-invoke only, no API gateway/URL/public address, and no network resources created. See "Attached mode" in research.md (R9–R11).
 
-Add a second, independent SAM deployment of the direct-invoke Lambda (connectivity check including the dry run, `add_note`, `get_notes`) that by default runs **outside any VPC** with Lambda's default public networking. It is a separate template (`scr/template-standalone.yaml`) and stack, reuses the existing application code and the same `Makefile` build, has **no network parameters or resources, no public web address and no function URL or API** (callable only with IAM-authorized cloud credentials), and refuses to talk to an `http://` ERP address unless the deployer explicitly switches on a plain-HTTP override. The HTTPS rule is enforced twice: at deployment (CloudFormation parameter patterns and rules) and at run time (a small guard in the application, switched on only in this deployment, so the VPC version keeps working over the plant's HTTP). `deploy.sh` gains a `--standalone` mode with its own settings file. See [research.md](research.md).
+Add a second, independent SAM deployment of the direct-invoke Lambda (connectivity check including the dry run, `add_note`, `get_notes`) that by default runs **outside any VPC** with Lambda's default public networking. It is a separate template (`src/template-standalone.yaml`) and stack, reuses the existing application code and the same `Makefile` build, has **no network parameters or resources, no public web address and no function URL or API** (callable only with IAM-authorized cloud credentials), and refuses to talk to an `http://` ERP address unless the deployer explicitly switches on a plain-HTTP override. The HTTPS rule is enforced twice: at deployment (CloudFormation parameter patterns and rules) and at run time (a small guard in the application, switched on only in this deployment, so the VPC version keeps working over the plant's HTTP). `deploy.sh` gains a `--standalone` mode with its own settings file. See [research.md](research.md).
 
 ## Technical Context
 
@@ -52,7 +52,7 @@ specs/003-standalone-public-lambda/
 ### Source Code (repository root)
 
 ```text
-scr/
+src/
 ├── template-standalone.yaml        # NEW: layer + direct function, no VPC, no network parameters, no public address
 ├── samconfig.toml                  # + [standalone.*] config environment (stack, template, region)
 ├── deploy.sh                       # + --standalone mode (own settings file, HTTPS/override handling, rejects network settings)
@@ -73,7 +73,7 @@ tests/unit/
 README.md, docs/DEPLOYMENT.md       # pointers
 ```
 
-**Structure Decision**: A second template file next to the first, sharing `scr/` as the code root and the existing `Makefile` (the logical IDs `DepsLayer` and `DirectFunction` are the same in both templates, so `make` targets are reused). Separate stack and layer names avoid collisions. The HTTPS rule needs run-time code, so it is a small guard driven by environment variables that only this template sets.
+**Structure Decision**: A second template file next to the first, sharing `src/` as the code root and the existing `Makefile` (the logical IDs `DepsLayer` and `DirectFunction` are the same in both templates, so `make` targets are reused). Separate stack and layer names avoid collisions. The HTTPS rule needs run-time code, so it is a small guard driven by environment variables that only this template sets.
 
 ## Complexity Tracking
 

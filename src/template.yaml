@@ -98,6 +98,26 @@ Parameters:
     AllowedValues: ["false", "true"]
     Description: Use FIPS AWS service endpoints (GovCloud)
 
+  # --- Which route each ERP operation uses: an IDO name keeps it on the web service; `database` (or empty) uses the
+  #     SyteLine database (the PO OCR demo's SQL calls). The database login lives in the ERP credentials secret. ---
+  NextCoIdo:
+    Type: String
+    Default: database
+    Description: >-
+      IDO that exposes NextCoSp (the web service reserves the CO number) or `database` (the database's NextCoSp is run).
+  NextJobIdo:
+    Type: String
+    Default: database
+    Description: IDO that exposes NextWOSp (the web service reserves job numbers) or `database`.
+  CustomerIdo:
+    Type: String
+    Default: database
+    Description: Customer-address collection the web service searches, or `database` (the demo's customer search and scoring).
+  DefaultsIdo:
+    Type: String
+    Default: database
+    Description: Order collection the web service reads the customer's terms and ship-via from, or `database`.
+
   # --- Job-number workflow (reserve / save): where the PO details are read from (an IDP accelerator stack) ---
   IdpStackName:
     Type: String
@@ -318,6 +338,40 @@ Resources:
       CidrIp: !Ref PlantCidr3
       Description: SyteLine web service (HTTP), third plant range
 
+  # TCP 1433 to the plant range(s) for the database calls (only used by operations whose route is `database`)
+  EgressPlantSql1:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: CreateNetwork
+    Properties:
+      GroupId: !GetAtt FunctionSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 1433
+      ToPort: 1433
+      CidrIp: !Ref PlantCidr1
+      Description: SyteLine database (SQL Server)
+
+  EgressPlantSql2:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: HasPlantCidr2
+    Properties:
+      GroupId: !GetAtt FunctionSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 1433
+      ToPort: 1433
+      CidrIp: !Ref PlantCidr2
+      Description: SyteLine database (SQL Server), second plant range
+
+  EgressPlantSql3:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: HasPlantCidr3
+    Properties:
+      GroupId: !GetAtt FunctionSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 1433
+      ToPort: 1433
+      CidrIp: !Ref PlantCidr3
+      Description: SyteLine database (SQL Server), third plant range
+
   EgressHostRange:
     Type: AWS::EC2::SecurityGroupEgress
     Condition: CreateNetwork
@@ -500,6 +554,10 @@ Resources:
           SYTELINE_CONFIG: !Ref SytelineConfig
           SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
           SYTELINE_LIVE_WRITES: !Ref LiveWrites
+          SYTELINE_NEXT_CO_IDO: !Ref NextCoIdo
+          SYTELINE_NEXT_JOB_IDO: !Ref NextJobIdo
+          SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo
+          SYTELINE_DEFAULTS_IDO: !Ref DefaultsIdo
           IDP_STACK_NAME: !Ref IdpStackName
           IDP_REGION: !Ref IdpRegion
       Policies:
@@ -633,6 +691,10 @@ Resources:
           SYTELINE_DEFAULT_WHSE: !Ref DefaultWhse
           SYTELINE_DEFAULT_ORDTYPE: !Ref DefaultOrdType
           SYTELINE_LIVE_WRITES: !Ref LiveWrites
+          SYTELINE_NEXT_CO_IDO: !Ref NextCoIdo
+          SYTELINE_NEXT_JOB_IDO: !Ref NextJobIdo
+          SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo
+          SYTELINE_DEFAULTS_IDO: !Ref DefaultsIdo
           IDP_STACK_NAME: !Ref IdpStackName
           IDP_REGION: !Ref IdpRegion
       Policies:
@@ -708,6 +770,10 @@ Resources:
           SYTELINE_CONFIG: !Ref SytelineConfig
           SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
           SYTELINE_LIVE_WRITES: !Ref LiveWrites
+          SYTELINE_NEXT_CO_IDO: !Ref NextCoIdo
+          SYTELINE_NEXT_JOB_IDO: !Ref NextJobIdo
+          SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo
+          SYTELINE_DEFAULTS_IDO: !Ref DefaultsIdo
       Policies:
         - Statement:
             - Effect: Allow

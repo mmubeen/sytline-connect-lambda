@@ -1,6 +1,6 @@
 # Contract: template parameters, rules, outputs and deploy script
 
-The "interface" of this feature is the SAM template (`scr/template.yaml`), its deployment script and the deployment outputs.
+The "interface" of this feature is the SAM template (`src/template.yaml`), its deployment script and the deployment outputs.
 
 ## New or changed parameters
 

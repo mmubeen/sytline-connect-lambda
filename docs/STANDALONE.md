@@ -58,14 +58,14 @@ Prerequisites: SAM CLI, AWS CLI with a GovCloud profile, a Secrets Manager secre
 region, and an ERP address reachable from the internet. See [DEPLOYMENT.md](DEPLOYMENT.md) section 2 for the tools and the secret.
 
 ```
-cd scr
+cd src
 cp deploy.standalone.env.example deploy.standalone.env     # fill in; git-ignored, holds no passwords
 ./deploy.sh --standalone --profile <govcloud-profile> --validate
 ./deploy.sh --standalone --profile <govcloud-profile> --build
 ./deploy.sh --standalone --profile <govcloud-profile>      # build + deploy, interactive change-set review
 ```
 
-`deploy.sh --standalone` uses its own stack (`sytline-connect-standalone`), template (`scr/template-standalone.yaml`), build directory
+`deploy.sh --standalone` uses its own stack (`sytline-connect-standalone`), template (`src/template-standalone.yaml`), build directory
 (`.aws-sam/standalone`) and settings file. It **refuses any network setting** (`WORKER_*`, `HOST_NETWORK_CIDR`, `PLANT_CIDR_*`,
 `DYNAMODB_PREFIX_LIST_ID`, `API_VPCE_ID`, `CREATE_API_ENDPOINT`, `CREATE_VPC_ENDPOINTS`) as not applicable; the only network settings it accepts are the three `ATTACH_*` ones.
 

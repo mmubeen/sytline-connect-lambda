@@ -8,19 +8,19 @@ step fails (SyteLine's own behavior), so failures report the numbers already obt
 
 import logging
 
-from . import config, errors, idos, idp, resolver, validation
-from .errors import ErpError, ErpRejected, IntegrationError, LiveWritesDisabled
+from . import config, errors, idp, numbers, resolver, validation
+from .errors import ErpError, ErpRejected, ErpUncertain, IntegrationError, LiveWritesDisabled
 from .pipeline import MIN_REMAINING_MS
 
 log = logging.getLogger(__name__)
 
 
 class _Stop(Exception):
-    def __init__(self, code, message, step):
-        self.code, self.message, self.step = code, message, step
+    def __init__(self, code, message, step, extra=None):
+        self.code, self.message, self.step, self.extra = code, message, step, extra or {}
 
 
-def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source=None):
+def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source=None, cfg=None):
     """Return {"duplicate", "reservation", "failure"?, "consumed_unused"?}.
 
     The PO details come from the IDP document `request["document_id"]` (`source`, default `idp.po_details`), never
@@ -40,17 +40,22 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source
     rid = reservation["reservation_id"]
     consumed = []  # numbers obtained so far, kept in memory too in case the store fails
 
-    def allocate(method, kind, step):
+    source_numbers = numbers.NumberSource(soap, cfg)  # one database connection (if any) for the whole reservation
+
+    def allocate(operation, kind, step):
         if remaining_ms() < MIN_REMAINING_MS:
             raise _Stop(errors.TIME_BUDGET_EXHAUSTED, "not enough Lambda time left to continue safely", step)
         try:
-            out = soap.invoke(method[0], method[1], [])
+            number = source_numbers.next(operation)
         except LiveWritesDisabled:
             raise _Stop(errors.LIVE_WRITES_DISABLED, "live ERP writes are disabled", step)
+        except IntegrationError as exc:  # DATABASE_NOT_CONFIGURED: refused before any connection
+            raise _Stop(exc.err["code"], exc.err["message"], step)
+        except ErpUncertain as exc:  # a number may be consumed; never retried
+            raise _Stop(errors.UNCERTAIN_OUTCOME, f"{kind} number allocation, outcome unknown: {exc}", step)
         except ErpError as exc:
             code = errors.ERP_REJECTED if isinstance(exc, ErpRejected) else errors.ERP_UNREACHABLE
             raise _Stop(code, f"{kind} number allocation failed: {exc}", step)
-        number = str(out[0]).strip() if out else ""
         if not number:
             raise _Stop(errors.ERP_REJECTED, f"{kind} number allocation returned no number", step)
         return number
@@ -65,9 +70,9 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source
     try:
         step = "resolve_customer"
         try:
-            customer = resolver.resolve_customer(soap, details["customer"])
-        except IntegrationError as exc:
-            raise _Stop(exc.err["code"], exc.err["message"], step)
+            customer = resolver.resolve_customer(soap, details["customer"], cfg)
+        except IntegrationError as exc:  # includes the candidates of a refused customer match
+            raise _Stop(exc.err["code"], exc.err["message"], step, exc.extra)
         except ErpError as exc:
             raise _Stop(errors.ERP_UNREACHABLE, str(exc), step)
         record(store.set_customer, rid, customer)
@@ -76,12 +81,12 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source
             raise _Stop(errors.LIVE_WRITES_DISABLED, "live ERP writes are disabled; no number was reserved",
                         "live_writes_check")
 
-        co_num = allocate(idos.next_co(), "CO", "number_co")
+        co_num = allocate("next_co", "CO", "number_co")
         consumed.append({"kind": "co", "number": co_num})
         record(store.set_co_num, rid, co_num)
         jobs = []
         for i in range(1, len(details["lines"]) + 1):
-            job = allocate(idos.next_job(), "job", f"number_job_{i}")
+            job = allocate("next_job", "job", f"number_job_{i}")
             consumed.append({"kind": "job", "line": i, "number": job})
             jobs.append({"line": i, "job": job})
             record(store.add_job_number, rid, list(jobs))
@@ -96,4 +101,8 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source
                "failure": {"code": stop.code, "message": stop.message, "step": stop.step}}
         if consumed:
             out["consumed_unused"] = consumed
+        if stop.extra.get("candidates"):
+            out["candidates"] = stop.extra["candidates"]
         return out
+    finally:
+        source_numbers.close()

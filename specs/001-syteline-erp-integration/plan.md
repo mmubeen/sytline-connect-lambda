@@ -51,7 +51,7 @@ specs/001-syteline-erp-integration/
 ### Source Code (repository root)
 
 ```text
-scr/
+src/
 ├── lambda_function.py        # direct-invoke dispatcher: health, add_note, get_notes
 ├── handlers/
 │   ├── intake.py             # API Gateway POST /confirmed-orders
@@ -81,7 +81,7 @@ tests/
 
 | Existing | Change |
 |---|---|
-| `scr/syteline/sql.py`, `python-tds` in `requirements.txt` | Delete |
+| `src/syteline/sql.py`, `python-tds` in `requirements.txt` | Delete |
 | `config.py`: `SYTELINE_SQL_*` settings, `sql_configured()` | Remove (keep `live_writes_enabled()`, `jobs_table()`, `worker_function_name()`) |
 | `client.py` | Add `invoke(ido, method, params)` for web-service method calls, gated by live writes (every call may write); `load` stays read-only; keep no-delete |
 | `resolver.py` (SQL `custaddr` query) | Query the customer-address collection through `client.load` using the lookup rule in research.md R5 step 1 (first-word prefix filter, capped, then normalized comparison in code); escape filter values; exactly one distinct customer |
@@ -92,7 +92,7 @@ tests/
 | `tests/fakes.py` | Remove `FakeSql`; `FakeSoap` gains `invoke` (numbers, notes) and collection queries (customers, record row pointers, notes) |
 | Tests | Rewrite `test_resolver`, `test_pipeline`, `test_uncertainty`, `test_notes` (unit + contract), `test_no_secrets`, health tests, `test_config`; delete SQL-specific tests |
 | `tests/integration/test_readonly_checks.py` | Replace the SQL port/SELECT checks with a read-only web-service query |
-| `scr/template.yaml`, `.env.example`, README, DEPLOY_PORTAL | Remove `SqlHost`/`SqlPort`/`SqlDatabase` and `SYTELINE_SQL_*`; secret holds only the ERP password; add VPC endpoints (or a documented NAT path) so the worker in private subnets can reach DynamoDB and Secrets Manager |
+| `src/template.yaml`, `.env.example`, README, DEPLOY_PORTAL | Remove `SqlHost`/`SqlPort`/`SqlDatabase` and `SYTELINE_SQL_*`; secret holds only the ERP password; add VPC endpoints (or a documented NAT path) so the worker in private subnets can reach DynamoDB and Secrets Manager |
 | Tracking ID | Rename the internal `job_id`/`JOB#` to `upload_id`/`UPLOAD#` in `jobs.py`, the handlers and tests to match the contract |
 
 ## Complexity Tracking

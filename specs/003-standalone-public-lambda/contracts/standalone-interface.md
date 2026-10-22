@@ -1,6 +1,6 @@
 # Contract: stand-alone deployment interface
 
-## Template `scr/template-standalone.yaml`
+## Template `src/template-standalone.yaml`
 
 Parameters and rules: see [data-model.md](../data-model.md). Rules (refused before anything is created):
 

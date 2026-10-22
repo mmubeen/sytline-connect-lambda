@@ -1,6 +1,6 @@
 # Contract: direct-invoke Lambda actions
 
-Direct Lambda invoke with a JSON event (`scr/lambda_function.py`). `action` defaults to `health`. Responses: `{"ok": bool, "action": str, ...}`; failures add `"errors": [{"code","message","field?","step?"}]`. Secrets never appear. Order creation is **not** here any more — see [api.md](api.md).
+Direct Lambda invoke with a JSON event (`src/lambda_function.py`). `action` defaults to `health`. Responses: `{"ok": bool, "action": str, ...}`; failures add `"errors": [{"code","message","field?","step?"}]`. Secrets never appear. Order creation is **not** here any more — see [api.md](api.md).
 
 ## health
 `{"action":"health","dry_run":false}` → `{ok, dry_run, host, config, stages[]}`. Stages: `dns, tcp, wsdl, token`. Dry run: `load, dns, tcp, wsdl`; sends no credentials and does not log in. There is no database connection of any kind (FR-018).

@@ -93,16 +93,17 @@ def save_handler(reservation_id, context, started):
 
     state = outcome["state"]
     res = outcome["results"]
+    warnings = outcome.get("warnings")
     if state == "succeeded":
-        store.finish_saved(reservation_id, res)
+        store.finish_saved(reservation_id, res, warnings)
         state = "saved"
     elif state == "partly_saved":
-        store.finish_partly_saved(reservation_id, outcome["code"], outcome["message"], outcome["step"], res)
+        store.finish_partly_saved(reservation_id, outcome["code"], outcome["message"], outcome["step"], res, warnings)
     elif state == "failed":
-        store.fail_save(reservation_id, outcome["code"], outcome["message"], outcome["step"], res)
+        store.fail_save(reservation_id, outcome["code"], outcome["message"], outcome["step"], res, warnings)
     else:
         store.park(reservation_id, outcome["code"], outcome["message"], outcome["step"],
-                   outcome.get("possibly_written", []), res)
+                   outcome.get("possibly_written", []), res, warnings=warnings)
     log_event("save", started, reservation_id=reservation_id, outcome=state, co_num=outcome.get("co_num"),
               code=outcome.get("code"), step=outcome.get("step"))
     return {"state": state}

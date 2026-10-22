@@ -243,18 +243,26 @@ class SqlServer:
         if seq.isdigit():
             try:
                 _, rows = self._read(LATEST_SAME_SHIP_TO, (cust, int(seq)))
-                if rows and (rows[0][0] or rows[0][1]):
-                    return _trim(rows[0][0]), _trim(rows[0][1]), "same_ship_to"
+                codes = _codes(rows)
+                if codes:
+                    return codes + ("same_ship_to",)
             except ErpRejected as exc:  # a failing first query falls through to the second (the demo does too)
                 log.warning("customer defaults (same ship-to) query failed: %s", exc)
         _, rows = self._read(LATEST_ANY, (cust,))
-        if rows and (rows[0][0] or rows[0][1]):
-            return _trim(rows[0][0]), _trim(rows[0][1]), "any_order"
-        return None
+        codes = _codes(rows)
+        return codes + ("any_order",) if codes else None
 
     def ping(self):
         self._read(PING)
         return True
+
+
+def _codes(rows):
+    """(terms, ship) of the first row with at least one non-blank code, else None."""
+    if not rows:
+        return None
+    terms, ship = _trim(rows[0][0]), _trim(rows[0][1])
+    return (terms, ship) if terms or ship else None
 
 
 def _trim(v):

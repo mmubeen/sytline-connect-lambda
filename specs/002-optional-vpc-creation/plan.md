@@ -6,11 +6,11 @@
 
 ## Summary
 
-Make the host-network inputs of the existing SAM stack (feature 001, `scr/template.yaml`) optional. If the deployer supplies none of them, the stack creates a private host network: one VPC with two private subnets (two availability zones), one route table with no route to the internet, security groups, a DynamoDB gateway endpoint and a Secrets Manager interface endpoint, and optionally the API-caller (`execute-api`) endpoint. If the deployer supplies all of them, nothing network-related is created and behavior is unchanged. Partial, missing or contradictory inputs are refused by CloudFormation `Rules` before anything is created. The plant connection (VPN, routes) is never created; the stack outputs what the network team needs to connect it. The approach is entirely template, deploy-script and documentation work; no Lambda code changes. See [research.md](research.md).
+Make the host-network inputs of the existing SAM stack (feature 001, `src/template.yaml`) optional. If the deployer supplies none of them, the stack creates a private host network: one VPC with two private subnets (two availability zones), one route table with no route to the internet, security groups, a DynamoDB gateway endpoint and a Secrets Manager interface endpoint, and optionally the API-caller (`execute-api`) endpoint. If the deployer supplies all of them, nothing network-related is created and behavior is unchanged. Partial, missing or contradictory inputs are refused by CloudFormation `Rules` before anything is created. The plant connection (VPN, routes) is never created; the stack outputs what the network team needs to connect it. The approach is entirely template, deploy-script and documentation work; no Lambda code changes. See [research.md](research.md).
 
 ## Technical Context
 
-**Language/Version**: AWS SAM / CloudFormation YAML (`scr/template.yaml`); bash (`scr/deploy.sh`); Python 3 for tests (existing pytest suite)
+**Language/Version**: AWS SAM / CloudFormation YAML (`src/template.yaml`); bash (`src/deploy.sh`); Python 3 for tests (existing pytest suite)
 
 **Primary Dependencies**: SAM CLI, cfn-lint (already used); no new runtime dependency
 
@@ -50,7 +50,7 @@ specs/002-optional-vpc-creation/
 ### Source Code (repository root)
 
 ```text
-scr/
+src/
 ├── template.yaml        # + optional-network parameters, Conditions, Rules, network resources, conditional outputs
 ├── deploy.sh            # + new settings, client-side checks, create/supply mode-switch guard
 ├── deploy.env.example   # + HOST_NETWORK_CIDR, PLANT_CIDR_1..3, CREATE_API_ENDPOINT, DYNAMODB_PREFIX_LIST_ID

@@ -1,19 +1,22 @@
 # Saving order data to SyteLine: how the workflow works
 
-This describes exactly what happens when order information is saved to the ERP using reserved numbers (stage 2 of the job-number workflow). For the reserve step and the states, see [RESERVATIONS.md](RESERVATIONS.md). The code is `scr/syteline/savewf.py` (the steps), `scr/handlers/save_intake.py` (accepting the request), `scr/handlers/worker.py` (running it) and `scr/syteline/idp.py` (reading the PO details from the IDP document).
+This describes exactly what happens when order information is saved to the ERP using reserved numbers (stage 2 of the job-number workflow). For the reserve step and the states, see [RESERVATIONS.md](RESERVATIONS.md). The code is `src/syteline/savewf.py` (the steps), `src/handlers/save_intake.py` (accepting the request), `src/handlers/worker.py` (running it), `src/syteline/idp.py` (reading the PO details from the IDP document) and `src/syteline/defaults.py` (the customer's terms and ship-via). Where the numbers and the customer come from (the web service, or the SyteLine database when no endpoint is configured) is in [DATABASE.md](DATABASE.md).
 
-> **Status of the field names.** The SyteLine property names and the update call below are best guesses until the read-only discovery task has run on the plant network (`scr/syteline/idos.py`, `SoapIdoClient.update`). Do not enable live writes before then.
+> **Status of the names.** The SyteLine property names and the update call below (including the header's `TermsCode` and `ShipCode`), and the database types, routines and columns that [DATABASE.md](DATABASE.md) lists, are best guesses until they have been verified read-only on the plant network (`src/syteline/idos.py`, `SoapIdoClient.update`). Do not enable live writes before then.
 
 ## At a glance
 
 ```
 caller                          API                       worker (in the plant network)            SyteLine
   |  POST /job-reservations      |                              |                                      |
-  |----------------------------->| reserve CO + job numbers ----+------------------------------------->|  (numbers only)
+  |----------------------------->| read IDP document, match the |                                      |
+  |                              | customer, reserve CO + job --+------------------------------------->|  (numbers only; web service
+  |                              | numbers (web service or db)  |                                      |   or database, see DATABASE.md)
   |<-- co_num, jobs[] -----------|                              |                                      |
   |  POST .../{id}/save          |                              |                                      |
   |----------------------------->| checks, record, 202          |                                      |
-  |<-- 202 save_accepted --------|--- invoke (async) ---------->| 1. insert CO header                 |
+  |<-- 202 save_accepted --------|--- invoke (async) ---------->| 0. read the customer's defaults      |
+  |                              |                              | 1. insert CO header (+ terms/ship)   |
   |                              |                              | 2. per line:                         |
   |                              |                              |    a. insert CO line (ref = job #)   |
   |                              |                              |    b. update teardown date           |
@@ -52,7 +55,8 @@ The worker claims the reservation (`save_accepted` to `saving`; a second claim i
 | # | Step | What is written | If it fails |
 |---|---|---|---|
 | 0 | Live-writes check | nothing | `failed` (`LIVE_WRITES_DISABLED`), nothing written |
-| 1 | **CO header** (`SLCos`) | CO number, customer number and sequence, order date (request value or today), status `O`, customer PO number (from `po_number`), received date if given | rejected and proven absent: `failed`; otherwise see "Outcomes" |
+| 0b | **Customer defaults** | nothing (a read only): the terms code and ship-via code of the customer's most recent order, from the same ship-to first, otherwise any order; through the database or the web service as configured (`DefaultsIdo`); not read at all when that setting is absent | never blocks the save: no previous order or an unreadable default leaves the header without them and adds an order-level **warning** (shown by the status view) |
+| 1 | **CO header** (`SLCos`) | CO number, customer number and sequence, order date (request value or today), status `O`, customer PO number (from the document's PO number), received date if given, and the **terms code and ship-via code** from step 0b when found | rejected and proven absent: `failed`; otherwise see "Outcomes" |
 | 2a | **CO line** (`CCT_Coitems`), per line, in order | CO number, line number, item, UOM, quantity, due date and price if given, and the job reference: type `J`, **reference number = the line's reserved job number**, suffix 0, release 0 | see "Outcomes" |
 | 2b | **Teardown date**, only if the line has `teardown` | a separate update of that CO line | a rejection is a **warning** on the line and the run goes on; any other failure stops the run as uncertain |
 | 2c | **Job** (`CCTJobs`) | job number, order type and warehouse (request value, else the deployment default), item, quantity released, CO number and line (the link back), root job = the job number, engine serial, serial number and packing if given | see "Outcomes" |
@@ -112,7 +116,7 @@ Poll `GET /job-reservations/6f1c...` until the state is final (`saved`, `partly_
    {"line": 2, "job": "5001", "co_line": 2, "item": "XYZ-200", "status": "saved", "warnings": []}]}
 ```
 
-A warning looks like `"teardown date not set: <ERP text>"`. Every request and the worker's run are logged as one structured line (type, identifiers, outcome, duration); credentials never appear in logs or responses.
+Warnings come in two kinds. A line warning looks like `"teardown date not set: <ERP text>"` (inside `lines[].warnings`). An order-level warning looks like `"customer defaults not available: no previous order for this customer"` and appears in a top-level `warnings` list on the status view (absent when empty). Every request and the worker's run are logged as one structured line (type, identifiers, outcome, duration), and each database-backed step logs its own line (type, outcome, duration, candidate count); credentials never appear in logs or responses.
 
 ## 5. How this differs from the one-step upload
 
@@ -123,6 +127,9 @@ A warning looks like `"teardown date not set: <ERP text>"`. Every request and th
 | PO details | sent by the caller and stored with the order | read from the IDP document; never sent, never stored |
 | Extra fields | none | PO number and received date on the header; engine serial, serial number, packing on the job |
 | Link check | line and job rows exist | also that the line references its job and the job points back |
+| Customer | matched in SyteLine (web service) | matched through the web service or, when no endpoint is configured, the database search with the demo's scoring; only one confident match is accepted |
+| Header terms and ship-via | none | the customer's most recent order's codes, when found (warning when not) |
+| Numbers | the web service or the database, per setting; an unknown outcome is `UNCERTAIN_OUTCOME` | the same, reserved before the save |
 | Failure outcomes | `failed` or `needs_reconciliation` | adds `partly_saved` |
 
 Both use the same ERP safety rules, the same single worker and the same jobs table; either can be used, but one PO should go through only one of them.
@@ -140,3 +147,8 @@ Both use the same ERP safety rules, the same single worker and the same jobs tab
 | `needs_reconciliation` with `STALE_RUNNING` | the worker stopped mid-run; check SyteLine for the rows in `possibly_written` |
 | `needs_reconciliation` with `READBACK_MISMATCH` | rows exist but differ from the request, or could not be read back; the line notes say what differed |
 | Warnings about the teardown date | SyteLine rejected the update; set the date by hand |
+| Order-level warning "customer defaults not available" | the customer has no earlier order, or the defaults could not be read (database or web service); the order was saved without terms and ship-via, set them in SyteLine; check [DATABASE.md](DATABASE.md) if every order shows it |
+| Reserve answers `DATABASE_NOT_CONFIGURED` (503) | an operation uses the database route and a `SQL_*` key or `SQL_CA_PEM` is missing from the secret; the message names the keys; nothing was reserved |
+| Reserve answers `CUSTOMER_AMBIGUOUS` / `CUSTOMER_LOW_CONFIDENCE` / `CUSTOMER_NOT_FOUND` (422) | the document's customer and address did not identify one confident SyteLine customer; the response lists the best candidates with scores (not found: none); correct the document in IDP and try again; nothing was reserved |
+| Reserve answers `UNCERTAIN_OUTCOME` (502) | the database connection was lost while a number was being reserved; that number may be consumed (the response lists the numbers already obtained as `consumed_unused`); it is never retried: reserve again with a new `request_ref` |
+| `ERP_UNREACHABLE` on a database step | cannot connect or log in: run `{"action":"health"}` and read `db_dns`, `db_tcp`, `db_login` (certificate, host name, login) |

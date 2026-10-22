@@ -31,6 +31,8 @@ def _view(item, now):
            "created_at": int(item["created_at"]), "updated_at": int(item["updated_at"])}
     if item.get("save"):  # a save was accepted: per-line results (empty until the run records some)
         out["lines"] = [_line(r) for r in item.get("results") or []]
+    if item.get("warnings"):  # order-level warnings from the save (for example: customer defaults not available)
+        out["warnings"] = list(item["warnings"])
     if item.get("failure"):
         out["failure"] = item["failure"]
     elif state != item["state"]:  # a reserve run that never finished

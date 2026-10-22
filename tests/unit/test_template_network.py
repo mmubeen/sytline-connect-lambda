@@ -1,4 +1,4 @@
-"""Structure of the optional host network in scr/template.yaml (plan.md, data-model.md)."""
+"""Structure of the optional host network in src/template.yaml (plan.md, data-model.md)."""
 
 import pytest
 
@@ -9,7 +9,7 @@ SUPPLY = dict(WorkerVpcId="vpc-1", WorkerSubnetIds="subnet-a,subnet-b", WorkerSe
               WorkerRouteTableIds="rtb-1", ApiVpcEndpointId="vpce-1")
 CREATED = {"HostVpc", "HostSubnetA", "HostSubnetB", "HostRouteTable", "FunctionSecurityGroup", "ApiEndpoint"}
 NETWORK_RESOURCES = {"HostVpc", "HostSubnetA", "HostSubnetB", "HostRouteTable", "RtAssocA", "RtAssocB",
-                     "FunctionSecurityGroup", "EndpointSecurityGroup", "EgressPlant2", "EgressPlant3",
+                     "FunctionSecurityGroup", "EndpointSecurityGroup", "EgressPlant2", "EgressPlant3", "EgressPlantSql1", "EgressPlantSql2", "EgressPlantSql3",
                      "EgressHostRange", "EgressDdbPrefix", "EgressDdbAny", "ApiEndpoint"}
 FORBIDDEN_TYPES = ("AWS::EC2::InternetGateway", "AWS::EC2::NatGateway", "AWS::EC2::EIP", "AWS::EC2::VPNGateway",
                    "AWS::EC2::VPNConnection", "AWS::EC2::VPCGatewayAttachment", "AWS::EC2::CustomerGateway",
@@ -64,9 +64,11 @@ def test_function_security_group_has_no_ingress_and_the_expected_egress(template
     assert "SecurityGroupIngress" not in sg
     assert not [r for r in template["Resources"].values() if r["Type"] == "AWS::EC2::SecurityGroupIngress"]
     e = ev(template, **CREATE)
-    assert egress_rules(template, e) == sorted([(80, "10.9.0.0/16"), (443, "10.50.0.0/24"), (443, "0.0.0.0/0")], key=str)
+    assert egress_rules(template, e) == sorted([(80, "10.9.0.0/16"), (1433, "10.9.0.0/16"), (443, "10.50.0.0/24"),
+                                                (443, "0.0.0.0/0")], key=str)
     e = ev(template, **dict(CREATE, PlantCidr2="10.8.0.0/16", PlantCidr3="10.7.0.0/16"))
-    assert (80, "10.8.0.0/16") in egress_rules(template, e) and (80, "10.7.0.0/16") in egress_rules(template, e)
+    for port in (80, 1433):  # the web service (HTTP) and the database (feature 005) reach every plant range
+        assert (port, "10.8.0.0/16") in egress_rules(template, e) and (port, "10.7.0.0/16") in egress_rules(template, e)
     e = ev(template, **dict(CREATE, DynamoDbPrefixListId="pl-63a5400a"))
     rules = egress_rules(template, e)
     assert (443, "pl-63a5400a") in rules and (443, "0.0.0.0/0") not in rules

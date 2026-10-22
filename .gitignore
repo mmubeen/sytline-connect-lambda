@@ -50,9 +50,9 @@ htmlcov/
 .claude
 # SAM
 .aws-sam/
-scr/.aws-sam/
-scr/deploy.env
-scr/sam-installation
+src/.aws-sam/
+src/deploy.env
+src/sam-installation
 
 # stand-alone deployment settings
-scr/deploy.standalone.env
+src/deploy.standalone.env

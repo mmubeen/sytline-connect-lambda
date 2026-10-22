@@ -10,7 +10,7 @@ feature 001): stop at the first problem, record a row as possibly written BEFORE
 never retry. Outcome states: saved | partly_saved | failed | needs_reconciliation (research.md R7, R8).
 """
 
-from . import config, errors, idos
+from . import config, defaults, errors, idos
 from .errors import ErpError, ErpRejected, LiveWritesDisabled
 from .pipeline import CO_IDO, JOB_IDO, LINE_IDO, Upload, _q, _Stop
 from .validation import today
@@ -28,6 +28,7 @@ class SaveRun(Upload):
         self.results = [{"line": j["line"], "job": j["job"], "item": ln["item"], "status": NOT_ATTEMPTED,
                          "warnings": []} for j, ln in zip(self.jobs, request["lines"])]
         self._written = set()  # lines whose line row and job row were both accepted (not yet read back)
+        self.warnings = []     # order-level warnings (for example: customer defaults not available)
 
     # -- bookkeeping -----------------------------------------------------------------------
     def _mark(self, kind, key):
@@ -36,7 +37,7 @@ class SaveRun(Upload):
             self.on_progress(list(self.possibly), [dict(r) for r in self.results])
 
     def _outcome(self, base):
-        return dict(base, results=[dict(r) for r in self.results], co_num=self.co_num)
+        return dict(base, results=[dict(r) for r in self.results], co_num=self.co_num, warnings=list(self.warnings))
 
     # -- steps -----------------------------------------------------------------------------
     def _teardown(self, i, value):
@@ -126,6 +127,14 @@ class SaveRun(Upload):
                       idos.CO_HEADER_PROPS["cust_po"]: req["po_number"]}
             if req.get("received_date"):
                 header[idos.CO_HEADER_PROPS["received_date"]] = req["received_date"]
+            # the customer's terms and ship-via from its most recent order; never blocks the save (warning instead)
+            found, warning = defaults.read(self.customer, self.soap, self.cfg)
+            if warning:
+                self.warnings.append(warning)
+            if found:
+                for key in ("terms_code", "ship_code"):
+                    if found[key]:
+                        header[idos.CO_HEADER_PROPS[key]] = found[key]
             self._insert(CO_IDO, header, "co", self.co_num, "create_co")
 
             whse = req.get("warehouse") or self.cfg.get("SYTELINE_DEFAULT_WHSE", "")

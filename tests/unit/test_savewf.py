@@ -184,3 +184,60 @@ def test_no_failure_injection_removes_or_repeats_a_write(live_writes):
         assert soap.calls.count(("insert", "SLCos")) == 1 and soap.count("SLCos") == 1  # header written once
         assert soap.calls.count(("update", "CCT_Coitems")) <= 1  # the teardown update is never repeated
         assert not hasattr(soap, "delete")  # and the client has no way to remove a row
+
+
+# ---- customer defaults on the header (feature 005) ---------------------------------------------------------
+from fakes import DB_CFG, FakeSqlServer  # noqa: E402
+
+CO_ROWS = [{"co_num": 1, "cust_num": "C1", "cust_seq": 0, "terms_code": "N30", "ship_code": "UPS"},
+           {"co_num": 2, "cust_num": "C1", "cust_seq": 0, "terms_code": "N45", "ship_code": "FDX"}]
+
+
+def go_defaults(monkeypatch, server, n=2, **kw):
+    monkeypatch.setenv(idos.DEFAULTS_SETTING, "database")
+    server.install(monkeypatch)
+    soap = FakeSoap(customers=CUST)
+    out = savewf.run_save(reservation(n), save_req(n), soap, dict(CFG, **DB_CFG), **kw)
+    return out, soap
+
+
+def test_the_header_carries_the_customers_terms_and_ship_via_from_its_latest_order(monkeypatch, live_writes):
+    out, soap = go_defaults(monkeypatch, FakeSqlServer(co_rows=CO_ROWS))
+    head = soap.rows["SLCos"][0]
+    assert head[idos.CO_HEADER_PROPS["terms_code"]] == "N45" and head[idos.CO_HEADER_PROPS["ship_code"]] == "FDX"
+    assert out["state"] == "succeeded" and out["warnings"] == []
+
+
+def test_a_customer_without_orders_saves_without_codes_and_says_so(monkeypatch, live_writes):
+    out, soap = go_defaults(monkeypatch, FakeSqlServer(co_rows=[]))
+    head = soap.rows["SLCos"][0]
+    assert idos.CO_HEADER_PROPS["terms_code"] not in head and idos.CO_HEADER_PROPS["ship_code"] not in head
+    assert out["state"] == "succeeded" and out["warnings"] == ["customer defaults not available: no previous order "
+                                                              "for this customer"]
+
+
+def test_an_unreadable_default_never_blocks_the_save(monkeypatch, live_writes):
+    out, soap = go_defaults(monkeypatch, FakeSqlServer(connect_error="connect_fail"))
+    assert out["state"] == "succeeded" and soap.count("SLCos") == 1
+    assert out["warnings"][0].startswith("customer defaults not available:")
+
+
+def test_missing_database_settings_are_only_a_warning_for_the_defaults(monkeypatch, live_writes):
+    monkeypatch.setenv(idos.DEFAULTS_SETTING, "database")
+    f = FakeSqlServer().install(monkeypatch)
+    soap = FakeSoap(customers=CUST)
+    out = savewf.run_save(reservation(), save_req(), soap, dict(CFG), )
+    assert out["state"] == "succeeded" and "database settings missing" in out["warnings"][0] and f.connect_kwargs == []
+
+
+def test_reading_the_defaults_does_not_change_the_order_of_erp_writes(monkeypatch, live_writes):
+    out, soap = go_defaults(monkeypatch, FakeSqlServer(co_rows=CO_ROWS))
+    assert kinds(soap) == [("insert", "SLCos"), ("insert", "CCT_Coitems"), ("insert", "CCTJobs"),
+                           ("insert", "CCT_Coitems"), ("insert", "CCTJobs")]
+
+
+def test_the_defaults_are_not_read_when_live_writes_are_off(monkeypatch):
+    f = FakeSqlServer(co_rows=CO_ROWS).install(monkeypatch)
+    monkeypatch.setenv(idos.DEFAULTS_SETTING, "database")
+    out = savewf.run_save(reservation(), save_req(), FakeSoap(customers=CUST), dict(CFG, **DB_CFG))
+    assert out["state"] == "failed" and f.connect_kwargs == []

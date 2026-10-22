@@ -16,7 +16,7 @@ def test_dry_run_needs_only_wsdl_and_stage_order(monkeypatch):
     _clear(monkeypatch)
     monkeypatch.setenv("SYTELINE_WSDL", "http://127.0.0.1:9/x?wsdl")
     out = lf.lambda_handler({"action": "health", "dry_run": True}, None)
-    assert set(out) == {"ok", "dry_run", "host", "config", "stages"}
+    assert set(out) == {"ok", "dry_run", "host", "config", "stages", "routes"}
     assert out["dry_run"] is True
     names = [s["stage"] for s in out["stages"]]
     assert names[0] == "load" and names[:3] == ["load", "dns", "tcp"]

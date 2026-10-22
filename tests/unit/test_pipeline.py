@@ -81,3 +81,75 @@ def test_time_budget_exhausted_after_writes_needs_reconciliation(live_writes):
     out, soap = run(remaining_ms=lambda: next(left))
     assert out["state"] == "needs_reconciliation" and out["code"] == "TIME_BUDGET_EXHAUSTED"
     assert {"kind": "co", "key": "100"} in out["possibly_written"]
+
+
+# ---- numbers from the database (feature 005) -------------------------------------------------------------
+from fakes import DB_CFG, FakeSqlServer  # noqa: E402
+from syteline import idos  # noqa: E402
+
+
+@pytest.fixture
+def db_numbers(monkeypatch):
+    monkeypatch.setenv(idos.NEXT_CO_SETTING, "database")
+    monkeypatch.setenv(idos.NEXT_JOB_SETTING, "database")
+    monkeypatch.setenv(idos.DEFAULTS_SETTING, "SLCos")  # keep the customer defaults off the database in these tests
+
+
+def run_db(r=None, soap=None, **kw):
+    soap = soap or FakeSoap(customers=CUST)
+    return pipeline.run_upload(r or req(), soap, dict(CFG, **DB_CFG), **kw), soap
+
+
+def test_the_upload_takes_its_numbers_from_the_database_and_writes_rows_through_the_service(monkeypatch, db_numbers,
+                                                                                          live_writes):
+    f = FakeSqlServer().install(monkeypatch)
+    out, soap = run_db()
+    assert out["state"] == "succeeded" and out["co_num"] == "100"
+    assert out["lines"] == [{"line": 1, "job": "5000"}, {"line": 2, "job": "5001"}]
+    assert f.committed == [100, 5000, 5001] and f.opened == f.closed == 1
+    assert [c[1] for c in soap.calls if c[0] == "invoke"] == []  # no numbering call to the web service
+    assert [c[1] for c in soap.calls if c[0] == "insert"] == ["SLCos", "CCT_Coitems", "CCTJobs", "CCT_Coitems", "CCTJobs"]
+
+
+def test_an_unknown_database_outcome_for_the_first_number_is_failed_with_the_uncertain_code(monkeypatch, db_numbers,
+                                                                                         live_writes):
+    FakeSqlServer(scenarios={("batch", 1): "drop"}).install(monkeypatch)
+    out, soap = run_db()
+    assert out["state"] == "failed" and out["code"] == "UNCERTAIN_OUTCOME" and out["step"] == "number_co"
+    assert soap.count("SLCos") == 0
+
+
+def test_an_unknown_database_outcome_after_rows_exist_needs_reconciliation(monkeypatch, db_numbers, live_writes):
+    FakeSqlServer(scenarios={("batch", 2): "drop"}).install(monkeypatch)
+    out, _ = run_db()
+    assert out["state"] == "needs_reconciliation" and out["step"] == "number_job_1" and out["code"] == "UNCERTAIN_OUTCOME"
+    assert out["possibly_written"] == [{"kind": "co", "key": "100"}]
+
+
+def test_missing_database_settings_fail_the_upload_before_anything_is_written(monkeypatch, db_numbers, live_writes):
+    f = FakeSqlServer().install(monkeypatch)
+    out, soap = pipeline.run_upload(req(), FakeSoap(customers=CUST), dict(CFG)), None
+    assert out["state"] == "failed" and out["code"] == "DATABASE_NOT_CONFIGURED" and f.connect_kwargs == []
+
+
+def test_the_database_connection_is_closed_when_the_upload_ends_in_any_state(monkeypatch, db_numbers, live_writes):
+    f = FakeSqlServer().install(monkeypatch)
+    soap = FakeSoap(customers=CUST, scenarios={("insert", "CCT_Coitems", 1): "timeout_after"})
+    out, _ = run_db(soap=soap)
+    assert out["state"] == "needs_reconciliation" and f.opened == f.closed == 1
+
+
+def test_the_upload_header_carries_the_customers_defaults(monkeypatch, live_writes):
+    monkeypatch.setenv(idos.DEFAULTS_SETTING, "database")
+    FakeSqlServer(co_rows=[{"co_num": 7, "cust_num": "C1", "cust_seq": 0, "terms_code": "N30",
+                            "ship_code": "UPS"}]).install(monkeypatch)
+    out, soap = run_db()
+    head = soap.rows["SLCos"][0]
+    assert out["state"] == "succeeded" and head["TermsCode"] == "N30" and head["ShipCode"] == "UPS"
+
+
+def test_an_unreadable_default_never_blocks_the_upload(monkeypatch, live_writes):
+    monkeypatch.setenv(idos.DEFAULTS_SETTING, "database")
+    FakeSqlServer(connect_error="login_fail").install(monkeypatch)
+    out, soap = run_db()
+    assert out["state"] == "succeeded" and "TermsCode" not in soap.rows["SLCos"][0]

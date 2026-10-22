@@ -16,7 +16,9 @@ from ._common import caller_identity, document_refusal, log_event, response
 _store_factory = None
 _clients_factory = None  # () -> soap
 
-UNPROCESSABLE = (errors.CUSTOMER_NOT_FOUND, errors.CUSTOMER_AMBIGUOUS, errors.LIVE_WRITES_DISABLED)
+UNPROCESSABLE = (errors.CUSTOMER_NOT_FOUND, errors.CUSTOMER_AMBIGUOUS, errors.CUSTOMER_LOW_CONFIDENCE,
+                 errors.LIVE_WRITES_DISABLED)
+UNAVAILABLE = (errors.STORE_UNAVAILABLE, errors.DATABASE_NOT_CONFIGURED)  # 503: not something the caller can fix by retrying the same request
 
 
 def _store():
@@ -80,7 +82,7 @@ def handler(event, context):
         return response(503, {"errors": [errors.error(errors.STORE_UNAVAILABLE, "could not reach the reservation store")]})
 
     try:
-        out = run_reserve(body, soap, store, caller, _remaining(context))
+        out = run_reserve(body, soap, store, caller, _remaining(context), cfg=getattr(soap, "_cfg", None))
     except IntegrationError as exc:  # the document cannot be used: nothing was recorded or reserved
         log_event("reserve", started, outcome=str(document_refusal(exc)["statusCode"]), code=exc.err["code"],
                   request_ref=body["request_ref"], document_id=body["document_id"])
@@ -102,11 +104,13 @@ def handler(event, context):
         return response(200, _body(item, True))
     failure = out.get("failure")
     if failure:
-        status = 422 if failure["code"] in UNPROCESSABLE else 503 if failure["code"] == errors.STORE_UNAVAILABLE else 502
+        status = 422 if failure["code"] in UNPROCESSABLE else 503 if failure["code"] in UNAVAILABLE else 502
         view = _body(item, False)
         view["errors"] = [errors.error(failure["code"], failure["message"], step=failure["step"])]
         if out.get("consumed_unused"):
             view["consumed_unused"] = out["consumed_unused"]
+        if out.get("candidates"):  # the best customer candidates and their scores, for a refused match
+            view["candidates"] = out["candidates"]
         log_event("reserve", started, outcome=str(status), code=failure["code"], step=failure["step"], **fields)
         return response(status, view)
     log_event("reserve", started, outcome="201", **fields)

@@ -112,7 +112,7 @@ Conditions:
   UsePlainHttp: !Not [!Equals [!Ref SytelineWsdlHttp, ""]]
 
 Resources:
-  # Dependencies built for Linux x86_64 / Python 3.13 by scr/Makefile (shared with the VPC template: same logical IDs)
+  # Dependencies built for Linux x86_64 / Python 3.13 by src/Makefile (shared with the VPC template: same logical IDs)
   DepsLayer:
     Type: AWS::Serverless::LayerVersion
     Metadata:

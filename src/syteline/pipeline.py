@@ -20,7 +20,7 @@ written to SLCos / CCT_Coitems / CCTJobs and the way the teardown value is store
 
 import logging
 
-from . import config, errors, idos, numbers, resolver
+from . import config, defaults, errors, idos, numbers, resolver
 from .errors import (ErpError, ErpRejected, ErpUncertain, ErpUnreachable, IntegrationError, LiveWritesDisabled)
 from .validation import today
 
@@ -163,7 +163,7 @@ class Upload:
         try:
             step = "resolve_customer"
             try:
-                self.customer = resolver.resolve_customer(self.soap, req["customer"])
+                self.customer = resolver.resolve_customer(self.soap, req["customer"], self.cfg)
             except IntegrationError as exc:
                 raise _Stop(self._failed(exc.err["code"], exc.err["message"], step))
             except ErpError as exc:
@@ -173,11 +173,17 @@ class Upload:
                 raise _Stop(self._failed(errors.LIVE_WRITES_DISABLED,
                                          "live ERP writes are disabled; nothing was written", "live_writes_check"))
 
+            found, warning = defaults.read(self.customer, self.soap, self.cfg)  # never blocks the upload
+            if warning:
+                log.warning("%s", warning)
+            header = {"CoNum": None, "CustNum": self.customer["cust_num"], "CustSeq": self.customer["cust_seq"],
+                      "OrderDate": req.get("order_date") or today(), "Stat": "O"}
+            for key in ("terms_code", "ship_code"):
+                if found and found[key]:
+                    header[idos.CO_HEADER_PROPS[key]] = found[key]
             self.co_num = self._allocate("next_co", "CO", "number_co")
-            self._insert(CO_IDO, {
-                "CoNum": self.co_num, "CustNum": self.customer["cust_num"], "CustSeq": self.customer["cust_seq"],
-                "OrderDate": req.get("order_date") or today(), "Stat": "O",
-            }, "co", self.co_num, "create_co")
+            header["CoNum"] = self.co_num
+            self._insert(CO_IDO, header, "co", self.co_num, "create_co")
 
             whse = req.get("warehouse") or self.cfg.get("SYTELINE_DEFAULT_WHSE", "")
             ordtype = req.get("order_type") or self.cfg.get("SYTELINE_DEFAULT_ORDTYPE", "")

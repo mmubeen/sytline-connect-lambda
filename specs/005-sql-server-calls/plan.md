@@ -6,7 +6,7 @@
 
 ## Summary
 
-Add the PO OCR demo's three database calls to the VPC deployment, each used **only for an operation that has no web-service endpoint configured**: (1) reserve the CO and job numbers by running `NextCoSp` / `NextWOSp` and committing, (2) find the customer from name and address by searching the customer address data with the demo's scoring (threshold 70, ambiguity margin 3, candidate cap 1000), (3) read the customer's default terms and ship-via codes from its most recent order. The route per operation is decided by a setting before anything is sent (an IDO name for the web service, or `database`/empty); no failure ever switches it. A new module `scr/syteline/sqlserver.py` is the only code that talks to the database: a pure-Python TDS driver (`python-tds`) over a TLS connection that is always encrypted and certificate-verified, with a fixed whitelist of statements (SELECT of two tables, EXEC of the two routines, COMMIT/ROLLBACK, a harmless ping) so it can never insert, update or delete a row. Existing numbering, customer-resolution and header-save code gains a route switch; the web-service code stays for operations that have an endpoint. The connectivity check reports each operation's route and the database stages. See [research.md](research.md).
+Add the PO OCR demo's three database calls to the VPC deployment, each used **only for an operation that has no web-service endpoint configured**: (1) reserve the CO and job numbers by running `NextCoSp` / `NextWOSp` and committing, (2) find the customer from name and address by searching the customer address data with the demo's scoring (threshold 70, ambiguity margin 3, candidate cap 1000), (3) read the customer's default terms and ship-via codes from its most recent order. The route per operation is decided by a setting before anything is sent (an IDO name for the web service, or `database`/empty); no failure ever switches it. A new module `src/syteline/sqlserver.py` is the only code that talks to the database: a pure-Python TDS driver (`python-tds`) over a TLS connection that is always encrypted and certificate-verified, with a fixed whitelist of statements (SELECT of two tables, EXEC of the two routines, COMMIT/ROLLBACK, a harmless ping) so it can never insert, update or delete a row. Existing numbering, customer-resolution and header-save code gains a route switch; the web-service code stays for operations that have an endpoint. The connectivity check reports each operation's route and the database stages. See [research.md](research.md).
 
 ## Technical Context
 
@@ -50,7 +50,7 @@ specs/005-sql-server-calls/
 ### Source Code (repository root)
 
 ```text
-scr/
+src/
 ├── template.yaml                  # + route parameters (default `database`), SQL egress rules in create-network mode, env on Reserve/Worker/Direct, outputs
 ├── requirements.txt               # + python-tds, pyOpenSSL, cryptography, rapidfuzz
 ├── Makefile                       # + manylinux_2_28 platform tag (cryptography wheels)

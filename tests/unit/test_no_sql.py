@@ -1,5 +1,5 @@
 """The database is used ONLY for the three calls of feature 005 (reserve numbers, find the customer, read the customer's
-default codes), only through scr/syteline/sqlserver.py, and it can never change a row directly (FR-009, SC-005).
+default codes), only through src/syteline/sqlserver.py, and it can never change a row directly (FR-009, SC-005).
 
 (Features 001 to 004 had a stricter rule: no database connection at all. It is relaxed for exactly these calls.)
 """
@@ -13,9 +13,9 @@ from fakes import DB_CFG, FakeSqlServer
 from syteline import sqlserver
 
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
-SCR = os.path.join(ROOT, "scr")
+SCR = os.path.join(ROOT, "src")
 SQL_MODULES = ("pytds", "pyodbc", "pymssql", "psycopg2", "sqlalchemy", "cx_Oracle")
-ALLOWED_IMPORTER = os.path.join("scr", "syteline", "sqlserver.py")
+ALLOWED_IMPORTER = os.path.join("src", "syteline", "sqlserver.py")
 
 
 def py_files():

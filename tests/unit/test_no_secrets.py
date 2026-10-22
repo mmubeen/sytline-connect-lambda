@@ -71,3 +71,35 @@ def test_soap_client_error_messages_do_not_leak_the_password():
     with pytest.raises(ErpUnreachable) as ei:
         cli.connect()
     assert SECRETS[0] not in str(ei.value)
+
+
+def test_no_database_login_or_password_anywhere_on_the_database_route(monkeypatch, caplog, live_writes):
+    from fakes import DB_CFG, FakeSqlServer
+    from syteline import health, idos
+
+    caplog.set_level(logging.DEBUG)
+    for k in (idos.NEXT_CO_SETTING, idos.NEXT_JOB_SETTING, idos.CUSTOMER_SETTING, idos.DEFAULTS_SETTING):
+        monkeypatch.setenv(k, "database")
+    for k, v in DB_CFG.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("SYTELINE_WSDL", "http://127.0.0.1:9/x?wsdl")
+    monkeypatch.setenv("SYTELINE_USER", "u")
+    monkeypatch.setenv("SYTELINE_PASS", SECRETS[0])
+    f = FakeSqlServer(custaddr=[{"cust_num": "C1", "cust_seq": 0, "name": "ACME", "zip": "85001"}],
+                      infobar=f"login {DB_CFG['SQL_USER']} pw {DB_CFG['SQL_PASS']}").install(monkeypatch)
+    fake_idp = FakeIdp().add("batch-1/PO-1.pdf", po_fields(1, ship_to_address="85001"))
+    monkeypatch.setattr(idp, "_client_factory", lambda: fake_idp)
+    rstore = ReservationStore(FakeJobsTable())
+    soap = FakeSoap(customers=[{"cust_num": "C1", "cust_seq": 0, "name": "ACME"}])
+    monkeypatch.setattr(reserve, "_store_factory", lambda: rstore)
+    monkeypatch.setattr(reserve, "_clients_factory", lambda: soap)
+    ident = {"requestContext": {"identity": {"userArn": "arn"}}}
+    body = {"request_ref": "rr", "confirmed": True, "uploaded_by": "u", "document_id": "batch-1/PO-1.pdf"}
+    outs = [reserve.handler(dict({"body": json.dumps(body)}, **ident), None), health.run_health({"action": "health"})]
+    monkeypatch.setattr(FakeSqlServer, "connect", lambda self, **kw: (_ for _ in ()).throw(OSError(
+        f"refused for {kw['user']} / {kw['password']}")))
+    outs.append(reserve.handler(dict({"body": json.dumps(dict(body, request_ref="r2"))}, **ident), None))
+    text = json.dumps(outs, default=str) + caplog.text
+    for secret in (DB_CFG["SQL_PASS"], DB_CFG["SQL_USER"], SECRETS[0]):
+        assert secret not in text
+    assert f.statements  # the database really was used

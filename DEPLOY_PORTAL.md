@@ -1,6 +1,6 @@
 # Deploying the direct-invoke function via the AWS Console (no SAM)
 
-> This covers only the direct-invoke function (`health`, `add_note`, `get_notes`). The private order API, worker, sweeper and job table are defined in `scr/template.yaml` (deploy with SAM); see README.md. The function runs in the private subnets that route to the plant (outbound HTTP port 80 to the web service only; no database access) and keeps `SYTELINE_LIVE_WRITES=false` unless an approved test window.
+> This covers only the direct-invoke function (`health`, `add_note`, `get_notes`). The private order API, worker, sweeper and job table are defined in `src/template.yaml` (deploy with SAM); see README.md. The function runs in the private subnets that route to the plant (outbound HTTP port 80 to the web service only; no database access) and keeps `SYTELINE_LIVE_WRITES=false` unless an approved test window.
 
 ## 1. What gets deployed
 
@@ -9,7 +9,7 @@
 | Secrets Manager secret `sytline/connect` | Holds `SYTELINE_PASS` (and optionally other keys) |
 | IAM execution role `sytline-connect-role` | Logs + read the secret (+ VPC ENI access if in a VPC) |
 | Lambda layer `sytline-connect-deps` | `zeep`, `lxml`, `requests` built for Linux |
-| Lambda function `sytline-connect` | `scr/lambda_function.py` + `scr/syteline/`, handler `lambda_function.lambda_handler` |
+| Lambda function `sytline-connect` | `src/lambda_function.py` + `src/syteline/`, handler `lambda_function.lambda_handler` |
 | (Optional) VPC config | Only if SyteLine is private |
 
 ```
@@ -20,16 +20,16 @@ Test event ──► Lambda ──(VPC/NAT or public)──► SyteLine WSDL/SOA
 
 ## 2. Key design decision: dependencies
 
-`scr/lambda_function.py` imports `zeep` (which pulls in `lxml`, a compiled library). The console code editor can't install packages, so pick one:
+`src/lambda_function.py` imports `zeep` (which pulls in `lxml`, a compiled library). The console code editor can't install packages, so pick one:
 
 - **A. Layer (recommended, no code change).** Build the dependency zip on your Mac using pip's cross-platform flags — no Docker needed:
   ```
   mkdir -p build/python dist
-  pip install -r scr/requirements.txt -t build/python \
+  pip install -r src/requirements.txt -t build/python \
     --platform manylinux2014_x86_64 --implementation cp \
     --python-version 3.13 --only-binary=:all:
   (cd build && zip -r ../dist/deps-layer.zip python -x '*/__pycache__/*')
-  (cd scr && zip -r ../dist/function.zip lambda_function.py syteline handlers -x '*/__pycache__/*')
+  (cd src && zip -r ../dist/function.zip lambda_function.py syteline handlers -x '*/__pycache__/*')
   ```
   Layer limit: 50 MB zipped for direct console upload, 250 MB unzipped total. If `deps-layer.zip` exceeds 50 MB, upload it to S3 and use "Upload a file from Amazon S3".
 - **B. Stdlib-only rewrite.** Replace zeep with a hand-built SOAP envelope via `urllib`, then paste the code straight into the console editor. Fewer moving parts, but diverges from the proven `core.py` flow. Only worth it if layers are blocked.

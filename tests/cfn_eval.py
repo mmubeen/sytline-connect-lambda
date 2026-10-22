@@ -1,6 +1,6 @@
 """A small CloudFormation evaluator for template tests (T002).
 
-Supports exactly what scr/template.yaml uses: Ref to a parameter, Fn::Equals/Not/And/Or, Condition,
+Supports exactly what src/template.yaml uses: Ref to a parameter, Fn::Equals/Not/And/Or, Condition,
 Fn::If/Select/Split/Join/Cidr/GetAZs/Sub/GetAtt. Anything else raises, so a template change using an
 unsupported function cannot silently pass the tests.
 """

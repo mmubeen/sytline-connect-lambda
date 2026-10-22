@@ -91,3 +91,30 @@ def test_the_reservation_handlers_log_type_identifiers_outcome_and_duration(env,
     assert by_type["save_intake"]["outcome"] == "202" and by_type["save"]["outcome"] == "saved"
     assert by_type["save"]["co_num"] == "100"
     assert all(isinstance(by_type[t]["ms"], int) for t in ("reserve", "save_intake", "save"))
+
+
+# ---- database-backed steps (feature 005, FR-014) -------------------------------------------------------------
+def test_each_database_step_logs_type_outcome_duration_and_counts_and_nothing_secret(monkeypatch, caplog):
+    from fakes import DB_CFG, FakeSqlServer
+    from syteline import defaults, idos, numbers, resolver
+
+    caplog.set_level(logging.INFO)
+    for k in (idos.NEXT_CO_SETTING, idos.NEXT_JOB_SETTING, idos.CUSTOMER_SETTING, idos.DEFAULTS_SETTING):
+        monkeypatch.setenv(k, "database")
+    monkeypatch.setenv("SYTELINE_LIVE_WRITES", "true")
+    FakeSqlServer(custaddr=[{"cust_num": "C1", "cust_seq": 0, "name": "ACME INC", "zip": "85001"}],
+                  co_rows=[{"co_num": 1, "cust_num": "C1", "cust_seq": 0, "terms_code": "N30", "ship_code": "UPS"}]
+                  ).install(monkeypatch)
+    cfg = dict(DB_CFG)
+    with numbers.NumberSource(FakeSoap(), cfg) as n:
+        n.next_co()
+    resolver.resolve_customer(FakeSoap(), {"name": "Acme Inc", "address1": "85001"}, cfg)
+    defaults.read({"cust_num": "C1", "cust_seq": 0}, FakeSoap(), cfg)
+    steps = {l["type"]: l for l in lines(caplog) if l.get("route") == "database"}
+    assert set(steps) == {"reserve_number", "customer_search", "customer_defaults"}
+    assert steps["reserve_number"]["outcome"] == "reserved" and steps["reserve_number"]["operation"] == "next_co"
+    assert steps["customer_search"]["outcome"] == "match" and steps["customer_search"]["candidates"] == 1
+    assert steps["customer_defaults"]["outcome"] == "found"
+    assert all(isinstance(s["ms"], int) for s in steps.values())
+    assert DB_CFG["SQL_PASS"] not in caplog.text and DB_CFG["SQL_USER"] not in caplog.text
+    assert "ACME" not in json.dumps(list(steps.values()))  # no customer details in the step lines

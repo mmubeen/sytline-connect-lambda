@@ -1,4 +1,4 @@
-"""Structure of the job-reservation additions to scr/template.yaml (specs/004-job-number-workflow/plan.md)."""
+"""Structure of the job-reservation additions to src/template.yaml (specs/004-job-number-workflow/plan.md)."""
 
 from cfn_eval import Evaluator
 
@@ -119,7 +119,7 @@ def test_every_function_has_a_makefile_build_target():
     from cfn_template import load_template
 
     template = load_template()
-    makefile = open(os.path.join(os.path.dirname(__file__), "..", "..", "scr", "Makefile")).read()
+    makefile = open(os.path.join(os.path.dirname(__file__), "..", "..", "src", "Makefile")).read()
     listed = set(re.search(r"^FUNCTIONS\s*=((?:.*\\\n)*.*)$", makefile, re.M).group(1).replace("\\", " ").split())
     functions = {n for n, r in template["Resources"].items() if r["Type"] == "AWS::Serverless::Function"
                  and (r.get("Metadata") or {}).get("BuildMethod") == "makefile"}
@@ -129,11 +129,11 @@ def test_every_function_has_a_makefile_build_target():
 def test_the_idp_sdk_is_packaged_from_a_checkout_never_installed_by_name():
     import os
 
-    scr = os.path.join(os.path.dirname(__file__), "..", "..", "scr")
-    makefile = open(os.path.join(scr, "Makefile")).read()
+    src = os.path.join(os.path.dirname(__file__), "..", "..", "src")
+    makefile = open(os.path.join(src, "Makefile")).read()
     assert "IDP_REPO" in makefile and "idp_sdk" in makefile and "idp_common" in makefile
     for f in ("requirements.txt", "requirements-idp.txt"):  # the squatted PyPI name must never be requested
-        lines = [l.split("#")[0].strip().lower() for l in open(os.path.join(scr, f))]
+        lines = [l.split("#")[0].strip().lower() for l in open(os.path.join(src, f))]
         assert not [l for l in lines if l.replace("_", "-").startswith(("idp-common", "idp-sdk"))]
 
 

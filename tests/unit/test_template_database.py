@@ -1,0 +1,68 @@
+"""The route settings and the database egress rules of src/template.yaml (specs/005-sql-server-calls/plan.md)."""
+
+import os
+
+from cfn_eval import Evaluator
+from cfn_template import load_template
+
+SUPPLY = dict(WorkerVpcId="vpc-1", WorkerSubnetIds="subnet-a,subnet-b", WorkerSecurityGroupIds="sg-1",
+              WorkerRouteTableIds="rtb-1", ApiVpcEndpointId="vpce-1")
+CREATE = dict(HostNetworkCidr="10.50.0.0/24", PlantCidr1="10.9.0.0/16", ApiVpcEndpointId="vpce-1")
+ROUTE_VARS = {"SYTELINE_NEXT_CO_IDO": "NextCoIdo", "SYTELINE_NEXT_JOB_IDO": "NextJobIdo",
+              "SYTELINE_CUSTOMER_IDO": "CustomerIdo", "SYTELINE_DEFAULTS_IDO": "DefaultsIdo"}
+
+
+def env_of(template, fn):
+    return (template["Resources"][fn]["Properties"].get("Environment") or {}).get("Variables", {})
+
+
+def test_the_four_route_parameters_default_to_the_database(template):
+    for name in ROUTE_VARS.values():
+        p = template["Parameters"][name]
+        assert p["Type"] == "String" and p["Default"] == "database" and "database" in p["Description"]
+
+
+def test_the_route_variables_are_on_exactly_the_functions_that_number_resolve_or_save(template):
+    for fn in ("ReserveFunction", "WorkerFunction", "DirectFunction"):
+        env = env_of(template, fn)
+        assert {k: env[k] for k in ROUTE_VARS} == {k: {"Ref": v} for k, v in ROUTE_VARS.items()}, fn
+    for fn, r in template["Resources"].items():
+        if r["Type"] == "AWS::Serverless::Function" and fn not in ("ReserveFunction", "WorkerFunction", "DirectFunction"):
+            assert not set(ROUTE_VARS) & set(env_of(template, fn)), fn
+
+
+def test_the_standalone_template_sets_none_of_them():
+    standalone = load_template(os.path.join(os.path.dirname(__file__), "..", "..", "src", "template-standalone.yaml"))
+    text = repr(standalone)
+    assert not any(v in text for v in ROUTE_VARS) and "SQL_" not in text and "1433" not in text
+
+
+def sql_rules(template, e):
+    out = []
+    for name in e.active():
+        r = template["Resources"][name]
+        if r["Type"] == "AWS::EC2::SecurityGroupEgress" and r["Properties"]["FromPort"] == 1433:
+            p = r["Properties"]
+            assert p["ToPort"] == 1433 and p["IpProtocol"] == "tcp"
+            out.append(e.resolve(p["CidrIp"]))
+    return sorted(out)
+
+
+def test_database_egress_exists_only_when_the_network_is_created_and_only_to_the_plant_ranges(template):
+    assert sql_rules(template, Evaluator(template, **SUPPLY)) == []  # the deployer's own security group applies
+    assert sql_rules(template, Evaluator(template, **CREATE)) == ["10.9.0.0/16"]
+    three = dict(CREATE, PlantCidr2="10.8.0.0/16", PlantCidr3="10.7.0.0/16")
+    assert sql_rules(template, Evaluator(template, **three)) == ["10.7.0.0/16", "10.8.0.0/16", "10.9.0.0/16"]
+
+
+def test_no_ingress_and_nothing_open_to_the_world_on_the_database_port(template):
+    for name, r in template["Resources"].items():
+        if r["Type"] == "AWS::EC2::SecurityGroupIngress":
+            raise AssertionError(f"{name}: no ingress rule may exist")
+        if r["Type"] == "AWS::EC2::SecurityGroupEgress" and r["Properties"]["FromPort"] == 1433:
+            assert "0.0.0.0/0" not in repr(r["Properties"]["CidrIp"])
+
+
+def test_no_new_function_and_no_new_permission_for_the_database(template):
+    text = repr({n: r for n, r in template["Resources"].items() if r["Type"] == "AWS::Serverless::Function"})
+    assert "sql" not in text.lower().replace("sytline", "")  # the login lives in the existing secret, already readable

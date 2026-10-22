@@ -4,8 +4,8 @@ Decided from the settings alone (specs/005-sql-server-calls, FR-012). Nothing he
 switches after a failure: a call that has started stays on its route.
 
 Per operation there is one setting (idos.NEXT_CO_SETTING ...):
-  absent                          -> the earlier web-service default (so stacks and tests that never set it are unchanged;
-                                     for `defaults`, which has no earlier default, the database)
+  absent                          -> the earlier web-service default (so stacks and tests that never set it are unchanged);
+                                     `defaults` has no earlier behaviour, so absent means OFF: no defaults are read
   an endpoint (IDO) name          -> the web service, that endpoint
   `database` or empty             -> the database
 """
@@ -14,7 +14,7 @@ import os
 
 from . import idos
 
-DATABASE, WEBSERVICE = "database", "webservice"
+DATABASE, WEBSERVICE, OFF = "database", "webservice", "off"
 OPERATIONS = ("next_co", "next_job", "customer", "defaults")
 
 
@@ -30,14 +30,14 @@ def _legacy(operation):
 
 
 def route(operation, environ=None):
-    """("webservice", endpoint name) or ("database", None)."""
+    """("webservice", endpoint name), ("database", None) or, for an unset `defaults` setting only, ("off", None)."""
     if operation not in OPERATIONS:
         raise ValueError(f"unknown operation: {operation}")
     env = os.environ if environ is None else environ
     name = _setting(operation)
     if name not in env:
         legacy = _legacy(operation)
-        return (WEBSERVICE, legacy) if legacy else (DATABASE, None)
+        return (WEBSERVICE, legacy) if legacy else (OFF, None)
     value = (env[name] or "").strip()
     if not value or value.lower() == DATABASE:
         return DATABASE, None
@@ -53,5 +53,5 @@ def describe(environ=None):
     out = {}
     for op in OPERATIONS:
         kind, name = route(op, environ)
-        out[op] = DATABASE if kind == DATABASE else f"{WEBSERVICE}:{name}"
+        out[op] = f"{WEBSERVICE}:{name}" if kind == WEBSERVICE else kind
     return out

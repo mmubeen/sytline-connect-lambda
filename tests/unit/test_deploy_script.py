@@ -1,4 +1,4 @@
-"""scr/deploy.sh behavior with stubbed `sam` and `aws` (contracts/template-interface.md)."""
+"""src/deploy.sh behavior with stubbed `sam` and `aws` (contracts/template-interface.md)."""
 
 import os
 import re
@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-SCR = os.path.join(os.path.dirname(__file__), "..", "..", "scr")
+SCR = os.path.join(os.path.dirname(__file__), "..", "..", "src")
 
 BASE = {"SYTELINE_WSDL": "http://erp/IDORequestService/IDOWebService.asmx?wsdl", "SYTELINE_USER": "svc",
         "SYTELINE_SECRET_ARN": "arn:aws-us-gov:secretsmanager:us-gov-east-1:1:secret:x"}
@@ -29,7 +29,7 @@ esac
 
 @pytest.fixture
 def run(tmp_path):
-    work = tmp_path / "scr"
+    work = tmp_path / "src"
     work.mkdir()
     shutil.copy(os.path.join(SCR, "deploy.sh"), work / "deploy.sh")
     shutil.copy(os.path.join(SCR, "samconfig.toml"), work / "samconfig.toml")
@@ -111,6 +111,24 @@ def test_option_with_an_existing_endpoint_is_contradictory(run):
 def test_option_needs_create_mode(run):
     p, calls = run({**BASE, **SUPPLY, "API_VPCE_ID": "", "CREATE_API_ENDPOINT": "true"})
     assert p.returncode != 0 and "only works while the host network is created" in p.stderr and not deployed(calls)
+
+
+# ---- route settings (feature 005) -------------------------------------------------------------
+ROUTE_KEYS = ("NextCoIdo", "NextJobIdo", "CustomerIdo", "DefaultsIdo")
+
+
+def test_the_route_parameters_default_to_the_database_and_are_always_passed(run):
+    p, calls = run({**BASE, **CREATE})
+    assert p.returncode == 0, p.stderr
+    o = overrides(calls)
+    assert {k: o[k] for k in ROUTE_KEYS} == {k: "database" for k in ROUTE_KEYS}  # always given, so an old value is cleared
+
+
+def test_an_endpoint_name_in_the_settings_keeps_that_operation_on_the_web_service(run):
+    p, calls = run({**BASE, **CREATE, "NEXT_CO_IDO": "SLCos", "CUSTOMER_IDO": "SLCustAddrs"})
+    o = overrides(calls)
+    assert (o["NextCoIdo"], o["NextJobIdo"], o["CustomerIdo"], o["DefaultsIdo"]) == ("SLCos", "database", "SLCustAddrs",
+                                                                                     "database")
 
 
 # ---- US2: supply mode / partial sets / mode-switch guard ---------------------------------

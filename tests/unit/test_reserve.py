@@ -2,8 +2,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from fakes import FakeIdp, FakeJobsTable, FakeSoap, po_fields
-from syteline import errors, idp, reservations as rs
+from fakes import DB_CFG, FakeIdp, FakeJobsTable, FakeSoap, FakeSqlServer, po_fields
+from syteline import errors, idos, idp, reservations as rs
 from syteline.errors import IntegrationError
 from syteline.jobs import RefConflict
 from syteline.reservations import ReservationStore
@@ -90,7 +90,7 @@ def test_erp_failure_midway_reports_the_numbers_already_obtained_as_consumed(liv
 def test_uncertain_number_call_is_reported_as_an_erp_failure_not_a_success(live_writes):
     soap = FakeSoap(customers=CUST, scenarios={("invoke", "NextCoSp", 1): "timeout_after"})
     out, _, _ = go(soap=soap)
-    assert out["failure"]["code"] == errors.ERP_UNREACHABLE and out["reservation"]["state"] == rs.FAILED
+    assert out["failure"]["code"] == errors.UNCERTAIN_OUTCOME and out["reservation"]["state"] == rs.FAILED
 
 
 def test_time_budget_exhausted_stops_and_keeps_the_numbers_obtained(live_writes):
@@ -154,3 +154,52 @@ def test_reserved_items_hold_no_po_details(live_writes):
     text = repr(store._t.items)
     for detail in ("ACME", "'PO-1'", "po_number", "quantity", "part_number", "lines", "'A'"):  # (the matched ERP customer number is not PO data)
         assert detail not in text
+
+
+# ---- numbers from the database (feature 005) -------------------------------------------------------------
+@pytest.fixture
+def db_numbers(monkeypatch):
+    monkeypatch.setenv(idos.NEXT_CO_SETTING, "database")
+    monkeypatch.setenv(idos.NEXT_JOB_SETTING, "database")
+    return FakeSqlServer().install(monkeypatch)
+
+
+def test_numbers_come_from_the_database_over_one_connection_and_the_service_is_not_asked(db_numbers, live_writes):
+    out, soap, _ = go(cfg=dict(DB_CFG))
+    item = out["reservation"]
+    assert item["state"] == rs.RESERVED and item["co_num"] == "100"
+    assert item["job_numbers"] == [{"line": 1, "job": "5000"}, {"line": 2, "job": "5001"}, {"line": 3, "job": "5002"}]
+    assert db_numbers.committed == [100, 5000, 5001, 5002] and db_numbers.opened == db_numbers.closed == 1
+    assert [c for c in soap.calls if c[0] in ("invoke", "insert", "update")] == []
+
+
+def test_an_unknown_database_outcome_is_uncertain_keeps_the_numbers_obtained_and_is_not_retried(monkeypatch, live_writes):
+    monkeypatch.setenv(idos.NEXT_CO_SETTING, "database")
+    monkeypatch.setenv(idos.NEXT_JOB_SETTING, "database")
+    f = FakeSqlServer(scenarios={("batch", 3): "drop"}).install(monkeypatch)
+    out, soap, _ = go(cfg=dict(DB_CFG))
+    assert out["failure"]["code"] == errors.UNCERTAIN_OUTCOME and out["failure"]["step"] == "number_job_2"
+    assert [c["number"] for c in out["consumed_unused"]] == ["100", "5000"]
+    assert out["reservation"]["state"] == rs.FAILED and soap.calls.count(("invoke", "NextWOSp")) == 0
+    assert f.opened == f.closed == 1 and len([s for s, _ in f.statements if s.startswith("SET NOCOUNT")]) == 3
+
+
+def test_missing_database_settings_reserve_nothing_and_open_no_connection(db_numbers, live_writes):
+    out, soap, _ = go(cfg={})
+    assert out["failure"]["code"] == errors.DATABASE_NOT_CONFIGURED and out["failure"]["step"] == "number_co"
+    assert "consumed_unused" not in out and db_numbers.connect_kwargs == []
+
+
+def test_live_writes_off_asks_the_database_for_nothing(db_numbers):
+    out, _, _ = go(cfg=dict(DB_CFG))
+    assert out["failure"]["code"] == errors.LIVE_WRITES_DISABLED and db_numbers.connect_kwargs == []
+
+
+def test_a_database_routine_error_reports_consumed_numbers_and_closes_the_connection(monkeypatch, live_writes):
+    monkeypatch.setenv(idos.NEXT_CO_SETTING, "database")
+    monkeypatch.setenv(idos.NEXT_JOB_SETTING, "database")
+    f = FakeSqlServer(scenarios={("batch", 2): "error"}).install(monkeypatch)
+    out, _, _ = go(cfg=dict(DB_CFG))
+    assert out["failure"]["code"] == errors.ERP_REJECTED and out["failure"]["step"] == "number_job_1"
+    assert [c["number"] for c in out["consumed_unused"]] == ["100"] and f.rolled_back == 1
+    assert f.opened == f.closed == 1

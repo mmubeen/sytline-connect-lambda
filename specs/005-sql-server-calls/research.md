@@ -8,7 +8,7 @@
 
 ## R2. Route per operation
 **Decision**: three operations (`next_co`, `next_job`, `customer`) plus `defaults`, each with one setting that already exists or is added alongside: `SYTELINE_NEXT_CO_IDO`, `SYTELINE_NEXT_JOB_IDO`, `SYTELINE_CUSTOMER_IDO` (existing names in `idos.py`) and `SYTELINE_DEFAULTS_IDO` (new). Rule in `routes.py`:
-- variable **absent**: the existing default web-service name (so deployments and tests that never set it behave as before);
+- variable **absent**: the existing default web-service name (so deployments and tests that never set it behave as before); for `defaults`, which had no earlier behaviour, absent means **off**: no defaults are read and nothing connects;
 - variable **set to a name**: web service, that endpoint;
 - variable **set to `database` or empty**: database.
 The template always sets all four, with default `database` (the existing web-service names were guesses, unconfirmed, so no endpoint is known to exist). The decision reads settings only; nothing is probed and no failure changes it.
@@ -46,7 +46,7 @@ The template always sets all four, with default `database` (the existing web-ser
 **Decision**: the database numbering path calls `config.live_writes_enabled()` before connecting, exactly like the web-service path (FR-004). `pipeline.Upload` (feature 001) and `reserve.run_reserve` (feature 004) both obtain numbers from `NumberSource`; both map `ErpUncertain` to `UNCERTAIN_OUTCOME` (parked / reported), which the web-service path previously mapped to `ERP_UNREACHABLE`.
 
 ## R11. Guard tests
-**Decision**: `tests/unit/test_no_sql.py` changes from "no SQL client anywhere" to: the driver may be imported only in `scr/syteline/sqlserver.py`; no other SQL client module is imported anywhere; and a recording-connection audit (SC-005) runs every code path and asserts each executed statement matches the whitelist (the two `SELECT`s, the two `EXEC`s, `COMMIT`/`ROLLBACK`, `SELECT 1`) with no `INSERT`/`UPDATE`/`DELETE`/`MERGE`/`DROP`/`ALTER`/`CREATE`/`TRUNCATE`.
+**Decision**: `tests/unit/test_no_sql.py` changes from "no SQL client anywhere" to: the driver may be imported only in `src/syteline/sqlserver.py`; no other SQL client module is imported anywhere; and a recording-connection audit (SC-005) runs every code path and asserts each executed statement matches the whitelist (the two `SELECT`s, the two `EXEC`s, `COMMIT`/`ROLLBACK`, `SELECT 1`) with no `INSERT`/`UPDATE`/`DELETE`/`MERGE`/`DROP`/`ALTER`/`CREATE`/`TRUNCATE`.
 
 ## R12. Stand-alone version
 **Decision**: unchanged and out of scope. Its template sets none of the route variables, so the absent-variable rule keeps its web-service behaviour; the database code is in the zip but unreachable without settings.

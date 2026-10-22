@@ -8,18 +8,18 @@ design: [`specs/001-syteline-erp-integration/`](specs/001-syteline-erp-integrati
 
 | Piece | Purpose |
 |---|---|
-| `POST /confirmed-orders` (`scr/handlers/intake.py`) | Validates an operator-confirmed order, durably records it, returns an upload ID (HTTP 202) |
-| `GET /upload-jobs/{id}` (`scr/handlers/status.py`) | State: `accepted`, `running`, `succeeded`, `failed`, `needs_reconciliation` |
-| Worker (`scr/handlers/worker.py`, VPC) | Runs the upload through the web service only: look up the customer (read) -> `NextCoSp` (method call) -> `SLCos` / `CCT_Coitems` / `CCTJobs` (inserts) -> read-back |
-| Sweeper (`scr/handlers/sweeper.py`) | Every 5 min: re-drives `accepted` jobs; parks stale `running` jobs as `needs_reconciliation` |
-| Direct invoke (`scr/lambda_function.py`) | `health` (connectivity check), `add_note`, `get_notes` |
+| `POST /confirmed-orders` (`src/handlers/intake.py`) | Validates an operator-confirmed order, durably records it, returns an upload ID (HTTP 202) |
+| `GET /upload-jobs/{id}` (`src/handlers/status.py`) | State: `accepted`, `running`, `succeeded`, `failed`, `needs_reconciliation` |
+| Worker (`src/handlers/worker.py`, VPC) | Runs the upload through the web service only: look up the customer (read) -> `NextCoSp` (method call) -> `SLCos` / `CCT_Coitems` / `CCTJobs` (inserts) -> read-back |
+| Sweeper (`src/handlers/sweeper.py`) | Every 5 min: re-drives `accepted` jobs; parks stale `running` jobs as `needs_reconciliation` |
+| Direct invoke (`src/lambda_function.py`) | `health` (connectivity check), `add_note`, `get_notes` |
 
 API shapes: [`contracts/api.md`](specs/001-syteline-erp-integration/contracts/api.md) and
 [`contracts/lambda-actions.md`](specs/001-syteline-erp-integration/contracts/lambda-actions.md).
 API: private REST API, `AWS_IAM` auth, reachable only through the approved `execute-api` VPC endpoint.
 
 ## Safety rules
-- **All ERP access is through the SyteLine web service** (FR-018): no SQL connection, driver or database credential exists.
+- **ERP records are saved through the SyteLine web service; the SyteLine database is used only for three calls the web service has no endpoint for** (reserving CO/job numbers, finding the customer, reading the customer's default terms and ship-via), and it never inserts, updates or deletes a row directly. See [`docs/DATABASE.md`](docs/DATABASE.md).
 - **Live writes are OFF by default** (`SYTELINE_LIVE_WRITES=false`). There is no test ERP. With the flag off
   the worker stops after the read-only customer match, before allocating any numbers. Turn it on only
   for a test the ERP owner approved, with a reconciliation and cleanup plan.
@@ -48,16 +48,16 @@ needs only `SYTELINE_WSDL`: no credentials, no login. Stages `load`, `dns`, `tcp
 HTTP 401/403 passes.
 
 ## Tests
-    pip install -r scr/requirements.txt -r scr/requirements-dev.txt && pytest
+    pip install -r src/requirements.txt -r src/requirements-dev.txt && pytest
 All tests use fakes and never touch the ERP. `tests/integration/` is skipped by default:
 `SYTELINE_READONLY_CHECKS=1` runs read-only network and web-service checks from the worker network; the live tests
 additionally need `SYTELINE_LIVE=1` **and** `LIVE_APPROVAL_REF` (the ERP owner's approval).
 
 ## Deploy (SAM)
-One stack (`sytline-connect`) in **us-gov-east-1**, one configuration (`default` in `scr/samconfig.toml`).
+One stack (`sytline-connect`) in **us-gov-east-1**, one configuration (`default` in `src/samconfig.toml`).
 
     pip install aws-sam-cli            # or the official installer
-    cd scr
+    cd src
     cp deploy.env.example deploy.env   # fill in; git-ignored, holds no passwords
     ./deploy.sh --profile NAME --validate   # lint the template
     ./deploy.sh --profile NAME --build      # sam build (no Docker, no local Python 3.13 needed)
@@ -66,7 +66,7 @@ One stack (`sytline-connect`) in **us-gov-east-1**, one configuration (`default`
 `--profile NAME` selects the AWS credentials profile for every step (or set `AWS_PROFILE_NAME` in `deploy.env`; omit both to use
 the default credential chain).
 
-- **Build:** `scr/Makefile` (selected by `Metadata: BuildMethod: makefile`) installs the dependencies as
+- **Build:** `src/Makefile` (selected by `Metadata: BuildMethod: makefile`) installs the dependencies as
   Linux x86_64 / CPython 3.13 wheels into the `sytline-connect-deps` layer and copies the code into each function.
 - **Host network:** supply an existing one (all four of VPC, subnets, security groups, route tables), or leave all four empty and
   set `HOST_NETWORK_CIDR` and `PLANT_CIDR_1` to have the stack create a private one (two subnets, no route out, security groups,
@@ -101,7 +101,7 @@ demo's flow. `GET /job-reservations/{id}` explains what happened. See [`docs/RES
 (omit `--payload` for the default `health` action).
 
 ## Unconfirmed web-service names
-`scr/syteline/idos.py` is the single place for the collection, method and property names, and
-`scr/syteline/client.py` for the SOAP operation names and payload shapes. They are best guesses, verified only
+`src/syteline/idos.py` is the single place for the collection, method and property names, and
+`src/syteline/client.py` for the SOAP operation names and payload shapes. They are best guesses, verified only
 against fakes, until the read-only discovery task (T013) is run on the plant network. Do not enable live
 writes before then.

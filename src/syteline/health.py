@@ -26,7 +26,7 @@ import time
 from urllib.parse import urlparse
 
 from . import config as cfgmod
-from . import diagnostics, errors
+from . import diagnostics, errors, routes
 from .client import config_service_address
 
 
@@ -45,6 +45,56 @@ def _stage(name, fn, results):
             entry["code"] = errors.INSECURE_TRANSPORT
         results.append(entry)
         return False
+
+
+def _database_stages(cfg, timeout, results):
+    """db_dns / db_tcp / db_login: only a name lookup, a connection and `SELECT 1`; never any credential in the output."""
+    from .errors import IntegrationError
+
+    missing = cfgmod.sql_missing(cfg)
+    server, port = cfg.get("SQL_SERVER") or "", int(cfg.get("SQL_PORT") or 1433)
+    login_timeout = cfgmod.sql_timeouts()[0]
+
+    def need(*keys):
+        if any(k in missing for k in keys):
+            raise RuntimeError("database not configured: " + ", ".join(k for k in keys if k in missing))
+
+    def db_dns():
+        need("SQL_SERVER")
+        return sorted({ai[4][0] for ai in socket.getaddrinfo(server, port, type=socket.SOCK_STREAM)})
+
+    def db_tcp():
+        with socket.create_connection((server, port), timeout=login_timeout):
+            return f"connected to the database port {port}"
+
+    def db_login():
+        from .sqlserver import SqlServer
+
+        try:
+            with SqlServer(cfg) as db:
+                db.ping()
+        except IntegrationError as exc:  # DATABASE_NOT_CONFIGURED (key names only)
+            raise RuntimeError(exc.err["message"].replace("database settings missing", "database not configured")) from None
+        except errors.ErpError as exc:
+            text = str(exc)
+            low = text.lower()
+            if "login" in low and ("failed" in low or "refused" in low):
+                raise RuntimeError("login refused") from None
+            if "certificate verify failed" in low or "unable to get" in low and "certificate" in low:
+                raise RuntimeError("certificate not trusted: the server's certificate is not signed by the "
+                                   "authority in SQL_CA_PEM") from None
+            if "does not match host name" in low:
+                raise RuntimeError("host name does not match the certificate (SYTELINE_SQL_VERIFY_HOSTNAME=false "
+                                   "switches only this check off)") from None
+            raise RuntimeError(text) from None
+        return "TLS connection, certificate and login accepted; SELECT 1 answered"
+
+    ok = True
+    for name, fn in (("db_dns", db_dns), ("db_tcp", db_tcp), ("db_login", db_login)):
+        if not _stage(name, fn, results):
+            ok = False
+            break  # later database stages depend on earlier ones
+    return ok
 
 
 def run_health(event, context=None):
@@ -156,7 +206,11 @@ def run_health(event, context=None):
             break  # later stages depend on earlier ones
 
     ok = len(results) == len(plan) and all(r["ok"] for r in results)
-    out = {"ok": ok, "dry_run": dry_run, "host": host, "config": cfg["SYTELINE_CONFIG"], "stages": results}
+    if not dry_run and routes.uses_database():  # the database is checked on its own: a web-service failure must not hide it
+        db_ok = _database_stages(cfg, timeout, results)
+        ok = ok and db_ok
+    out = {"ok": ok, "dry_run": dry_run, "host": host, "config": cfg["SYTELINE_CONFIG"], "stages": results,
+           "routes": routes.describe()}
     insecure = [r for r in results if r.get("code") == errors.INSECURE_TRANSPORT]
     if insecure:
         out["errors"] = [errors.error(errors.INSECURE_TRANSPORT, cfgmod.INSECURE_MESSAGE)]

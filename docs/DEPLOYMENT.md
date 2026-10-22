@@ -1,7 +1,7 @@
 # Deploying with the SAM CLI
 
 Target: AWS GovCloud **us-gov-east-1**, one stack named `sytline-connect`, one configuration (`default`).
-Everything below is run from the `scr/` directory. This guide covers deploying the code; the network and ERP
+Everything below is run from the `src/` directory. This guide covers deploying the code; the network and ERP
 prerequisites are listed in section 2 and come from
 `docs/Instruction Sheet AWS GovCloud API Gateway to On-Premises Sy.docx`.
 
@@ -10,6 +10,8 @@ prerequisites are listed in section 2 and come from
 > discovery task (T013 in `specs/001-syteline-erp-integration/tasks.md`) has run. **Keep live ERP writes off.**
 
 > **Two-stage job-number workflow** (reserve the CO and job numbers, then save with them) is part of this stack: see [RESERVATIONS.md](RESERVATIONS.md).
+
+> **The SyteLine database calls** (numbers, customer search, defaults) and the route settings are described in [DATABASE.md](DATABASE.md).
 
 > **No network available, and the ERP is reachable from the internet?** See the stand-alone version without any VPC: [STANDALONE.md](STANDALONE.md).
 
@@ -35,7 +37,7 @@ prerequisites are listed in section 2 and come from
 - AWS CLI v2 with credentials for the GovCloud account, ideally as a named profile (`aws configure list-profiles`; the `aws-us-gov` partition). Select it with `./deploy.sh --profile <name>` (section 4).
 - SAM CLI (`sam --version`): <https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html>
   or `pip install aws-sam-cli`.
-- `python3` with `pip` (any recent 3.x) and `make`. **Docker and a local Python 3.13 are not needed**: `scr/Makefile`
+- `python3` with `pip` (any recent 3.x) and `make`. **Docker and a local Python 3.13 are not needed**: `src/Makefile`
   installs Linux wheels with pip's cross-platform flags.
 - IAM permissions to create CloudFormation stacks, Lambda, API Gateway, DynamoDB, IAM roles, VPC endpoints and
   an S3 bucket for artifacts (SAM creates and manages that bucket: `resolve_s3 = true`).
@@ -62,8 +64,8 @@ prerequisites are listed in section 2 and come from
 
 ## 3. Configure
 
-`scr/samconfig.toml` holds only the fixed settings (stack name, region, capabilities). Site-specific values live in
-`scr/deploy.env`, which is git-ignored and contains no passwords:
+`src/samconfig.toml` holds only the fixed settings (stack name, region, capabilities). Site-specific values live in
+`src/deploy.env`, which is git-ignored and contains no passwords:
 
 ```
 cp deploy.env.example deploy.env
@@ -176,7 +178,7 @@ aws cloudformation describe-stacks --region us-gov-east-1 --stack-name sytline-c
    `GET .../prod/upload-jobs/<upload_id>`. From outside the approved endpoint or without IAM credentials the call must be denied.
 4. **Expected outcome while live writes are off:** the upload ends `failed` with code `LIVE_WRITES_DISABLED`, after
    the read-only customer lookup and **before** any number is allocated or any row is written. If the lookup itself
-   fails (for example `ERP_UNREACHABLE`), the unconfirmed web-service names in `scr/syteline/idos.py` are the first
+   fails (for example `ERP_UNREACHABLE`), the unconfirmed web-service names in `src/syteline/idos.py` are the first
    thing to check. That is what the discovery task is for.
 
 Logs: `sam logs --stack-name sytline-connect --region us-gov-east-1 --name WorkerFunction --tail`

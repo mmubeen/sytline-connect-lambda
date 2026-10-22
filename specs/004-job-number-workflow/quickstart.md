@@ -1,6 +1,6 @@
 # Quickstart: validating the reservation workflow
 
-Prerequisites: the repo's Python test setup (`scr/requirements-dev.txt`); Python 3.12 or 3.13. Nothing here touches a real ERP.
+Prerequisites: the repo's Python test setup (`src/requirements-dev.txt`); Python 3.12 or 3.13. Nothing here touches a real ERP.
 
 ## 1. Automated checks (simulated ERP and table)
 ```
@@ -11,7 +11,7 @@ Expected: all pass. They cover: distinct numbers across concurrent reserves (SC-
 
 ## 2. Template structure
 ```
-sam validate --lint -t scr/template.yaml
+sam validate --lint -t src/template.yaml
 python -m pytest tests/unit/test_template_reservation.py tests/unit/test_template_network.py -q
 ```
 Expected: three new routes on the private API, reserve and worker functions in the VPC, no new network resources, existing tests still green.
@@ -28,4 +28,4 @@ Expected: no new failures versus before this feature (feature 001-003 behavior u
 3. `POST /job-reservations/{id}/save` with matching PO details → 202.
 4. Poll `GET` → `saved`, each line `saved`, jobs `used`. Check in SyteLine that the CO, two lines (reference = job number) and two jobs exist.
 5. Repeat step 3 → 409 `RESERVATION_USED`; nothing new in SyteLine.
-Property names and IDO methods are UNCONFIRMED until discovery; correct them in `scr/syteline/idos.py`.
+Property names and IDO methods are UNCONFIRMED until discovery; correct them in `src/syteline/idos.py`.

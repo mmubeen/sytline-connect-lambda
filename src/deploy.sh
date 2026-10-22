@@ -265,6 +265,11 @@ overrides=(
   "$(q LiveWrites "$live")"
   "$(q CreateApiEndpoint "$api_endpoint_option")"
   # always passed (empty clears a value an earlier deployment set: sam keeps old values for parameters it is not given)
+  # which route each ERP operation uses: an IDO name = the web service, `database` = the SyteLine database (always passed)
+  "$(q NextCoIdo "${NEXT_CO_IDO:-database}")"
+  "$(q NextJobIdo "${NEXT_JOB_IDO:-database}")"
+  "$(q CustomerIdo "${CUSTOMER_IDO:-database}")"
+  "$(q DefaultsIdo "${DEFAULTS_IDO:-database}")"
   "$(q IdpStackName "${IDP_STACK_NAME:-}")"
   "$(q IdpRegion "${IDP_REGION:-}")"
   "$(q IdpOutputBucketName "${IDP_OUTPUT_BUCKET:-}")"

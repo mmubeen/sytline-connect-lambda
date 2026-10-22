@@ -5,7 +5,7 @@ ever starts the call on the other. The database route needs live writes (reservi
 and opens ONE connection for the whole reservation, closed by `close()` / the context manager.
 """
 
-from . import config, idos, routes
+from . import config, idos, routes, steplog
 from .errors import LiveWritesDisabled
 
 _KIND = {"next_co": "co", "next_job": "job"}
@@ -15,7 +15,7 @@ _METHOD = {"next_co": idos.NEXT_CO_METHOD, "next_job": idos.NEXT_JOB_METHOD}
 class NumberSource:
     def __init__(self, soap, cfg=None):
         self._soap = soap
-        self._cfg = cfg if cfg is not None else config.load_config()
+        self._cfg = cfg  # None: loaded only if the database is actually used
         self._db = None
 
     def __enter__(self):
@@ -41,13 +41,20 @@ class NumberSource:
             return str(out[0]).strip() if out else ""
         if not config.live_writes_enabled():  # before any connection is made
             raise LiveWritesDisabled("live ERP writes are disabled (SYTELINE_LIVE_WRITES)")
-        if self._db is None:
-            from .sqlserver import SqlServer
+        started = steplog.now()
+        try:
+            if self._db is None:
+                from .sqlserver import SqlServer
 
-            db = SqlServer(self._cfg)
-            db.__enter__()  # may raise DATABASE_NOT_CONFIGURED / ErpUnreachable: nothing was sent
-            self._db = db
-        return self._db.next_number(_KIND[operation])
+                db = SqlServer(self._cfg if self._cfg is not None else config.load_config())
+                db.__enter__()  # may raise DATABASE_NOT_CONFIGURED / ErpUnreachable: nothing was sent
+                self._db = db
+            number = self._db.next_number(_KIND[operation])
+        except Exception as exc:
+            steplog.step("reserve_number", started, type(exc).__name__, operation=operation)
+            raise
+        steplog.step("reserve_number", started, "reserved", operation=operation)
+        return number
 
     def next_co(self):
         return self.next("next_co")

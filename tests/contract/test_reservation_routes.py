@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from fakes import FakeIdp, FakeJobsTable, FakeLambda, FakeSoap, po_fields
+from fakes import DB_CFG, FakeIdp, FakeJobsTable, FakeLambda, FakeSoap, FakeSqlServer, po_fields
 from handlers import reserve, save_intake
-from syteline import idp
+from syteline import idos, idp
 from syteline.reservations import ReservationStore
 
 CUST = [{"cust_num": "C1", "cust_seq": 0, "name": "ACME"}]
@@ -137,6 +137,71 @@ def test_503_when_the_reservation_cannot_be_recorded(monkeypatch, env, live_writ
     status, out = call(reserve.handler, event(rbody()))
     assert status == 503 and out["errors"][0]["code"] == "STORE_UNAVAILABLE"
     assert env[1].writes() == []
+
+
+# -- numbers from the database (feature 005) --------------------------------------------------------------
+@pytest.fixture
+def db_route(monkeypatch):
+    monkeypatch.setenv(idos.NEXT_CO_SETTING, "database")
+    monkeypatch.setenv(idos.NEXT_JOB_SETTING, "database")
+    for k, v in DB_CFG.items():
+        monkeypatch.setenv(k, v)  # the function's configuration (normally from the ERP secret)
+
+
+def test_201_with_numbers_from_the_database(monkeypatch, env, db_route, live_writes):
+    f = FakeSqlServer().install(monkeypatch)
+    status, out = call(reserve.handler, event(rbody()))
+    assert status == 201 and out["co_num"] == "100" and out["jobs"] == [{"line": 1, "job": "5000"},
+                                                                         {"line": 2, "job": "5001"}]
+    assert f.committed == [100, 5000, 5001] and env[1].calls.count(("invoke", "NextCoSp")) == 0
+
+
+def test_502_with_the_consumed_numbers_when_the_database_outcome_is_unknown(monkeypatch, env, db_route, live_writes):
+    FakeSqlServer(scenarios={("batch", 2): "drop"}).install(monkeypatch)
+    status, out = call(reserve.handler, event(rbody()))
+    assert status == 502 and out["errors"][0]["code"] == "UNCERTAIN_OUTCOME" and out["state"] == "failed"
+    assert out["consumed_unused"] == [{"kind": "co", "number": "100"}]
+
+
+def test_503_when_the_database_is_not_configured_and_nothing_is_reserved(monkeypatch, env, db_route, live_writes):
+    monkeypatch.setenv("SQL_CA_PEM", "")
+    f = FakeSqlServer().install(monkeypatch)
+    status, out = call(reserve.handler, event(rbody()))
+    assert status == 503 and out["errors"][0]["code"] == "DATABASE_NOT_CONFIGURED"
+    assert "SQL_CA_PEM" in out["errors"][0]["message"] and "consumed_unused" not in out and f.connect_kwargs == []
+
+
+# -- customer search through the database (feature 005) ----------------------------------------------------
+DB_CUSTOMERS = [
+    {"cust_num": "C0006", "cust_seq": 0, "name": "ACME DELTA", "addr1": "300 SOUTH AVENUE", "city": "SPOKANE",
+     "state": "WA", "zip": "99201"},
+    {"cust_num": "C0007", "cust_seq": 0, "name": "ACME DELTA GROUP", "addr1": "300 SOUTH AVENUE", "city": "SPOKANE",
+     "state": "WA", "zip": "99201"},
+    {"cust_num": "C0010", "cust_seq": 0, "name": "ACME HYDRAULICS", "addr1": "41 LANE", "city": "DAYTON",
+     "state": "OH", "zip": "45402"},
+]
+
+
+@pytest.mark.parametrize("fields,code", [
+    ({"customer_name": "ACME DELTA", "ship_to_address": "300 South Ave Spokane WA 99201"}, "CUSTOMER_AMBIGUOUS"),
+    ({"customer_name": "ACME HYDRAULICS", "ship_to_address": "9 Other Road Reno NV 89501"}, "CUSTOMER_LOW_CONFIDENCE"),
+    ({"customer_name": "ZETA UNKNOWN", "ship_to_address": "12 Elm St Springfield IL 62701"}, "CUSTOMER_NOT_FOUND")])
+def test_422_with_the_candidates_when_the_database_search_refuses_the_customer(monkeypatch, env, fake_idp, live_writes,
+                                                                             fields, code):
+    monkeypatch.setenv(idos.CUSTOMER_SETTING, "database")
+    for k, v in DB_CFG.items():
+        monkeypatch.setenv(k, v)
+    f = FakeSqlServer(custaddr=DB_CUSTOMERS).install(monkeypatch)
+    fake_idp.add(DOC, po_fields(2, **fields))
+    store, soap, _ = env
+    status, out = call(reserve.handler, event(rbody()))
+    assert status == 422 and out["errors"][0]["code"] == code and out["state"] == "failed"
+    if code != "CUSTOMER_NOT_FOUND":
+        assert out["candidates"] and set(out["candidates"][0]) == {"cust_num", "cust_seq", "name", "score"}
+    else:
+        assert "candidates" not in out
+    assert "consumed_unused" not in out and soap.writes() == []
+    assert not [s for s, _ in f.statements if s.startswith("SET NOCOUNT")]  # no number was asked for
 
 
 # -- the document cannot be used: nothing is reserved or recorded (FR-019, FR-022) ----------------
@@ -401,6 +466,17 @@ def test_status_failed_reservation_lists_consumed_numbers(monkeypatch, full, liv
     assert [j["usage"] for j in view["jobs"]] == ["consumed_unused"]
 
 
+def test_status_shows_the_order_level_warnings_of_the_save(monkeypatch, full, live_writes):
+    (store, soap, _), worker = full
+    monkeypatch.setenv(idos.DEFAULTS_SETTING, "database")  # the worker has no database settings: warning only
+    rid = reserved((store, None, None))
+    call(save_intake.handler, sevent(rid, sbody()))
+    worker.handler({"reservation_id": rid}, None)
+    status, out = get(rid)
+    assert out["state"] == "saved" and len(out["warnings"]) == 1
+    assert out["warnings"][0].startswith("customer defaults not available:")
+
+
 def test_no_po_detail_is_stored_anywhere_after_a_full_reserve_and_save(full, live_writes):
     (store, _, _), worker = full
     rid = reserved((store, None, None))
@@ -420,5 +496,5 @@ def test_status_404_and_no_internal_fields_leak(full, live_writes):
     call(save_intake.handler, sevent(rid, sbody()))
     worker.handler({"reservation_id": rid}, None)
     text = json.dumps(get(rid)[1])
-    for hidden in ("payload_hash", "fingerprint", "caller_identity", ARN, "save", "customer", "ACME", "attempts"):
+    for hidden in ("payload_hash", "fingerprint", "caller_identity", ARN, "save", '"customer"', "ACME", "attempts"):
         assert hidden not in text.replace('"saved"', "").replace("save_accepted", ""), hidden

@@ -18,8 +18,8 @@ Expected: `tests/fixtures/customer_match_golden.json` unchanged unless the demo'
 
 ## 3. Template and layer
 ```
-sam validate --lint -t scr/template.yaml
-IDP_REPO=<idp checkout> make -C scr build-DepsLayer ARTIFACTS_DIR=/tmp/layer
+sam validate --lint -t src/template.yaml
+IDP_REPO=<idp checkout> make -C src build-DepsLayer ARTIFACTS_DIR=/tmp/layer
 ```
 Expected: valid template with the four route parameters and the 1433 egress rules; the layer builds and contains `pytds`, `OpenSSL`, `cryptography`, `rapidfuzz`.
 

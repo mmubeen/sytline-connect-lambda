@@ -1,4 +1,4 @@
-"""Load scr/template.yaml with a CloudFormation-aware YAML loader (T001).
+"""Load src/template.yaml with a CloudFormation-aware YAML loader (T001).
 
 Short-form tags become the long-form dicts: `!Ref x` -> {"Ref": "x"}, `!If [..]` -> {"Fn::If": [..]},
 `!GetAtt A.B` -> {"Fn::GetAtt": ["A", "B"]}, `!Condition c` -> {"Condition": "c"}.
@@ -8,7 +8,7 @@ import os
 
 import yaml
 
-TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "..", "scr", "template.yaml")
+TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "..", "src", "template.yaml")
 
 
 class _Loader(yaml.SafeLoader):

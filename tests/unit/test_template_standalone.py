@@ -1,4 +1,4 @@
-"""scr/template-standalone.yaml: no VPC, no public address, HTTPS by default (FR-001..003, FR-006..008)."""
+"""src/template-standalone.yaml: no VPC, no public address, HTTPS by default (FR-001..003, FR-006..008)."""
 
 import pytest
 

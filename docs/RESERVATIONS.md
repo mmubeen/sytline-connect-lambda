@@ -10,10 +10,10 @@ Design and decisions: [`specs/004-job-number-workflow/`](../specs/004-job-number
 
 The PO details (customer, PO number and lines) are **never sent by the caller and never stored**. They are read from the **IDP document** that holds the extraction result, through the IDP SDK, by `document_id` (the S3 key `batch-id/filename`).
 
-1. `POST /job-reservations` with `request_ref`, `confirmed: true`, `uploaded_by` and `document_id`. The document is read first and must be usable (below). SyteLine then matches the customer from the document (it must be exactly one confident match), and CO and job numbers are reserved: you get `co_num` and one `job` per line, in line order. **Nothing else is written** to SyteLine. Sending the same `request_ref` and request again returns the same numbers (no new ones).
+1. `POST /job-reservations` with `request_ref`, `confirmed: true`, `uploaded_by` and `document_id`. The document is read first and must be usable (below). SyteLine then matches the customer from the document (it must be exactly one confident match: by the web service, or, when no endpoint is configured, the database search with the PO OCR demo's scoring), and CO and job numbers are reserved (by the web service or by SyteLine's own numbering routines in the database; see [DATABASE.md](DATABASE.md)): you get `co_num` and one `job` per line, in line order. **Nothing else is written** to SyteLine. Sending the same `request_ref` and request again returns the same numbers (no new ones).
 2. Use the numbers (for example to name the filed PO copy after the job).
-3. `POST /job-reservations/{id}/save` with `confirmed`, `uploaded_by`, the same `document_id`, and optionally `order_date`, `received_date`, `warehouse`, `order_type`. It answers `202` and a background run reads the document again, then saves: the CO header, then per line the CO line (carrying its job number), the line's teardown date, and the job; then it reads everything back.
-4. `GET /job-reservations/{id}` shows the state, the numbers with what became of each, and the per-line results.
+3. `POST /job-reservations/{id}/save` with `confirmed`, `uploaded_by`, the same `document_id`, and optionally `order_date`, `received_date`, `warehouse`, `order_type`. It answers `202` and a background run reads the document again, then saves: the CO header (with the customer's terms and ship-via from its most recent order, when found), then per line the CO line (carrying its job number), the line's teardown date, and the job; then it reads everything back.
+4. `GET /job-reservations/{id}` shows the state, the numbers with what became of each, the per-line results and any order-level warnings (for example that the customer's defaults were not available).
 
 ### When a document can be used
 
@@ -30,7 +30,11 @@ Reserving is itself a change in SyteLine, so it needs live writes switched on (`
 - Stack parameters `IdpStackName`, `IdpOutputBucketName`, `IdpTrackingTableName` (all three or none) and optionally `IdpRegion`. Without them reserve and save answer `IDP_UNAVAILABLE`. The reserve, save-intake and worker functions get read-only access to that stack's description, its output bucket and its tracking table (same account; cross-account access is not set up).
 - The functions run in the plant-routed network, so they need a private path to **S3 and CloudFormation** (VPC endpoints or a NAT route). This stack creates neither.
 - The IDP SDK is packaged with the functions at build time from a checkout of the IDP accelerator: `IDP_REPO=/path/to/accelerated-intelligent-document-processing-on-aws sam build`. Without `IDP_REPO` the build warns and the SDK is missing. The names `idp-common` and `idp-sdk` must never be installed from public PyPI (the first belongs to someone else); the build copies the code instead.
-- **Field names are unconfirmed.** `scr/syteline/idp_fields.py` holds the defaults (`customer_name`, `cust_po`, `lines[].part_number` ...), taken from the PO OCR demo. Set `IDP_DOCUMENT_CLASS` and `IDP_FIELD_MAP` (a JSON object, for example `{"po_number": "purchase_order"}`) or edit that file once the real class and field names are known.
+- **Field names are unconfirmed.** `src/syteline/idp_fields.py` holds the defaults (`customer_name`, `cust_po`, `lines[].part_number` ...), taken from the PO OCR demo. Set `IDP_DOCUMENT_CLASS` and `IDP_FIELD_MAP` (a JSON object, for example `{"po_number": "purchase_order"}`) or edit that file once the real class and field names are known.
+
+### Where the numbers and the customer come from
+
+For each operation the web service is used when an endpoint is configured; otherwise the SyteLine database is (the PO OCR demo's calls). See [DATABASE.md](DATABASE.md). The customer search refuses ambiguous, low-confidence and unknown customers (`CUSTOMER_AMBIGUOUS`, `CUSTOMER_LOW_CONFIDENCE`, `CUSTOMER_NOT_FOUND`) with the best candidates and their scores; an unknown outcome while reserving a number is `UNCERTAIN_OUTCOME` and is never retried.
 
 ## States
 
@@ -55,6 +59,6 @@ The save stops at the first problem, as the order upload does; it never carries 
 ## Limits and notes
 
 - At most 25 lines per reservation (the reserve call must answer inside API Gateway's 29 s limit; it also stops safely, keeping the numbers it got, if time runs short; the IDP document read adds a few seconds).
-- Not included: filing the scanned PO in a job folder on a network share (the caller can do it using the returned job numbers), and the demo's default terms and ship-via from the customer record.
+- Not included: filing the scanned PO in a job folder on a network share (the caller can do it using the returned job numbers). The demo's default terms and ship-via are included: the save reads them from the customer's most recent order (see [DATABASE.md](DATABASE.md)); when they can't be read the order is saved without them and the status view shows a warning.
 - **Unconfirmed IDP names and review rule:** the IDP field names above, and how a human-reviewed result is recognised (the SDK has no review operation; a reviewed document is assumed to be `COMPLETED` and to report its corrected values meeting their thresholds). Check this on your IDP stack before relying on it.
-- **Unconfirmed ERP names:** the property names written by the save (customer PO number, received date, the line's job reference, teardown, root job, engine serial, serial number, packing) and the update call are guesses until the read-only discovery task is run on the plant network. They are all in `scr/syteline/idos.py` and `SoapIdoClient.update` in `scr/syteline/client.py`. Do not enable live writes for this before then.
+- **Unconfirmed ERP names:** the property names written by the save (customer PO number, received date, terms code, ship-via code, the line's job reference, teardown, root job, engine serial, serial number, packing), the update call and the database names listed in [DATABASE.md](DATABASE.md) are guesses until the read-only discovery task is run on the plant network. They are all in `src/syteline/idos.py` and `SoapIdoClient.update` in `src/syteline/client.py`. Do not enable live writes for this before then.

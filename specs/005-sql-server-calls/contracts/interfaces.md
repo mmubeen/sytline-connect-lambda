@@ -9,7 +9,7 @@ No new API route. The reservation and upload routes keep their shapes; this feat
 | `NextJobIdo` | `SYTELINE_NEXT_JOB_IDO` | `database` | IDO name for `NextWOSp`, or `database` |
 | `CustomerIdo` | `SYTELINE_CUSTOMER_IDO` | `database` | customer collection, or `database` |
 | `DefaultsIdo` | `SYTELINE_DEFAULTS_IDO` | `database` | order collection for terms/ship-via, or `database` |
-Set on `ReserveFunction`, `WorkerFunction` and `DirectFunction` (all three, so reserve, save and the health check agree). A variable that is absent keeps the earlier web-service behaviour (stand-alone version, local runs).
+Set on `ReserveFunction`, `WorkerFunction` and `DirectFunction` (all three, so reserve, save and the health check agree). A variable that is absent keeps the earlier web-service behaviour (stand-alone version, local runs); an absent `DefaultsIdo` means `off` (the routes object shows `"defaults": "off"`): no defaults are read and nothing connects.
 
 ## Secret keys (existing ERP secret)
 `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, optional `SQL_PORT`, `SQL_CA_PEM` (required). See data-model.md.
@@ -17,7 +17,7 @@ Set on `ReserveFunction`, `WorkerFunction` and `DirectFunction` (all three, so r
 ## Health: `{"action":"health"}`
 Added to the response (existing keys and stage order unchanged):
 ```json
-"routes": {"next_co": "database", "next_job": "database", "customer": "webservice:SLCustAddrs", "defaults": "database"}
+"routes": {"next_co": "database", "next_job": "database", "customer": "webservice:SLCustAddrs", "defaults": "off"}
 ```
 Outside the dry run, when any route is `database`, three stages are appended after `token`:
 | Stage | Passes when | Failure detail (never includes credentials) |
