@@ -275,7 +275,7 @@ def test_standalone_uses_its_own_config_environment_and_settings_file(run):
     assert "SAM build --config-env standalone" in calls and "SAM deploy --config-env standalone" in calls
     assert "describe-stacks" not in calls  # no create/supply mode guard
     o = overrides(calls)
-    assert o["SytelineWsdlHttps"] == SA["SYTELINE_WSDL"] and "SytelineWsdlHttp" not in o
+    assert o["SytelineWsdlHttps"] == SA["SYTELINE_WSDL"] and o["SytelineWsdlHttp"] == ""  # the unused one is cleared (sam keeps old values)
     assert o["AllowPlainHttp"] == "false" and o["VerifyTls"] == "true" and o["LiveWrites"] == "false"
     assert o["SytelineUser"] == "svc" and o["SytelineConfig"] == "CCT"
     assert not any(k in o for k in ("WorkerVpcId", "HostNetworkCidr", "ApiVpcEndpointId", "CreateVpcEndpoints"))
@@ -325,7 +325,7 @@ def test_http_address_with_the_override_uses_the_http_parameter_and_warns(run):
     p, calls = sa(run, {"SYTELINE_WSDL": "http://erp.example.com/x?wsdl", "ALLOW_PLAIN_HTTP": "true"})
     assert p.returncode == 0, p.stderr
     o = overrides(calls)
-    assert o["SytelineWsdlHttp"] == "http://erp.example.com/x?wsdl" and "SytelineWsdlHttps" not in o
+    assert o["SytelineWsdlHttp"] == "http://erp.example.com/x?wsdl" and o["SytelineWsdlHttps"] == ""
     assert o["AllowPlainHttp"] == "true"
     assert "UNENCRYPTED" in p.stdout
 

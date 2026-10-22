@@ -91,6 +91,11 @@ resources**, callable only with IAM-permitted cloud credentials (no API gateway,
 group** instead. It requires **HTTPS** to the ERP in both modes (plain HTTP only with an explicit override that sends credentials unencrypted), and cannot use ERP source-address
 allow-listing. See [`docs/STANDALONE.md`](docs/STANDALONE.md).
 
+## Job-number reservations (VPC version)
+A two-stage alternative to the one-step order upload: `POST /job-reservations` reserves the CO and job numbers from SyteLine (writes no
+order, line or job), then `POST /job-reservations/{id}/save` saves the order information using those numbers, following the PO OCR
+demo's flow. `GET /job-reservations/{id}` explains what happened. See [`docs/RESERVATIONS.md`](docs/RESERVATIONS.md).
+
 ## Invoke (direct actions)
 `aws lambda invoke --function-name <name> --payload '{"action":"health"}' --cli-binary-format raw-in-base64-out out.json && cat out.json`
 (omit `--payload` for the default `health` action).

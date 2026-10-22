@@ -32,6 +32,15 @@ CUSTOMER_PROPS = {"cust_num": "CustNum", "cust_seq": "CustSeq", "name": "Name", 
 
 CUSTOMER_LOOKUP_CAP = 50
 
+# Property names written by the job-reservation save (feature 004), following the PO OCR demo's field mapping
+# (JOB_NUMBER_RETRIEVAL.md). ALL UNCONFIRMED until the read-only discovery task has been run against the plant:
+# correct them here only.
+CO_HEADER_PROPS = {"cust_po": "CustPo", "received_date": "DateReceived"}
+LINE_LINK_PROPS = {"ref_type": "RefType", "ref_num": "RefNum", "ref_line_suf": "RefLineSuf", "ref_release": "RefRelease"}
+LINK_NUM_PROP = LINE_LINK_PROPS["ref_num"]  # read back to confirm the line references its job
+LINE_TEARDOWN_PROP = "Teardown"  # set by a separate update after the line exists, as in the demo
+JOB_EXTRA_PROPS = {"root_job": "RootJob", "engine_sn": "EngineSn", "serial_num": "SerialNum", "packing": "Packing"}
+
 
 def customer_ido():
     return os.environ.get("SYTELINE_CUSTOMER_IDO") or _DEFAULT_CUSTOMER_IDO

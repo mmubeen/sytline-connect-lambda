@@ -9,6 +9,8 @@ prerequisites are listed in section 2 and come from
 > The SyteLine web-service names (collections, methods, SOAP operations) are unconfirmed until the read-only
 > discovery task (T013 in `specs/001-syteline-erp-integration/tasks.md`) has run. **Keep live ERP writes off.**
 
+> **Two-stage job-number workflow** (reserve the CO and job numbers, then save with them) is part of this stack: see [RESERVATIONS.md](RESERVATIONS.md).
+
 > **No network available, and the ERP is reachable from the internet?** See the stand-alone version without any VPC: [STANDALONE.md](STANDALONE.md).
 
 ## 1. What gets deployed

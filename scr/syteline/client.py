@@ -7,7 +7,7 @@ specs/001-syteline-erp-integration/research.md): the SOAP operation names and pa
 correction touches only this file.
 
 Safety rules (FR-004, FR-016):
-  * `insert` and `invoke` (a method call may write) refuse to run unless live writes are enabled.
+  * `insert`, `update` and `invoke` (a method call may write) refuse to run unless live writes are enabled.
   * HTTP 200 is NOT acceptance: row-level rejections inside the response raise ErpRejected.
   * A transport failure after a write request may have been sent raises ErpUncertain, never a
     plain failure. There is intentionally no delete operation.
@@ -131,6 +131,22 @@ class SoapIdoClient:
             raise ErpRejected(err)
         rows = parse_rows(raw)
         return rows[0] if rows else dict(values)
+
+    def update(self, ido, key, values):
+        """Update one existing row (identified by `key`, a property -> value dict); return the stored row.
+
+        Same safety classification as `insert`: gated by live writes, a row-level rejection raises ErpRejected,
+        a transport failure after the request may have been sent raises ErpUncertain. ASSUMPTION (UNCONFIRMED,
+        discovery task): an Update change carries the key properties plus the changed ones.
+        """
+        if not config.live_writes_enabled():
+            raise LiveWritesDisabled("live ERP writes are disabled (SYTELINE_LIVE_WRITES)")
+        raw = self._call("save", _xml_changes(ido, "Update", {**key, **values}), write=True)
+        err = row_error(raw)
+        if err:
+            raise ErpRejected(err)
+        rows = parse_rows(raw)
+        return rows[0] if rows else {**key, **values}
 
     def invoke(self, ido, method, params):
         """Call an IDO method (e.g. NextCoSp) through the web service; return its output values.

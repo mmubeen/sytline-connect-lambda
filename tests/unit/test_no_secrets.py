@@ -3,8 +3,9 @@ import logging
 
 import lambda_function as lf
 from fakes import FakeJobsTable, FakeLambda, FakeSoap
-from handlers import intake, status, sweeper, worker
+from handlers import intake, reserve, save_intake, status, sweeper, worker
 from syteline.jobs import JobStore
+from syteline.reservations import ReservationStore
 
 SECRETS = ("S3cr3t-ERP-Pass",)
 
@@ -23,6 +24,13 @@ def test_no_password_in_any_response_or_log(monkeypatch, caplog, live_writes):
     monkeypatch.setattr(sweeper, "_lambda_factory", lambda: FakeLambda())
     monkeypatch.setattr(worker, "_clients_factory", lambda: (soap, {}))
     monkeypatch.setattr(lf, "_client_factory", lambda: soap)
+    rstore = ReservationStore(FakeJobsTable())
+    for mod in (reserve, save_intake):
+        monkeypatch.setattr(mod, "_store_factory", lambda: rstore)
+    monkeypatch.setattr(reserve, "_clients_factory", lambda: soap)
+    monkeypatch.setattr(save_intake, "_lambda_factory", lambda: FakeLambda())
+    monkeypatch.setattr(worker, "_reservation_store_factory", lambda: rstore)
+    monkeypatch.setattr(sweeper, "_reservation_store_factory", lambda: rstore)
 
     outs = [lf.lambda_handler({}, None), lf.lambda_handler({"action": "health", "dry_run": True}, None)]
     body = {"request_ref": "r", "confirmed": True, "uploaded_by": "u", "customer": {"name": "ACME"},
@@ -31,6 +39,15 @@ def test_no_password_in_any_response_or_log(monkeypatch, caplog, live_writes):
     jid = json.loads(r["body"])["upload_id"]
     outs += [r, worker.handler({"upload_id": jid}, None), status.handler({"pathParameters": {"id": jid}}, None),
              sweeper.handler({}, None)]
+    ident = {"requestContext": {"identity": {"userArn": "arn"}}}
+    rb = {"request_ref": "rr", "confirmed": True, "uploaded_by": "u", "customer": {"name": "ACME"},
+          "po_number": "PO-1", "line_count": 1}
+    rr = reserve.handler(dict({"body": json.dumps(rb)}, **ident), None)
+    rid = json.loads(rr["body"])["reservation_id"]
+    sb = {"confirmed": True, "uploaded_by": "u", "customer": {"name": "ACME"}, "po_number": "PO-1",
+          "lines": [{"item": "A", "quantity": 1, "uom": "EA"}]}
+    outs += [rr, save_intake.handler(dict({"body": json.dumps(sb), "pathParameters": {"id": rid}}, **ident), None),
+             worker.handler({"reservation_id": rid}, None)]
     text = json.dumps(outs, default=str) + caplog.text
     for secret in SECRETS:
         assert secret not in text

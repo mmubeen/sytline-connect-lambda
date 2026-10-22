@@ -7,8 +7,9 @@ import pytest
 
 import lambda_function as lf
 from fakes import FakeJobsTable, FakeLambda, FakeSoap
-from handlers import intake, status, sweeper, worker
+from handlers import intake, reserve, save_intake, status, sweeper, worker
 from syteline.jobs import JobStore
+from syteline.reservations import ReservationStore
 
 CUST = [{"cust_num": "C1", "cust_seq": 0, "name": "ACME"}]
 BODY = {"request_ref": "ref-1", "confirmed": True, "uploaded_by": "jdoe", "customer": {"name": "ACME"},
@@ -36,6 +37,13 @@ def env(monkeypatch, caplog, live_writes):
     monkeypatch.setattr(sweeper, "_lambda_factory", lambda: FakeLambda())
     monkeypatch.setattr(worker, "_clients_factory", lambda: (soap, {}))
     monkeypatch.setattr(lf, "_client_factory", lambda: soap)
+    rstore = ReservationStore(FakeJobsTable())
+    for m in (reserve, save_intake):
+        monkeypatch.setattr(m, "_store_factory", lambda: rstore)
+    monkeypatch.setattr(reserve, "_clients_factory", lambda: soap)
+    monkeypatch.setattr(save_intake, "_lambda_factory", lambda: FakeLambda())
+    monkeypatch.setattr(worker, "_reservation_store_factory", lambda: rstore)
+    monkeypatch.setattr(sweeper, "_reservation_store_factory", lambda: rstore)
     monkeypatch.setenv("WORKER_FUNCTION_NAME", "w")
     return store
 
@@ -63,3 +71,22 @@ def test_failures_are_logged_with_their_code(env, caplog):
     logged = lines(caplog)
     assert any(l.get("type") == "create_order" and l.get("outcome") == "400" for l in logged)
     assert any(l.get("type") == "nope" and l.get("errors") == ["UNKNOWN_ACTION"] for l in logged)
+
+
+def test_the_reservation_handlers_log_type_identifiers_outcome_and_duration(env, caplog):
+    ident = {"requestContext": {"identity": {"userArn": "arn:x"}}}
+    rb = {"request_ref": "res-1", "confirmed": True, "uploaded_by": "jdoe", "customer": {"name": "ACME"},
+          "po_number": "PO-1", "line_count": 1}
+    r = reserve.handler(dict({"body": json.dumps(rb)}, **ident), None)
+    rid = json.loads(r["body"])["reservation_id"]
+    sb = {"confirmed": True, "uploaded_by": "jdoe", "customer": {"name": "ACME"}, "po_number": "PO-1",
+          "lines": [{"item": "A", "quantity": 1, "uom": "EA"}]}
+    save_intake.handler(dict({"body": json.dumps(sb), "pathParameters": {"id": rid}}, **ident), None)
+    worker.handler({"reservation_id": rid}, None)
+    by_type = {l["type"]: l for l in lines(caplog)}
+    assert {"reserve", "save_intake", "save"} <= set(by_type)
+    assert by_type["reserve"]["outcome"] == "201" and by_type["reserve"]["reservation_id"] == rid
+    assert by_type["reserve"]["request_ref"] == "res-1" and by_type["reserve"]["uploaded_by"] == "jdoe"
+    assert by_type["save_intake"]["outcome"] == "202" and by_type["save"]["outcome"] == "saved"
+    assert by_type["save"]["co_num"] == "100"
+    assert all(isinstance(by_type[t]["ms"], int) for t in ("reserve", "save_intake", "save"))

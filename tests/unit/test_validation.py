@@ -1,3 +1,6 @@
+import pytest
+
+from syteline import validation
 from syteline.validation import payload_hash, validate_order
 
 
@@ -77,3 +80,55 @@ def test_payload_hash_is_stable_and_sensitive():
     assert payload_hash(a) == payload_hash(dict(reversed(list(b.items()))))
     b["lines"][0]["quantity"] = 3
     assert payload_hash(a) != payload_hash(b)
+
+
+# ---- job reservation requests (feature 004) -------------------------------------------------
+def reserve_body(**kw):
+    b = {"request_ref": "r", "confirmed": True, "uploaded_by": "u", "customer": {"name": "ACME"},
+         "po_number": "PO-1", "line_count": 2}
+    b.update(kw)
+    return b
+
+
+def save_body(**kw):
+    b = {"confirmed": True, "uploaded_by": "u", "customer": {"name": "ACME"}, "po_number": "PO-1",
+         "lines": [{"item": "A", "quantity": 1, "uom": "EA"}]}
+    b.update(kw)
+    return b
+
+
+def test_reserve_request_valid_and_each_problem_reported_together():
+    assert validation.validate_reserve(reserve_body()) == []
+    errs = validation.validate_reserve({"request_ref": "", "confirmed": False, "customer": {"cust_num": "C1"},
+                                        "line_count": True})
+    assert {e["field"] for e in errs} == {"request_ref", "confirmed", "uploaded_by", "customer.name",
+                                          "customer.cust_num", "po_number", "line_count"}
+
+
+@pytest.mark.parametrize("n,code", [(0, "VALIDATION"), (-1, "VALIDATION"), ("2", "VALIDATION"), (2.5, "VALIDATION"),
+                                    (26, "TOO_MANY_LINES")])
+def test_reserve_line_count_limits(n, code):
+    errs = validation.validate_reserve(reserve_body(line_count=n))
+    assert [e["code"] for e in errs] == [code] and errs[0]["field"] == "line_count"
+    assert validation.validate_reserve(reserve_body(line_count=25)) == []
+
+
+def test_save_request_valid_and_line_checks_match_the_order_upload():
+    assert validation.validate_save(save_body()) == []
+    b = save_body(received_date="x", order_date="2026-13-01", warehouse="")
+    b["lines"] = [{"item": "", "quantity": 0, "uom": "", "due_date": "x", "price": -1, "teardown": 5,
+                   "engine_sn": 1, "serial_num": 2, "packing": 3}]
+    fields = {e["field"] for e in validation.validate_save(b)}
+    assert fields == {"received_date", "order_date", "warehouse", "lines[0].item", "lines[0].quantity",
+                      "lines[0].uom", "lines[0].due_date", "lines[0].price", "lines[0].teardown",
+                      "lines[0].engine_sn", "lines[0].serial_num", "lines[0].packing"}
+    assert {e["field"] for e in validation.validate_save(save_body(lines=[]))} == {"lines"}
+    assert {e["field"] for e in validation.validate_save(save_body(lines=[save_body()["lines"][0]] * 26))} == {"lines"}
+
+
+def test_fingerprint_binds_customer_po_and_line_count_and_ignores_case_and_spacing():
+    base = validation.fingerprint({"name": "Acme  Inc", "city": "Phoenix"}, "po-1", 2)
+    assert base == validation.fingerprint({"name": "ACME INC", "city": "phoenix"}, "PO-1", 2)
+    assert base != validation.fingerprint({"name": "ACME INC", "city": "Tucson"}, "PO-1", 2)
+    assert base != validation.fingerprint({"name": "ACME INC", "city": "Phoenix"}, "PO-2", 2)
+    assert base != validation.fingerprint({"name": "ACME INC", "city": "Phoenix"}, "PO-1", 3)

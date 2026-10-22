@@ -443,6 +443,81 @@ Resources:
             Path: /upload-jobs/{id}
             Method: get
 
+  # Job-number workflow (feature 004). Reserve runs in the plant-routed network (it calls the ERP and reads the
+  # secret) and answers synchronously, so it must finish inside API Gateway's 29 s limit.
+  ReserveFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Handler: handlers.reserve.handler
+      Timeout: 28
+      VpcConfig:
+        SecurityGroupIds: !If [CreateNetwork, [!Ref FunctionSecurityGroup], !Split [",", !Ref WorkerSecurityGroupIds]]
+        SubnetIds: !If [CreateNetwork, [!Ref HostSubnetA, !Ref HostSubnetB], !Split [",", !Ref WorkerSubnetIds]]
+      Environment:
+        Variables:
+          SYTELINE_WSDL: !Ref SytelineWsdl
+          SYTELINE_USER: !Ref SytelineUser
+          SYTELINE_CONFIG: !Ref SytelineConfig
+          SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
+          SYTELINE_LIVE_WRITES: !Ref LiveWrites
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref SytelineSecretArn
+      Events:
+        Post:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OrderApi
+            Path: /job-reservations
+            Method: post
+
+  SaveIntakeFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Handler: handlers.save_intake.handler
+      Timeout: 15
+      Environment:
+        Variables:
+          WORKER_FUNCTION_NAME: !Ref WorkerFunction
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref WorkerFunction
+      Events:
+        Post:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OrderApi
+            Path: /job-reservations/{id}/save
+            Method: post
+
+  ReservationStatusFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Handler: handlers.reservation_status.handler
+      Timeout: 10
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref JobsTable
+      Events:
+        Get:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OrderApi
+            Path: /job-reservations/{id}
+            Method: get
+
   WorkerFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -560,3 +635,5 @@ Outputs:
     Value: !Ref DirectFunction
   JobsTableName:
     Value: !Ref JobsTable
+  ReserveFunctionName:
+    Value: !Ref ReserveFunction

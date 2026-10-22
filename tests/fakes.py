@@ -99,6 +99,26 @@ class FakeSoap:
             raise ErpUncertain("timeout after insert")
         return row
 
+    def update(self, ido, key, values):
+        """Update the stored row(s) matching `key`; scenarios as for insert, keyed ("update", ido, nth)."""
+        self._gate_check()
+        self.calls.append(("update", ido))
+        action = self._scenario("update", ido)
+        if action == "reject":
+            raise ErpRejected(f"{ido} update rejected by ERP")
+        if action == "timeout_before":
+            raise ErpUncertain("timeout")
+        if action == "unreachable":
+            raise ErpUnreachable("connect failed")
+        rows = [r for r in self.rows.get(ido, []) if all(str(r.get(k, "")) == str(v) for k, v in key.items())]
+        if not rows:
+            raise ErpRejected(f"{ido} row not found for update")
+        for r in rows:
+            r.update(values)
+        if action == "timeout_after":
+            raise ErpUncertain("timeout after update")
+        return dict(rows[0])
+
     def invoke(self, ido, method, params):
         self._gate_check()  # refused before it counts as a write
         self.calls.append(("invoke", method))
@@ -147,7 +167,7 @@ class FakeSoap:
         return len(self.rows.get(ido, []))
 
     def writes(self):
-        return [c for c in self.calls if c[0] in ("insert", "invoke")]
+        return [c for c in self.calls if c[0] in ("insert", "invoke", "update")]
 
 
 class FakeClientError(Exception):

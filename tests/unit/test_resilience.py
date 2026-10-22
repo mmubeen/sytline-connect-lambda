@@ -90,6 +90,29 @@ def test_http_200_with_row_level_rejection_is_rejected(live_writes):
         client(Svc(save=[diffgram])).insert("SLCos", {"CoNum": "1"})
 
 
+def test_update_refused_when_live_writes_off():
+    svc = Svc(save=[OK_ROW])
+    with pytest.raises(LiveWritesDisabled):
+        client(svc).update("CCT_Coitems", {"CoNum": "1", "CoLine": 1}, {"Teardown": "x"})
+    assert svc.save_results == [OK_ROW]  # SaveDataSet never called
+
+
+def test_update_classification_matches_insert(live_writes):
+    key, vals = {"CoNum": "1", "CoLine": 1}, {"Teardown": "x"}
+    assert client(Svc(save=[OK_ROW])).update("CCT_Coitems", key, vals)
+    with pytest.raises(ErpUncertain):
+        client(Svc(save=[TimeoutError("read timed out")])).update("CCT_Coitems", key, vals)
+    with pytest.raises(ErpUnreachable):
+        client(Svc(save=[ConnectionError("Failed to establish a new connection")])).update("CCT_Coitems", key, vals)
+    with pytest.raises(ErpRejected):
+        client(Svc(save=[Fault("no such row")])).update("CCT_Coitems", key, vals)
+    diffgram = ('<diffgram xmlns:diffgr="urn:schemas-microsoft-com:xml-diffgram-v1"><DataSet>'
+                '<CCT_Coitems diffgr:hasErrors="true" diffgr:Error="locked"><CoNum>1</CoNum></CCT_Coitems>'
+                '</DataSet></diffgram>')
+    with pytest.raises(ErpRejected, match="locked"):
+        client(Svc(save=[diffgram])).update("CCT_Coitems", key, vals)
+
+
 def test_row_error_variants_and_clean_response():
     assert row_error("<a><Error>bad</Error></a>") == "bad"
     assert row_error("<a><b Error='nope'/></a>") == "nope"
