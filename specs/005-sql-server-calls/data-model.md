@@ -55,3 +55,7 @@ All values travel as parameters; the routine name comes from a two-entry constan
 - `SYTELINE_DB_CHECK` / `DatabaseCheck`: `auto` (default), `true`, `false` (see research.md R16). Template `AllowedValues: ["auto", "true", "false"]`; `deploy.sh --standalone` setting `DATABASE_CHECK` (default `auto`).
 - Decision table (not a dry run; "routes" = the plant route settings): routes use the database -> stages run. Else mode `false` -> nothing. Mode `auto` -> stages if attached, else nothing. Mode `true` -> stages if attached, else the `database_check` skip note.
 - Deployment rule: `DatabaseCheck=true` still needs the three `Attach*` settings; `auto` and `false` do not.
+
+
+## Revision 2026-10-22: mode parity (no stored data)
+Parity rules, per setting present as a parameter in both templates (research.md R18): (1) equal `Type`, `Default`, `AllowedValues`, `AllowedPattern`; (2) same environment variable names on `DirectFunction` referencing it; (3) `deploy.sh` passes it in both branches from `UPPER_SNAKE(Param)`, default equal to the template default; (4) both example files list `UPPER_SNAKE(Param)=`, with the template default as the example value when that default is non-empty. Exceptions table: `SYTELINE_WSDL` wiring. Violations are reported as strings of the form `<where>: <setting>: <what differs>`.

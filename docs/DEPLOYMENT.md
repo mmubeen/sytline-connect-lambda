@@ -134,6 +134,8 @@ aws cloudformation describe-stacks --region us-gov-east-1 --stack-name sytline-c
 
 Then run the health check (section 5); it should now pass `dns`, `tcp`, `wsdl` and `token`.
 
+> **Adding a setting that both deployments have?** The plant stack (`template.yaml`) and the stand-alone stack (`template-standalone.yaml`) are separate files, so a setting they share must be added to **both** templates (same name, default and allowed values, wired to the same environment variable), to **both** branches of `deploy.sh`, and to **both** `deploy*.env.example` files. `tests/unit/test_mode_parity.py` fails, naming the setting, when any of these differ; a setting that only one mode has is never flagged. See [STANDALONE.md](STANDALONE.md).
+
 ## 4. Validate, build, deploy
 
 ```

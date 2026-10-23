@@ -113,6 +113,8 @@ When the function is attached, its health check can also test the plant **SyteLi
 
 Details and failure meanings: [DATABASE.md](DATABASE.md).
 
+> **Adding a setting that both deployments have?** The plant stack (`template.yaml`) and the stand-alone stack (`template-standalone.yaml`) are separate files, so a setting they share must be added to **both** templates (same name, default and allowed values, wired to the same environment variable), to **both** branches of `deploy.sh`, and to **both** `deploy*.env.example` files. `tests/unit/test_mode_parity.py` fails, naming the setting, when any of these differ; a setting that only one mode has is never flagged. See [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ## 4. Allow a caller to invoke it
 
 Grant the calling principal permission, for example attach this to its IAM role:

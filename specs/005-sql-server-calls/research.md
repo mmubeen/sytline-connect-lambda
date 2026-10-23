@@ -79,3 +79,21 @@ The template always sets all four, with default `database` (the existing web-ser
 A missing database key is not special-cased: `db_login` fails naming the keys, as for the plant version, and `ok` is false.
 **Consequence to state**: an already-attached stand-alone deployment starts showing the three stages on its next health call, and `ok` is false until the database keys exist in the secret; `DatabaseCheck=false` keeps the earlier result.
 **Alternatives**: auto only when `SQL_SERVER` is in the secret (rejected by the deployer: a missing key should be visible, not silent); keep default off (superseded).
+
+
+## Revision 2026-10-22: parity tests for the two deployment modes (R17 to R19)
+
+## R17. Scope: tests only
+**Decision**: no template, script or code restructuring (clarified). A new `tests/unit/test_mode_parity.py` compares the plant (`src/template.yaml`) and stand-alone (`src/template-standalone.yaml`) deployments, `src/deploy.sh` and the two example files. Findings when planned: the eight parameters present in both templates (`LiveWrites`, `SqlEncrypt`, `SqlLoginTimeout`, `SqlVerifyHostname`, `SytelineConfig`, `SytelineSecretArn`, `SytelineUser`, `UseFipsEndpoints`) are identical today apart from description wording, and every shared environment variable is wired the same way except `SYTELINE_WSDL` (plant: one parameter; stand-alone: the https/http pair by design). The tests lock that state in.
+
+## R18. What "shared" and "in sync" mean
+**Decision**: the shared set is computed, not listed: the parameters that exist in both templates. Adding a parameter to both therefore puts it under test automatically; adding it to only one is not an error (modes legitimately differ: network, attachment, route and tuning settings are plant-only; WSDL pair, `AllowPlainHttp`, `VerifyTls`, `Attach*`, `DatabaseCheck` stand-alone-only). For each shared parameter the tests check:
+1. **Template definition**: `Type`, `Default`, `AllowedValues`, `AllowedPattern` equal in both (descriptions may differ: they describe the mode).
+2. **Function wiring**: the environment variables of `DirectFunction` that reference the parameter are the same names in both templates (`{Ref: Param}` only; derived values such as the WSDL `If` are listed in an explicit exceptions table with a reason).
+3. **deploy.sh**: the parameter is passed in both the plant branch and the stand-alone branch, from the same environment variable (the upper-snake-case of the parameter name: `SqlLoginTimeout` -> `SQL_LOGIN_TIMEOUT`, with `UseFipsEndpoints` -> `USE_FIPS_ENDPOINTS`), and where the script supplies a default (`${VAR:-default}`) it equals the template default. A small mapping table lists parameters whose script variable does not follow the rule (none expected today).
+4. **Example files**: both `deploy.env.example` and `deploy.standalone.env.example` contain a line `VAR=` for that variable (commented or not), and for parameters with a non-empty template default the example value equals it.
+**Exceptions table**: `SYTELINE_WSDL` wiring only. Every entry must carry a reason and the test fails if an entry is no longer needed (no stale exceptions).
+
+## R19. Proving the tests catch drift (SC-011)
+**Decision**: besides checking the real files, the module has a self-test that mutates in-memory copies (a changed default, a changed allowed value, a parameter missing from `deploy.sh` text, a variable missing from an example, a differently named environment variable) and asserts the checker reports each, so a future edit that weakens the checker is itself caught. The checker is a set of plain functions returning lists of violation strings; the real-file tests assert the lists are empty.
+**Alternatives**: snapshot/golden files of the parameter tables (hide intent, produce noisy diffs); generating one file from the other (structural change, rejected by the clarification).

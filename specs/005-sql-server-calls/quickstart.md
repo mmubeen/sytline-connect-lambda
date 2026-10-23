@@ -44,3 +44,7 @@ Verify the `LongList` / `Infobar` types, the routine signatures and the `custadd
 
 ## 7. Automatic stand-alone check (revision 2026-10-22)
 `python -m pytest tests/unit/test_config.py tests/unit/test_health_database.py tests/unit/test_template_standalone.py tests/unit/test_deploy_script.py tests/unit/test_standalone_parity.py -q`: `auto` is the default; an attached stand-alone function runs the stages without any switch; not attached it shows the earlier result with no note; `false` never runs; `true` without attachment is refused at deployment. Deployed: an attached `./deploy.sh --standalone` with no `DATABASE_CHECK` setting shows the three stages on `{"action":"health"}` (failing with the missing keys named until they are in the secret).
+
+
+## 8. Mode parity (revision 2026-10-22)
+`python -m pytest tests/unit/test_mode_parity.py -q`: all pass on the current files. To see it work, change `Default: "5"` of `SqlLoginTimeout` in only one template (or delete `SQL_LOGIN_TIMEOUT` from one example file) and re-run: the suite fails naming the setting; revert the change afterwards.

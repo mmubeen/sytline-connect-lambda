@@ -67,3 +67,7 @@ Secret keys, error and stage messages: as in the sections above. The stand-alone
 - `true`: as `auto`, and refused at deployment without the three `Attach*` settings.
 - `false`: never, whatever the attachment.
 A missing database key makes `db_login` fail naming the keys (`database not configured: ...`) and the overall `ok` false. The plant deployment never sets this variable and is unchanged.
+
+
+## Revision 2026-10-22: parity contract (test contract, no runtime interface)
+`tests/unit/test_mode_parity.py` exposes pure functions used by the tests and the self-test: `shared_parameters(plant, standalone)`, `template_violations(plant, standalone)`, `wiring_violations(plant, standalone)`, `script_violations(script_text, plant, standalone)`, `example_violations(example_texts, plant, standalone)`; each returns a list of violation strings (empty = in sync). Adding a setting to both modes must require updating all four places or the suite fails; adding it to one mode only never fails the parity tests.

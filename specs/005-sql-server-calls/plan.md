@@ -12,6 +12,8 @@ Add the PO OCR demo's three database calls to the VPC deployment, each used **on
 
 **Revision 2026-10-22 (automatic stand-alone check):** the stand-alone database check now runs automatically whenever the function is attached (`DatabaseCheck` = `auto`, the new default; `true` forces, `false` disables). See research.md R16.
 
+**Revision 2026-10-22 (mode parity):** a new test module `tests/unit/test_mode_parity.py` keeps the settings shared by the plant and stand-alone deployments in sync across the two templates, `deploy.sh` and the example files (spec FR-015, SC-011). Tests only: no structural change (research.md R17 to R19).
+
 ## Technical Context
 
 **Language/Version**: Python 3.13 (Lambda; existing code), SAM/CloudFormation YAML

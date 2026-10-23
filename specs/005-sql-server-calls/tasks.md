@@ -156,6 +156,18 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 
 ---
 
+## Phase 11: Revision 2026-10-22 - keep the two deployment modes in sync with parity tests (spec FR-015, SC-011; research.md R17 to R19)
+
+**Goal**: any drift of a setting shared by the plant and stand-alone deployments, between the two templates, `deploy.sh` and the example files, fails the test suite. Tests only; no change to the templates, script or code.
+
+- [X] T053 Create `tests/unit/test_mode_parity.py` with the checker functions of contracts/interfaces.md: `shared_parameters` (parameters present in both templates, loaded with `tests/cfn_template.py`), `template_violations` (equal `Type`, `Default`, `AllowedValues`, `AllowedPattern`; descriptions ignored), `wiring_violations` (environment variables of `DirectFunction` that are exactly `{"Ref": <shared parameter>}` must have the same names in both templates; exceptions table limited to `SYTELINE_WSDL` with its reason), `script_violations` (in `src/deploy.sh` each shared parameter is passed by `q <Param> ...` in BOTH the stand-alone branch and the plant `overrides=(...)` list, from the environment variable `UPPER_SNAKE(Param)`, and a `${VAR:-default}` default equals the template default; mapping table for exceptions, empty today) and `example_violations` (both `src/deploy.env.example` and `src/deploy.standalone.env.example` contain a line `VAR=` or `# VAR=` for each shared setting, with the template default as value when that default is not empty)
+- [X] T054 In the same module add the real-file tests (each asserts its violation list is empty, with the list in the failure message) and a test that every exceptions-table entry is still necessary (no stale exceptions) and carries a non-empty reason
+- [X] T055 In the same module add the self-test (SC-011): mutate in-memory copies (changed `Default`, changed `AllowedValues`, parameter removed from the script text of one branch, variable removed from one example, an environment variable renamed in one template) and assert the checker reports each with the setting name; plus a test that the shared set is not accidentally empty (at least the eight parameters known at planning time are present) so a loader failure cannot pass silently
+- [X] T056 Run the whole suite, `cfn-lint src/template.yaml src/template-standalone.yaml`, `sam validate --lint` for both templates; fix any real drift the new tests reveal in the template, script or examples (not by weakening the tests); only the pre-existing failures (12 failures, 2 errors in `tests/unit/test_transport.py`, `tests/contract/test_health.py`, `tests/unit/test_standalone_parity.py`) may remain
+- [X] T057 [P] Document the rule in `docs/DEPLOYMENT.md` and `docs/STANDALONE.md` (one short paragraph: a setting added to both modes must be added to both templates, both script branches and both example files; the parity tests enforce it)
+
+---
+
 ## Dependencies and order
 
 - Phase 1 first (T001 to T004 touch different files and can run together). T005 and T006 need T002 and T004; T007 needs T006's interface; T008 needs T006 and T007; T009 needs T006 and T007.
@@ -164,6 +176,7 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 - US3 (T021 to T024) needs T006 and T003; T023 follows T013 and T012's file changes (`pipeline.py`, `reserve.py` are touched by earlier tasks) and US2's `resolver.py` (customer match is its input).
 - US4 (T025 to T026) needs T005 and T006 and can run any time after Phase 2.
 - Polish after the stories it documents or checks (T027 needs T005's setting names).
+- Phase 11 (parity tests) after Phase 10: T053 then T054 then T055 (same file, sequential); T056 after T055; T057 in parallel with T054 to T056.
 - Phase 10 (automatic check) after Phase 9: T047 first; T048 needs T047; T049 needs only the new value names; T050 and T051 in parallel after T049; T052 last.
 - Phase 9 (stand-alone database check) after Phase 8: T040 first; T041 needs T040; T042 needs only the setting names from T040; T043 needs T042's parameter names (different file, parallel after T042); T044 needs T041 and T042; T045 after T041 to T043; T046 last.
 - Phase 8 (revision) after Phases 1-7: T033 first (config); T034 needs T033; T035 needs T034 and the existing `FakeSqlServer`; T036 needs T034 (`SqlServer.encrypted`); T037 needs only the setting name from T033 and can run in parallel with T034 to T036; T038 after T034 to T037; T039 last.
