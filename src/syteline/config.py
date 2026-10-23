@@ -116,10 +116,13 @@ def verify_tls():
 SQL_REQUIRED = ("SQL_SERVER", "SQL_DATABASE", "SQL_USER", "SQL_PASS", "SQL_CA_PEM")
 
 
-def db_check():
-    """True only when SYTELINE_DB_CHECK is exactly `true` (trimmed, any case): the stand-alone health check also tests the
-    database. Never set by the plant deployment, which switches the check on through its route settings instead."""
-    return os.environ.get("SYTELINE_DB_CHECK", "false").strip().lower() == "true"
+def db_check_mode():
+    """SYTELINE_DB_CHECK as `true`, `false` or `auto` (trimmed, any case; absent, empty or any other value is `auto`).
+
+    Stand-alone health check only: `auto` runs the database stages when the function is attached to a VPC, `true` forces
+    them (the deployment refuses it without the attachment), `false` never runs them. The plant deployment never sets it."""
+    value = os.environ.get("SYTELINE_DB_CHECK", "auto").strip().lower()
+    return value if value in ("true", "false") else "auto"
 
 
 def attached():

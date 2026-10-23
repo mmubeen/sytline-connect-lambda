@@ -213,15 +213,17 @@ def run_health(event, context=None):
     ok = len(results) == len(plan) and all(r["ok"] for r in results)
     standalone_skip = False
     # the database is checked on its own: a web-service failure must not hide it. The plant version checks it when an
-    # operation uses it; the stand-alone version only when asked (SYTELINE_DB_CHECK) and attached to a VPC.
-    wanted = routes.uses_database() or cfgmod.db_check()
-    if not dry_run and wanted and (routes.uses_database() or cfgmod.attached()):
-        db_ok = _database_stages(cfg, timeout, results)
-        ok = ok and db_ok
-        if not cfgmod.sql_encrypt():  # the explicit option is in use: say so, loudly
-            warnings.append(UNENCRYPTED_WARNING)
-    elif not dry_run and wanted:
-        standalone_skip = True
+    # operation's route uses it. The stand-alone version (no route variable) follows SYTELINE_DB_CHECK: `auto` runs it when
+    # attached to a VPC, `true` forces it (noting a skip when not attached), `false` never runs it.
+    mode = cfgmod.db_check_mode()
+    if not dry_run:
+        if routes.uses_database() or (mode != "false" and cfgmod.attached()):
+            db_ok = _database_stages(cfg, timeout, results)
+            ok = ok and db_ok
+            if not cfgmod.sql_encrypt():  # the explicit option is in use: say so, loudly
+                warnings.append(UNENCRYPTED_WARNING)
+        elif mode == "true":
+            standalone_skip = True
     out = {"ok": ok, "dry_run": dry_run, "host": host, "config": cfg["SYTELINE_CONFIG"], "stages": results,
            "routes": routes.describe()}
     if standalone_skip:

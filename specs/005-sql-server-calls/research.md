@@ -68,3 +68,14 @@ The template always sets all four, with default `database` (the existing web-ser
 
 ## R15. Template, deploy and network
 **Decision**: `template-standalone.yaml` gains parameters `DatabaseCheck` (default `false`), `SqlEncrypt` (default `true`), `SqlVerifyHostname` (default `true`), `SqlLoginTimeout` (default `5`) and the env on `DirectFunction`: `SYTELINE_DB_CHECK`, `SYTELINE_SQL_ENCRYPT`, `SYTELINE_SQL_VERIFY_HOSTNAME`, `SYTELINE_SQL_LOGIN_TIMEOUT`, `SYTELINE_ATTACHED`. A rule refuses `DatabaseCheck=true` without the three attachment settings (nothing is created). `deploy.sh --standalone` and `deploy.standalone.env.example` get `DATABASE_CHECK`, `SQL_ENCRYPT`, `SQL_VERIFY_HOSTNAME`, `SQL_LOGIN_TIMEOUT` (always passed, validated like the plant ones; `SQL_ENCRYPT=false` warns). The database keys go in the secret (`SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, optional `SQL_PORT`, `SQL_CA_PEM` while encrypted). The stack creates no network rule: the deployer's security group must allow TCP 1433 from the function to the database. The layer already contains the driver (shared `requirements.txt`).
+
+
+## Revision 2026-10-22: automatic stand-alone check (R16)
+
+## R16. Three-valued database check
+**Decision**: `SYTELINE_DB_CHECK` (stand-alone parameter `DatabaseCheck`) takes `auto`, `true` or `false`; absent or any other value means `auto`. `config.db_check_mode()` returns the normalised value (trimmed, lower-cased). Rule in `health.run_health` (not a dry run, which never touches the database):
+- the plant routes decide first, exactly as today: `routes.uses_database()` runs the stages whatever the mode (the plant template never sets `SYTELINE_DB_CHECK` or `SYTELINE_ATTACHED`);
+- otherwise, mode `false`: no stages and no note; mode `auto`: run the stages when `config.attached()`, else do nothing (quietly: it is the default for functions that were never meant to reach the plant, so no skip note); mode `true`: run when attached, else no stages and the note `database_check: skipped: the function is not attached to a VPC` (reachable only by forcing the environment: the template and `deploy.sh` refuse `true` without the attachment).
+A missing database key is not special-cased: `db_login` fails naming the keys, as for the plant version, and `ok` is false.
+**Consequence to state**: an already-attached stand-alone deployment starts showing the three stages on its next health call, and `ok` is false until the database keys exist in the secret; `DatabaseCheck=false` keeps the earlier result.
+**Alternatives**: auto only when `SQL_SERVER` is in the secret (rejected by the deployer: a missing key should be visible, not silent); keep default off (superseded).

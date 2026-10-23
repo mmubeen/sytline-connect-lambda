@@ -59,3 +59,11 @@ Where a response carries these, `step` names the operation (`number_co`, `number
 
 Health response, stand-alone, `DatabaseCheck=true`: attached -> the stages and the unencrypted warning exactly as in the plant version; not attached (only reachable by forcing the environment) -> no database stage and `"database_check": "skipped: the function is not attached to a VPC"`. With `DatabaseCheck=false` (default) the response is unchanged from today.
 Secret keys, error and stage messages: as in the sections above. The stand-alone actions `add_note` and `get_notes` never use the database.
+
+
+## Revision 2026-10-22: automatic stand-alone check
+`DatabaseCheck` / `SYTELINE_DB_CHECK` is now `auto` | `true` | `false`, default `auto` (the table above showed `true`/`false`, default `false`; this supersedes it):
+- `auto`: the stand-alone health check runs `db_dns`, `db_tcp`, `db_login` (and the unencrypted warning) whenever the function is attached to a VPC; a function that is not attached shows exactly the earlier result.
+- `true`: as `auto`, and refused at deployment without the three `Attach*` settings.
+- `false`: never, whatever the attachment.
+A missing database key makes `db_login` fail naming the keys (`database not configured: ...`) and the overall `ok` false. The plant deployment never sets this variable and is unchanged.

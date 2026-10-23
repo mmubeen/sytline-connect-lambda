@@ -183,3 +183,32 @@ def test_the_standalone_notes_actions_never_open_a_database_connection(modes, mo
                   {"action": "add_note", "record_type": "co", "record_key": "900", "text": "hi"}):
         lf.lambda_handler(event, None)
     assert f.connect_kwargs == [] and f.statements == []
+
+
+def test_the_default_setting_gives_an_attached_standalone_function_the_plants_database_stages(modes, monkeypatch):
+    """DatabaseCheck defaults to auto: attached means the stages run with no switch, the same as the plant version."""
+    from fakes import FakeSqlServer
+    from syteline import health
+
+    seen = {}
+    for kind in ("standalone", "vpc"):
+        modes(kind)
+        _db_env(monkeypatch, kind)
+        if kind == "standalone":
+            monkeypatch.delenv("SYTELINE_DB_CHECK", raising=False)  # nothing set: the default (auto)
+        _fake_db_network(monkeypatch)
+        FakeSqlServer().install(monkeypatch)
+        out = health.run_health({"action": "health"})
+        seen[kind] = [(s["stage"], s["ok"]) for s in out["stages"] if s["stage"].startswith("db_")]
+    assert seen["standalone"] == seen["vpc"] and [n for n, _ in seen["vpc"]] == ["db_dns", "db_tcp", "db_login"]
+
+
+def test_an_unattached_standalone_function_keeps_the_earlier_health_result_by_default(modes, monkeypatch):
+    from fakes import FakeSqlServer
+
+    modes("standalone")
+    monkeypatch.delenv("SYTELINE_DB_CHECK", raising=False)
+    monkeypatch.setenv("SYTELINE_ATTACHED", "false")
+    f = FakeSqlServer().install(monkeypatch)
+    out = lf.lambda_handler({"action": "health"}, None)
+    assert [s["stage"] for s in out["stages"]] == ["dns", "tcp"] and "database_check" not in out and f.connect_kwargs == []

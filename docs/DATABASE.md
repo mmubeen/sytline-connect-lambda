@@ -69,12 +69,12 @@ The stand-alone Lambda has no actions that reserve numbers, search customers or 
 
 | `deploy.standalone.env` | Stack parameter | Default | Meaning |
 |---|---|---|---|
-| `DATABASE_CHECK` | `DatabaseCheck` | `false` | `true` adds the database stages; refused unless all three `ATTACH_*` settings are given |
+| `DATABASE_CHECK` | `DatabaseCheck` | `auto` | `auto`: the database stages run whenever the function is attached to a VPC (not attached: unchanged). `true`: always (refused unless all three `ATTACH_*` settings are given). `false`: never |
 | `SQL_ENCRYPT` | `SqlEncrypt` | `true` | as above (`false` = unencrypted, warned, no CA needed) |
 | `SQL_VERIFY_HOSTNAME` | `SqlVerifyHostname` | `true` | as above |
 | `SQL_LOGIN_TIMEOUT` | `SqlLoginTimeout` | `5` | seconds |
 
-The database keys go in the secret, and the security group must allow TCP 1433. If the check is switched on but the function is not attached, no stage runs and the response says `database_check: skipped: the function is not attached to a VPC`. See [STANDALONE.md](STANDALONE.md).
+The database keys go in the secret, and the security group must allow TCP 1433. With `auto` an attached function shows the stages on every health call; a database key missing from the secret appears as a failing `db_login` stage naming the key, and the overall `ok` is false (set `DATABASE_CHECK=false` to keep the earlier result). An unattached function is unchanged. Only a forced `true` that reaches an unattached function (the template and script refuse it) reports `database_check: skipped: the function is not attached to a VPC`. See [STANDALONE.md](STANDALONE.md).
 
 ## Checking it (before the first PO)
 

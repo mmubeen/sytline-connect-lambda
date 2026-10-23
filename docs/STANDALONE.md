@@ -105,11 +105,11 @@ network settings in place (detaching can take several minutes to release the net
 
 When the function is attached, its health check can also test the plant **SyteLine database** (SQL Server), so you can confirm the path before the plant version is used. The stand-alone actions themselves never use the database; this adds only the stages `db_dns` (the name resolves), `db_tcp` (the port accepts a connection) and `db_login` (login, then `SELECT 1`).
 
-1. In `deploy.standalone.env` set `DATABASE_CHECK=true` (it needs the three `ATTACH_*` settings; the script and the template refuse it otherwise).
+1. Nothing to switch on: with the default `DATABASE_CHECK=auto` the check runs as soon as the function is attached (the three `ATTACH_*` settings). `DATABASE_CHECK=false` turns it off; `true` forces it and is refused without the attachment.
 2. Put the database keys in the credentials secret: `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, optional `SQL_PORT`, and `SQL_CA_PEM` while the connection is encrypted. They are never set in `deploy.standalone.env`.
 3. Make your security group allow **TCP 1433** from the function to the database (the stack creates no network rule).
 4. Encryption: the default is encrypted with the certificate verified. If the server offers no verifiable certificate, set `SQL_ENCRYPT=false`: no CA is needed, but the login and password then cross the network unprotected; the health result and the logs carry a warning every time. `SQL_VERIFY_HOSTNAME=false` turns off only the host-name check.
-5. Run `{"action":"health"}` and read the three `db_*` stages. Without a VPC attachment the check is not run (the response says `database_check: skipped`). With `DATABASE_CHECK=false` (the default) the health result is exactly as before.
+5. Run `{"action":"health"}` and read the three `db_*` stages. If the database keys are not in the secret yet, `db_login` fails naming them and `ok` is false until they are added. An unattached function shows no database stage; with `DATABASE_CHECK=false` the health result is exactly as before.
 
 Details and failure meanings: [DATABASE.md](DATABASE.md).
 

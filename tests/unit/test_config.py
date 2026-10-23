@@ -99,12 +99,22 @@ def test_the_ca_certificate_is_required_only_while_encrypted(monkeypatch):
 
 
 # ---- stand-alone database check (feature 005, revision 2026-10-22) -----------------------------------------
-@pytest.mark.parametrize("name,fn", [("SYTELINE_DB_CHECK", config.db_check), ("SYTELINE_ATTACHED", config.attached)])
-@pytest.mark.parametrize("value,expected", [(None, False), ("", False), ("false", False), ("1", False), ("yes", False),
-                                            ("truee", False), ("true", True), (" TRUE ", True), ("True", True)])
-def test_the_standalone_switches_are_on_only_for_the_exact_value_true(monkeypatch, name, fn, value, expected):
+@pytest.mark.parametrize("value,expected", [(None, "auto"), ("", "auto"), ("auto", "auto"), ("AUTO", "auto"), ("maybe", "auto"),
+                                            ("1", "auto"), ("yes", "auto"), ("true", "true"), (" TRUE ", "true"),
+                                            ("false", "false"), (" False ", "false")])
+def test_the_database_check_mode_is_true_false_or_auto_and_defaults_to_auto(monkeypatch, value, expected):
     if value is None:
-        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv("SYTELINE_DB_CHECK", raising=False)
     else:
-        monkeypatch.setenv(name, value)
-    assert fn() is expected
+        monkeypatch.setenv("SYTELINE_DB_CHECK", value)
+    assert config.db_check_mode() == expected
+
+
+@pytest.mark.parametrize("value,expected", [(None, False), ("", False), ("false", False), ("1", False), ("truee", False),
+                                            ("true", True), (" TRUE ", True), ("True", True)])
+def test_attached_is_on_only_for_the_exact_value_true(monkeypatch, value, expected):
+    if value is None:
+        monkeypatch.delenv("SYTELINE_ATTACHED", raising=False)
+    else:
+        monkeypatch.setenv("SYTELINE_ATTACHED", value)
+    assert config.attached() is expected

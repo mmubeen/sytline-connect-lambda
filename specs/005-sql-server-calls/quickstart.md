@@ -40,3 +40,7 @@ Verify the `LongList` / `Infobar` types, the routine signatures and the `custadd
 ## 6. Stand-alone version (revision 2026-10-22)
 1. `python -m pytest tests/unit/test_template_standalone.py tests/unit/test_standalone_parity.py tests/unit/test_health_database.py tests/unit/test_deploy_script.py -q`: the new parameters default to off, `DatabaseCheck=true` needs the three attachment settings, the plant health result is unchanged, the stand-alone result is unchanged with the default, and with the check on and attached the stages and warning match the plant version.
 2. Deploy `./deploy.sh --standalone` with the three `ATTACH_*` settings, `DATABASE_CHECK=true` and the database keys in the secret; invoke `{"action":"health"}`: `db_dns`, `db_tcp`, `db_login` pass (the security group must allow TCP 1433). Without `ATTACH_*` the script refuses `DATABASE_CHECK=true`.
+
+
+## 7. Automatic stand-alone check (revision 2026-10-22)
+`python -m pytest tests/unit/test_config.py tests/unit/test_health_database.py tests/unit/test_template_standalone.py tests/unit/test_deploy_script.py tests/unit/test_standalone_parity.py -q`: `auto` is the default; an attached stand-alone function runs the stages without any switch; not attached it shows the earlier result with no note; `false` never runs; `true` without attachment is refused at deployment. Deployed: an attached `./deploy.sh --standalone` with no `DATABASE_CHECK` setting shows the three stages on `{"action":"health"}` (failing with the missing keys named until they are in the secret).

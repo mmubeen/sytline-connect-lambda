@@ -210,7 +210,7 @@ def test_the_vpc_template_has_no_standalone_parameters_or_guard(standalone_templ
 
 
 # ---- optional database connectivity check (feature 005, revision 2026-10-22) -----------------------------------------
-DB_PARAMS = {"DatabaseCheck": "false", "SqlEncrypt": "true", "SqlVerifyHostname": "true", "SqlLoginTimeout": "5"}
+DB_PARAMS = {"DatabaseCheck": "auto", "SqlEncrypt": "true", "SqlVerifyHostname": "true", "SqlLoginTimeout": "5"}
 DB_ENV = {"SYTELINE_DB_CHECK": "DatabaseCheck", "SYTELINE_SQL_ENCRYPT": "SqlEncrypt",
           "SYTELINE_SQL_VERIFY_HOSTNAME": "SqlVerifyHostname", "SYTELINE_SQL_LOGIN_TIMEOUT": "SqlLoginTimeout"}
 
@@ -245,9 +245,17 @@ def test_database_check_without_a_vpc_attachment_is_refused_naming_all_three(sta
     assert any("AttachVpcId" in m and "AttachSubnetIds" in m and "AttachSecurityGroupIds" in m and "DatabaseCheck" in m
                for m in msgs)
     assert ev(standalone_template, SytelineWsdlHttps=HTTPS, DatabaseCheck="true", **ATTACH).violations() == []
-    assert ev(standalone_template, SytelineWsdlHttps=HTTPS, DatabaseCheck="false").violations() == []
+    for free in ("auto", "false"):  # only "true" forces the check, so only "true" needs the attachment
+        assert ev(standalone_template, SytelineWsdlHttps=HTTPS, DatabaseCheck=free).violations() == []
 
 
 def test_the_encryption_and_numeric_parameters_reject_bad_values(standalone_template):
-    for p, v in (("SqlEncrypt", "maybe"), ("SqlVerifyHostname", "1"), ("DatabaseCheck", "yes"), ("SqlLoginTimeout", "x")):
+    for p, v in (("SqlEncrypt", "maybe"), ("SqlVerifyHostname", "1"), ("DatabaseCheck", "yes"), ("DatabaseCheck", ""),
+                 ("SqlLoginTimeout", "x")):
         assert ev(standalone_template, SytelineWsdlHttps=HTTPS, **{p: v}).parameter_errors(), p
+
+
+def test_database_check_accepts_exactly_auto_true_and_false(standalone_template):
+    assert standalone_template["Parameters"]["DatabaseCheck"]["AllowedValues"] == ["auto", "true", "false"]
+    for ok in ("auto", "true", "false"):
+        assert ev(standalone_template, SytelineWsdlHttps=HTTPS, DatabaseCheck=ok, **ATTACH).parameter_errors() == []

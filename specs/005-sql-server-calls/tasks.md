@@ -143,6 +143,19 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 
 ---
 
+## Phase 10: Revision 2026-10-22 - the stand-alone database check runs automatically when attached (spec FR-011; research.md R16)
+
+**Goal**: `DatabaseCheck` becomes `auto` (default) | `true` | `false`; an attached stand-alone function shows the database stages with no extra setting; the plant version and the default for an unattached function are unchanged.
+
+- [X] T047 In `src/syteline/config.py` replace `db_check()` with `db_check_mode()` returning `"true"`, `"false"` or `"auto"` (trimmed, lower-cased; absent, empty or any other value is `"auto"`); update `tests/unit/test_config.py` accordingly
+- [X] T048 In `src/syteline/health.py` apply the decision table of data-model.md: stages run when not a dry run and (`routes.uses_database()` or (mode in `auto`/`true` and `config.attached()`)); mode `true` and not attached and no route uses the database adds `database_check: skipped: ...`; mode `auto` not attached adds nothing; mode `false` never runs the stand-alone path; extend `tests/unit/test_health_database.py` (auto attached runs with no switch; auto not attached unchanged and no note; true attached; true not attached skip note; false attached none; a missing key shows in `db_login` and `ok` is false; plant routes unchanged) and `tests/unit/test_standalone_parity.py` (default attached stand-alone equals the plant stages)
+- [X] T049 In `src/template-standalone.yaml` set `DatabaseCheck` to `AllowedValues: ["auto", "true", "false"]`, `Default: "auto"` (description: auto runs it when attached), keep the rule that `true` needs the three `Attach*` settings, and update `tests/unit/test_template_standalone.py` (default `auto`, `auto` and `false` accepted without attachment, `true` refused without, bad value rejected) and `tests/unit/test_template_database.py`
+- [X] T050 [P] In `src/deploy.sh` (`--standalone`) accept `DATABASE_CHECK` as `auto|true|false` (default `auto`, always passed), refuse `true` without the three `ATTACH_*` settings, refuse any other value with `DATABASE_CHECK must be auto, true or false`; update `src/deploy.standalone.env.example` and `tests/unit/test_deploy_script.py`
+- [X] T051 [P] Update `docs/DATABASE.md`, `docs/STANDALONE.md`, `docs/TESTING.md` and the README line: automatic when attached, the three values, the consequence for existing attached deployments (database stages appear; `ok` false until the keys are in the secret; `DATABASE_CHECK=false` keeps the earlier result)
+- [X] T052 Run the whole suite, `cfn-lint src/template.yaml src/template-standalone.yaml`, `sam validate --lint` for both templates; only the pre-existing failures (12 failures, 2 errors in `tests/unit/test_transport.py`, `tests/contract/test_health.py`, `tests/unit/test_standalone_parity.py`) may remain
+
+---
+
 ## Dependencies and order
 
 - Phase 1 first (T001 to T004 touch different files and can run together). T005 and T006 need T002 and T004; T007 needs T006's interface; T008 needs T006 and T007; T009 needs T006 and T007.
@@ -151,11 +164,13 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 - US3 (T021 to T024) needs T006 and T003; T023 follows T013 and T012's file changes (`pipeline.py`, `reserve.py` are touched by earlier tasks) and US2's `resolver.py` (customer match is its input).
 - US4 (T025 to T026) needs T005 and T006 and can run any time after Phase 2.
 - Polish after the stories it documents or checks (T027 needs T005's setting names).
+- Phase 10 (automatic check) after Phase 9: T047 first; T048 needs T047; T049 needs only the new value names; T050 and T051 in parallel after T049; T052 last.
 - Phase 9 (stand-alone database check) after Phase 8: T040 first; T041 needs T040; T042 needs only the setting names from T040; T043 needs T042's parameter names (different file, parallel after T042); T044 needs T041 and T042; T045 after T041 to T043; T046 last.
 - Phase 8 (revision) after Phases 1-7: T033 first (config); T034 needs T033; T035 needs T034 and the existing `FakeSqlServer`; T036 needs T034 (`SqlServer.encrypted`); T037 needs only the setting name from T033 and can run in parallel with T034 to T036; T038 after T034 to T037; T039 last.
 
 ## Parallel examples
 
+- Phase 10: after T049, T050 (`deploy.sh` and the env example) and T051 (docs) in parallel; T047 and T048 touch `config.py` and `health.py` and are sequential.
 - Phase 8: T037 (template, deploy script) alongside T034 to T036 (code and tests); T035 and T036 are different test files and can run together once T034 is done.
 - Phase 1: T001, T002, T003 together; T004 alone (it edits `config.py`).
 - Phase 2: after T006, T007 and T009 together; T008 after T007.
@@ -166,4 +181,5 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 
 - **MVP**: Phases 1, 2 and US1 (T001-T015): numbers from the database with the specified failure behaviour, on both the reservation and the one-step upload.
 - **Then**: US2 makes the customer decision identical to the demo, US3 fills the header defaults, US4 makes the whole path observable. Do not enable live writes or run any step against the plant database until the unconfirmed names (`LongList`, `Infobar`, routine signatures, `custaddr` / `co` columns, `SLCos` terms and ship property names) have been verified read-only.
+- **Revision (Phases 9 and 10)**: T040 to T046 add the optional stand-alone database check (done); T047 to T052 make it automatic when the function is attached (`DatabaseCheck=auto`, the new default). Do T047 to T049 first (config, health, template), then the script and docs in parallel.
 - **Revision (Phase 8)**: T033 to T039 make `SQL_CA_PEM` optional by adding the explicit, warned unencrypted option; the default stays encrypted and verified. Do it before the first run against the plant database, because that server offers no certificate the functions can verify.

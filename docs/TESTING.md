@@ -121,12 +121,12 @@ Wait for `saved` (or investigate `partly_saved`, `failed`, `needs_reconciliation
 The API is private: call it from inside the VPC or through the execute-api endpoint with an IAM-signed request (for example `awscurl --service execute-api`). Routes: `POST /job-reservations`, `POST /job-reservations/{id}/save`, `GET /job-reservations/{id}` (and `POST /confirmed-orders` for the one-step upload). The API ID is the `ApiId` stack output. The caller identity is then the signing principal.
 
 ## Step 11b: Stand-alone version, database check (optional)
-Deploy `./deploy.sh --standalone` with the three `ATTACH_*` settings and `DATABASE_CHECK=true` (the database keys in the secret, TCP 1433 allowed from the function's security group), then:
+Deploy `./deploy.sh --standalone` with the three `ATTACH_*` settings (the database check is automatic when attached; `DATABASE_CHECK=auto` is the default), the database keys in the secret and TCP 1433 allowed from the function's security group, then:
 ```
 aws lambda invoke --function-name <StandaloneDirectFunction> --cli-binary-format raw-in-base64-out \
   --payload '{"action":"health"}' out.json && cat out.json
 ```
-Expect `db_dns`, `db_tcp`, `db_login` after the web-service stages, and a `warnings` entry if `SQL_ENCRYPT=false`. Without the VPC attachment the script refuses `DATABASE_CHECK=true`. With `DATABASE_CHECK=false` the health result has no database stage. Failure meanings are the same as in step 4.
+Expect `db_dns`, `db_tcp`, `db_login` after the web-service stages, and a `warnings` entry if `SQL_ENCRYPT=false`. Until the database keys are in the secret `db_login` fails naming them and `ok` is false. Without the VPC attachment there is no database stage (and the script refuses `DATABASE_CHECK=true`). With `DATABASE_CHECK=false` the health result has no database stage. Failure meanings are the same as in step 4.
 
 ## Step 12: Check the records and stop
 - **CloudWatch logs:** each function writes one structured line per request, and each database step its own line (type, outcome, duration, counts). Confirm no password or login appears.

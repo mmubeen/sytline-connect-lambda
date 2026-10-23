@@ -86,7 +86,7 @@ def test_the_standalone_template_has_the_encryption_setting_only_for_its_health_
     standalone = load_template(os.path.join(os.path.dirname(__file__), "..", "..", "src", "template-standalone.yaml"))
     env = standalone["Resources"]["DirectFunction"]["Properties"]["Environment"]["Variables"]
     assert env["SYTELINE_SQL_ENCRYPT"] == {"Ref": "SqlEncrypt"} and env["SYTELINE_DB_CHECK"] == {"Ref": "DatabaseCheck"}
-    assert standalone["Parameters"]["DatabaseCheck"]["Default"] == "false"  # the default stand-alone health is unchanged
+    assert standalone["Parameters"]["DatabaseCheck"]["Default"] == "auto"  # attached: the stages show; not attached: unchanged
 
 
 TUNING_VARS = {"SYTELINE_SITE_ID": "SiteId", "SYTELINE_MATCH_MIN_SCORE": "MatchMinScore",

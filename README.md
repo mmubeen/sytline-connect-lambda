@@ -89,7 +89,7 @@ the default credential chain).
 resources**, callable only with IAM-permitted cloud credentials (no API gateway, no public address). By default it runs **outside any VPC**
 (the ERP must then be reachable from the internet); with the three `ATTACH_*` settings it runs **inside an existing VPC, subnets and security
 group** instead. It requires **HTTPS** to the ERP in both modes (plain HTTP only with an explicit override that sends credentials unencrypted), and cannot use ERP source-address
-allow-listing. When attached, its health check can also test the plant database (`DATABASE_CHECK=true`; the actions never use it). See [`docs/STANDALONE.md`](docs/STANDALONE.md).
+allow-listing. When attached, its health check also tests the plant database automatically (`DATABASE_CHECK=auto`, or `false` to turn it off; the actions never use the database). See [`docs/STANDALONE.md`](docs/STANDALONE.md).
 
 ## Job-number reservations (VPC version)
 A two-stage alternative to the one-step order upload: `POST /job-reservations` reserves the CO and job numbers from SyteLine (writes no

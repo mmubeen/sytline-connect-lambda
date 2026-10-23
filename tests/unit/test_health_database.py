@@ -216,24 +216,28 @@ def test_no_warning_and_no_database_stage_when_no_operation_uses_the_database(en
 
 
 # ---- the stand-alone database check (revision 2026-10-22) -------------------------------------------------------
-def standalone(monkeypatch, check=True, attached=True):
-    """Stand-alone shape: no route variable set (nothing routes to the database), database check by its own switch."""
+def standalone(monkeypatch, check="auto", attached=True):
+    """Stand-alone shape: no route variable set (nothing routes to the database), database check by its own setting.
+    check: "auto" (the default), "true", "false" or None (variable absent)."""
     for v in OPS.values():
         monkeypatch.delenv(v, raising=False)
-    monkeypatch.setenv("SYTELINE_DB_CHECK", "true" if check else "false")
+    if check is None:
+        monkeypatch.delenv("SYTELINE_DB_CHECK", raising=False)
+    else:
+        monkeypatch.setenv("SYTELINE_DB_CHECK", str(check).lower())
     monkeypatch.setenv("SYTELINE_ATTACHED", "true" if attached else "false")
 
 
-def test_standalone_default_has_no_database_stage_and_the_response_is_unchanged(env):
-    standalone(env, check=False, attached=True)
+def test_standalone_false_never_checks_the_database_even_when_attached(env):
+    standalone(env, check="false", attached=True)
     f = FakeSqlServer().install(env)
     out = health.run_health({"action": "health"})
     assert db_stages(out) == [] and "database_check" not in out and f.connect_kwargs == []
     assert set(out) == {"ok", "dry_run", "host", "config", "stages", "routes"}
 
 
-def test_standalone_check_on_and_attached_runs_the_three_stages(env):
-    standalone(env)
+def test_standalone_check_true_and_attached_runs_the_three_stages(env):
+    standalone(env, check="true")
     with_db_settings(env)
     fake_network(env)
     f = FakeSqlServer().install(env)
@@ -258,7 +262,7 @@ def test_standalone_unencrypted_option_warns_and_needs_no_ca(env):
 
 
 def test_standalone_check_on_but_not_attached_skips_and_makes_no_connection(env):
-    standalone(env, attached=False)
+    standalone(env, check="true", attached=False)
     with_db_settings(env)
     f = FakeSqlServer().install(env)
     out = health.run_health({"action": "health"})
@@ -289,6 +293,72 @@ def test_the_plant_version_is_unchanged_routes_still_trigger_the_stages_even_if_
     database_everywhere(env)
     env.delenv("SYTELINE_ATTACHED", raising=False)
     env.delenv("SYTELINE_DB_CHECK", raising=False)
+    with_db_settings(env)
+    fake_network(env)
+    FakeSqlServer().install(env)
+    assert [s["stage"] for s in db_stages(health.run_health({"action": "health"}))] == ["db_dns", "db_tcp", "db_login"]
+
+
+# ---- automatic stand-alone check: DatabaseCheck = auto | true | false (revision 2026-10-22, research.md R16) -------------
+def test_the_default_mode_is_auto_so_an_attached_standalone_function_checks_the_database_with_no_switch(env):
+    standalone(env, check=None, attached=True)  # SYTELINE_DB_CHECK absent
+    with_db_settings(env)
+    fake_network(env)
+    FakeSqlServer().install(env)
+    out = health.run_health({"action": "health"})
+    assert [s["stage"] for s in db_stages(out)] == ["db_dns", "db_tcp", "db_login"] and "database_check" not in out
+
+
+def test_auto_and_not_attached_is_exactly_the_earlier_result_with_no_note_and_no_connection(env):
+    standalone(env, check="auto", attached=False)
+    with_db_settings(env)
+    f = FakeSqlServer().install(env)
+    out = health.run_health({"action": "health"})
+    assert db_stages(out) == [] and "database_check" not in out and f.connect_kwargs == []
+    assert set(out) == {"ok", "dry_run", "host", "config", "stages", "routes"}
+
+
+def test_auto_and_attached_with_missing_database_keys_shows_them_and_is_not_ok(env):
+    standalone(env, check="auto", attached=True)
+    with_db_settings(env, SQL_SERVER="", SQL_USER="")
+    fake_network(env)
+    f = FakeSqlServer().install(env)
+    out = health.run_health({"action": "health"})
+    first = db_stages(out)[0]  # the name lookup cannot even start without a server
+    assert first["stage"] == "db_dns" and first["ok"] is False and "SQL_SERVER" in first["error"]
+    assert out["ok"] is False and f.connect_kwargs == []
+    with_db_settings(env, SQL_USER="")
+    out = health.run_health({"action": "health"})
+    login = [s for s in out["stages"] if s["stage"] == "db_login"][0]
+    assert login["ok"] is False and "database not configured" in login["error"] and "SQL_USER" in login["error"]
+    assert DB_CFG["SQL_PASS"] not in repr(out)
+
+
+@pytest.mark.parametrize("mode,attached,runs,note", [("auto", True, True, False), ("auto", False, False, False),
+                                                      ("true", True, True, False), ("true", False, False, True),
+                                                      ("false", True, False, False), ("false", False, False, False)])
+def test_the_decision_table_for_the_standalone_check(env, mode, attached, runs, note):
+    standalone(env, check=mode, attached=attached)
+    with_db_settings(env)
+    fake_network(env)
+    FakeSqlServer().install(env)
+    out = health.run_health({"action": "health"})
+    assert bool(db_stages(out)) is runs and ("database_check" in out) is note
+
+
+def test_a_dry_run_never_checks_the_database_in_any_mode(env):
+    for mode in ("auto", "true", "false"):
+        standalone(env, check=mode, attached=True)
+        with_db_settings(env)
+        f = FakeSqlServer().install(env)
+        out = health.run_health({"action": "health", "dry_run": True})
+        assert db_stages(out) == [] and "database_check" not in out and f.connect_kwargs == []
+
+
+def test_the_plant_routes_still_decide_whatever_the_stand_alone_setting_says(env):
+    database_everywhere(env)
+    env.setenv("SYTELINE_DB_CHECK", "false")
+    env.delenv("SYTELINE_ATTACHED", raising=False)
     with_db_settings(env)
     fake_network(env)
     FakeSqlServer().install(env)

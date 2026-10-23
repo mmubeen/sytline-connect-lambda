@@ -100,8 +100,8 @@ if [[ "$standalone" == "true" ]]; then
   fi
 
   # optional database connectivity check of the health action (feature 005): needs the VPC attachment
-  database_check="${DATABASE_CHECK:-false}"
-  [[ "$database_check" =~ ^(true|false)$ ]] || die "DATABASE_CHECK must be true or false"
+  database_check="${DATABASE_CHECK:-auto}"
+  [[ "$database_check" =~ ^(auto|true|false)$ ]] || die "DATABASE_CHECK must be auto, true or false"
   [[ "${SQL_ENCRYPT:-true}" =~ ^(true|false)$ ]] || die "SQL_ENCRYPT must be true or false"
   [[ "${SQL_VERIFY_HOSTNAME:-true}" =~ ^(true|false)$ ]] || die "SQL_VERIFY_HOSTNAME must be true or false"
   [[ "${SQL_LOGIN_TIMEOUT:-5}" =~ ^[0-9]+$ ]] || die "SQL_LOGIN_TIMEOUT must be a whole number"

@@ -395,7 +395,7 @@ def test_http_address_without_the_override_is_refused_before_any_sam_call(run):
     assert p.returncode != 0 and "ALLOW_PLAIN_HTTP=true" in p.stderr and "SAM" not in calls
 
 
-STANDALONE_DB = {"DatabaseCheck": "false", "SqlEncrypt": "true", "SqlVerifyHostname": "true", "SqlLoginTimeout": "5"}
+STANDALONE_DB = {"DatabaseCheck": "auto", "SqlEncrypt": "true", "SqlVerifyHostname": "true", "SqlLoginTimeout": "5"}
 ATT = {"ATTACH_VPC_ID": "vpc-0abc1234", "ATTACH_SUBNET_IDS": "subnet-0a1,subnet-0b2", "ATTACH_SG_IDS": "sg-0c3"}
 
 
@@ -417,7 +417,7 @@ def test_standalone_database_check_needs_the_vpc_attachment_and_passes_through_w
     assert "UNENCRYPTED" in p.stdout
 
 
-@pytest.mark.parametrize("name,value,message", [("DATABASE_CHECK", "yes", "DATABASE_CHECK must be true or false"),
+@pytest.mark.parametrize("name,value,message", [("DATABASE_CHECK", "yes", "DATABASE_CHECK must be auto, true or false"),
                                                  ("SQL_ENCRYPT", "maybe", "SQL_ENCRYPT must be true or false"),
                                                  ("SQL_VERIFY_HOSTNAME", "1", "SQL_VERIFY_HOSTNAME must be true or false"),
                                                  ("SQL_LOGIN_TIMEOUT", "fast", "SQL_LOGIN_TIMEOUT must be a whole number")])
@@ -528,3 +528,14 @@ def test_attached_mode_keeps_the_https_rule_and_the_live_write_approval(run):
     assert p.returncode != 0 and "ALLOW_PLAIN_HTTP=true" in p.stderr and "SAM" not in calls
     p, calls = sa(run, {**ATTACH, "LIVE_WRITES": "true"})
     assert p.returncode != 0 and "LIVE_APPROVAL_REF" in p.stderr
+
+
+def test_standalone_auto_and_false_need_no_vpc_attachment_and_true_does(run):
+    for value in ("auto", "false"):
+        p, calls = sa(run, {"DATABASE_CHECK": value})
+        assert p.returncode == 0, (value, p.stdout + p.stderr)
+        assert overrides(calls)["DatabaseCheck"] == value
+    p, calls = sa(run, {"DATABASE_CHECK": "true"})
+    assert p.returncode != 0 and not deployed(calls)
+    p, calls = sa(run, {"DATABASE_CHECK": "true", **ATT})
+    assert p.returncode == 0 and overrides(calls)["DatabaseCheck"] == "true"

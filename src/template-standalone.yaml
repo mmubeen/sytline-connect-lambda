@@ -71,12 +71,14 @@ Parameters:
   #     adds the db_dns / db_tcp / db_login stages to the health check, and only when attached to an existing VPC. ---
   DatabaseCheck:
     Type: String
-    Default: "false"
-    AllowedValues: ["false", "true"]
+    Default: "auto"
+    AllowedValues: ["auto", "true", "false"]
     Description: >-
-      "true": the health check also tests the SyteLine database (name lookup, connection, login). Needs the three Attach*
-      settings. The database keys (SQL_SERVER, SQL_DATABASE, SQL_USER, SQL_PASS, and SQL_CA_PEM while encrypted) go in
-      the credentials secret; the security group must allow TCP 1433 to the database.
+      Whether the health check also tests the SyteLine database (name lookup, connection, login). "auto" (default):
+      when the function is attached to a VPC (it then shows the database stages, failing and naming any key missing
+      from the secret); not attached: unchanged. "true": always (needs the three Attach* settings). "false": never.
+      The database keys (SQL_SERVER, SQL_DATABASE, SQL_USER, SQL_PASS, and SQL_CA_PEM while encrypted) go in the
+      credentials secret; the security group must allow TCP 1433 to the database.
   SqlEncrypt:
     Type: String
     Default: "true"

@@ -10,6 +10,8 @@ Add the PO OCR demo's three database calls to the VPC deployment, each used **on
 
 **Revision 2026-10-22 (stand-alone health check):** the stand-alone Lambda also gets the database settings, used only by its connectivity check and only when attached to an existing VPC (research.md R13 to R15). No new database operation; `sqlserver.py` and the health stages are reused.
 
+**Revision 2026-10-22 (automatic stand-alone check):** the stand-alone database check now runs automatically whenever the function is attached (`DatabaseCheck` = `auto`, the new default; `true` forces, `false` disables). See research.md R16.
+
 ## Technical Context
 
 **Language/Version**: Python 3.13 (Lambda; existing code), SAM/CloudFormation YAML
