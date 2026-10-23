@@ -94,6 +94,14 @@ The same workflow can be started automatically by the IDP's finished-document ev
 A step-by-step test sequence, from credential-free checks to an approved live-write window: [`docs/TESTING.md`](docs/TESTING.md).
 
 ## Invoke (direct actions)
+Easiest: `src/invoke.sh` sends a payload read from a file and prints the response (it checks the file is valid JSON first; `--check` only inspects it, `--log` shows the log tail; `--profile`, `--function`, `--region`, `--async` as needed):
+
+    cd src
+    ./invoke.sh ../sample_events.json                 # the IDP finished-document event (no "action" needed)
+    echo '{"action":"health","dry_run":true}' > /tmp/health.json && ./invoke.sh /tmp/health.json
+
+Or with the AWS CLI directly:
+
 `aws lambda invoke --function-name <name> --payload '{"action":"health"}' --cli-binary-format raw-in-base64-out out.json && cat out.json`
 The health check **must** be asked for with `"action":"health"`: a payload without an `action` is treated as an IDP finished-document event (the default action, `document_event`) and a payload that is not such an event is refused with a message that says so ([`docs/EVENT_INTAKE.md`](docs/EVENT_INTAKE.md)).
 

@@ -49,7 +49,7 @@ The response is discarded by EventBridge (asynchronous invoke, **no retries**); 
 ## Switching it on
 
 1. Verify the IDP calls and the unconfirmed ERP/IDP names read-only first ([TESTING.md](TESTING.md) step 5 and the notes of features 004 and 005).
-2. Invoke the Lambda with the example event while live writes are off: `aws lambda invoke --function-name <DirectFunctionName> --payload fileb://sample_events.json out.json` (use `--payload file://…` with `--cli-binary-format raw-in-base64-out` for AWS CLI v2 text payloads). Expect `refused`/`DOCUMENT_NEEDS_REVIEW` if a field is below its threshold, or `read_only` otherwise; the summary is in the response.
+2. Invoke the Lambda with the example event while live writes are off (`cd src && ./invoke.sh ../sample_events.json`; `./invoke.sh --check ../sample_events.json` looks at the file first; the raw command is): `aws lambda invoke --function-name <DirectFunctionName> --payload fileb://sample_events.json out.json` (use `--payload file://…` with `--cli-binary-format raw-in-base64-out` for AWS CLI v2 text payloads). Expect `refused`/`DOCUMENT_NEEDS_REVIEW` if a field is below its threshold, or `read_only` otherwise; the summary is in the response.
 3. Set `IDP_STATE_MACHINE_ARN` in `deploy.env` (PLANT ONLY block; the state machine must be in the same account and region as this stack) and redeploy. A rule now sends each `SUCCEEDED` execution of that state machine to the function. Empty it and redeploy to stop.
 4. Turn on live writes only in an approved window ([DEPLOYMENT.md](DEPLOYMENT.md)).
 
