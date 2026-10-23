@@ -110,9 +110,13 @@ def read_document(document_id):
     except IntegrationError:
         raise
     except Exception as exc:
-        log.warning("IDP client could not be created: %s", type(exc).__name__)
+        # the exception type, and for a missing module its name (a module name is not sensitive); never the message
+        module = getattr(exc, "name", None) if isinstance(exc, ImportError) and isinstance(getattr(exc, "name", None), str) else None
+        log.warning("IDP client could not be created: %s%s", type(exc).__name__, f" (module {module})" if module else "")
+        extra = {"module": module} if module else {}
         raise _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be reached", cause=type(exc).__name__,
-                      hint=_HINTS.get(type(exc).__name__, "see the function log line 'IDP client could not be created'")) from None
+                      hint=_HINTS.get(type(exc).__name__, "see the function log line 'IDP client could not be created'"),
+                      **extra) from None
     with _idp_errors(document_id):
         status = client.document.get_status(document_id=document_id)
         state = _state(status)

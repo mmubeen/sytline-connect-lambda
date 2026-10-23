@@ -196,6 +196,21 @@ def test_the_idp_and_save_settings_are_wired_and_the_idp_parameters_are_all_or_n
     assert Evaluator(template, IdpStackName="idp", **NET).condition("HasIdp") is True
 
 
+def test_the_idp_permissions_include_the_lookup_function_of_the_idp_stack_and_only_that_function(template):
+    cond = next(p for p in fn(template)["Policies"] if isinstance(p, dict) and "Fn::If" in p)["Fn::If"]
+    assert cond[0] == "HasIdp" and cond[2] == {"Ref": "AWS::NoValue"}
+    statements = cond[1]["Statement"]
+    invoke = [s for s in statements if s["Action"] == "lambda:InvokeFunction"]
+    assert len(invoke) == 1  # nothing broader than the one function the SDK needs
+    resource = invoke[0]["Resource"]["Fn::Sub"][0]
+    assert resource.endswith(":function:${IdpStackName}-LookupFunction-*") and resource.count("*") == 1
+    assert ":lambda:${IdpRegionName}:${AWS::AccountId}:" in resource
+    assert invoke[0]["Effect"] == "Allow"
+    # the other IDP read permissions are still there
+    actions = {a for s in statements for a in (s["Action"] if isinstance(s["Action"], list) else [s["Action"]])}
+    assert {"cloudformation:DescribeStacks", "s3:GetObject", "dynamodb:GetItem"} <= actions
+
+
 def test_the_erp_secret_and_live_writes_settings_are_unchanged(template):
     assert {"SYTELINE_WSDL", "SYTELINE_USER", "SYTELINE_CONFIG", "SYTELINE_SECRET_ARN", "SYTELINE_LIVE_WRITES"} <= set(env(template))
     assert template["Parameters"]["LiveWrites"]["Default"] == "false"

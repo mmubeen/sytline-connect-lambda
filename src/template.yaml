@@ -374,6 +374,12 @@ Resources:
                 Resource: !Sub
                   - arn:${AWS::Partition}:cloudformation:${IdpRegionName}:${AWS::AccountId}:stack/${IdpStackName}*/*
                   - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
+              # the IDP SDK resolves the stack's resources by invoking the IDP stack's own LookupFunction
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Sub
+                  - arn:${AWS::Partition}:lambda:${IdpRegionName}:${AWS::AccountId}:function:${IdpStackName}-LookupFunction-*
+                  - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
               - Effect: Allow
                 Action: s3:GetObject
                 Resource: !Sub arn:${AWS::Partition}:s3:::${IdpOutputBucketName}/*

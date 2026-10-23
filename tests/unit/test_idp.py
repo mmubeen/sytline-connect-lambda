@@ -212,3 +212,28 @@ def test_a_failed_read_reports_the_exception_type_only(fake):
     with pytest.raises(IntegrationError) as ei:
         idp.read_document(DOC)
     assert ei.value.err["code"] == errors.IDP_UNAVAILABLE and ei.value.extra == {"cause": "ConnectionError"}
+
+
+def test_a_missing_module_is_named_in_the_refusal_and_the_log(monkeypatch, caplog):
+    import logging
+
+    def factory():
+        raise ModuleNotFoundError("No module named 'pydantic_core'", name="pydantic_core")
+
+    caplog.set_level(logging.WARNING)
+    monkeypatch.setattr(idp, "_client_factory", factory)
+    with pytest.raises(IntegrationError) as ei:
+        idp.read_document(DOC)
+    assert ei.value.extra["cause"] == "ModuleNotFoundError" and ei.value.extra["module"] == "pydantic_core"
+    assert "IDP client could not be created: ModuleNotFoundError (module pydantic_core)" in caplog.text
+    assert "No module named" not in repr(ei.value.extra) and "No module named" not in caplog.text  # never the message
+
+
+def test_a_non_import_error_has_no_module_field(monkeypatch):
+    def factory():
+        raise KeyError("IDP_STACK_NAME")
+
+    monkeypatch.setattr(idp, "_client_factory", factory)
+    with pytest.raises(IntegrationError) as ei:
+        idp.read_document(DOC)
+    assert "module" not in ei.value.extra

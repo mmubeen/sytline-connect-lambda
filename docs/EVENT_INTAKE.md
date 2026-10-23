@@ -63,10 +63,10 @@ The response then carries `cause` (the exception type only, never its message) a
 
 | `cause` | Usually means |
 |---|---|
-| `ModuleNotFoundError` / `ImportError` | the IDP SDK is not in the deployed package: run the build with `IDP_REPO=/path/to/accelerator checkout` and redeploy |
+| `ModuleNotFoundError` / `ImportError` | the IDP SDK, or one of its dependencies, is not in the deployed package. The response and the log line name the missing module (`module`): `idp_sdk` or `idp_common` means set `IDP_REPO=/path/to/accelerator checkout` in `deploy.env` and redeploy; anything else means a dependency of the SDK is missing from `src/requirements-idp.txt` |
 | `KeyError` | `IDP_STACK_NAME` (and the other IDP settings) are not set on the function: fill the IDP block of `deploy.env` and redeploy |
 | `NoRegionError` | set `IDP_REGION` |
-| `ClientError` | AWS refused the call (the role's IDP read permissions, only created when `IDP_STACK_NAME`, `IDP_OUTPUT_BUCKET` and `IDP_TRACKING_TABLE` are all set) |
+| `ClientError` | AWS refused the call: the role's IDP permissions (CloudFormation describe, S3 read, DynamoDB read and invoking the IDP stack's `LookupFunction`) are only created when `IDP_STACK_NAME`, `IDP_OUTPUT_BUCKET` and `IDP_TRACKING_TABLE` are all set; an `AccessDeniedException ... lambda:InvokeFunction ... LookupFunction` in the log means the stack was deployed before this permission existed: redeploy |
 | `EndpointConnectionError`, `ConnectTimeoutError` | the subnets have no private path to CloudFormation, S3 and DynamoDB (VPC endpoints or a NAT route) |
 
 `./invoke.sh --log <payload>` prints the log tail, which has the line `IDP client could not be created: <type>`.
