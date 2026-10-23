@@ -32,6 +32,8 @@ Every function that can read the secret can read these. Use a login with only th
 
 Tunables (environment): `SYTELINE_SITE_ID` (default 10), `SYTELINE_SQL_LOGIN_TIMEOUT` (5 s), `SYTELINE_SQL_TIMEOUT` (10 s), `SYTELINE_MATCH_MIN_SCORE` (70), `SYTELINE_MATCH_MARGIN` (3), `SYTELINE_MATCH_CAP` (1000).
 
+Each is a stack parameter (`SiteId`, `SqlLoginTimeout`, `SqlTimeout`, `SqlVerifyHostname`, `MatchMinScore`, `MatchMargin`, `MatchCap`) set from `deploy.env` (`SITE_ID`, `SQL_LOGIN_TIMEOUT`, `SQL_TIMEOUT`, `SQL_VERIFY_HOSTNAME`, `MATCH_MIN_SCORE`, `MATCH_MARGIN`, `MATCH_CAP`). `deploy.sh` always passes them, with the defaults above, so a value set by an earlier deployment is cleared; it refuses values that are not numbers or `true`/`false`.
+
 ## Encryption and certificates
 
 **By default** the connection is encrypted and its certificate chain is verified, and `SQL_CA_PEM` is required. Without it nothing connects (`DATABASE_NOT_CONFIGURED`): a missing CA, a failed handshake or any other error **never** leads to an unencrypted connection. The host name is checked against the certificate; `SYTELINE_SQL_VERIFY_HOSTNAME=false` turns **only that check** off (for example when the server is reached by IP address) and logs a warning on every connection. The driver speaks TLS 1.2 (SQL Server 2016 to 2022; not strict-encryption mode).

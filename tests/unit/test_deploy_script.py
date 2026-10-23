@@ -143,6 +143,50 @@ def test_sql_encrypt_must_be_true_or_false_and_nothing_is_deployed_otherwise(run
     assert p.returncode != 0 and "SQL_ENCRYPT must be true or false" in (p.stdout + p.stderr) and not deployed(calls)
 
 
+TUNING = {"SqlVerifyHostname": "true", "SqlLoginTimeout": "5", "SqlTimeout": "10", "SiteId": "10", "MatchMinScore": "70",
+          "MatchMargin": "3", "MatchCap": "1000", "UseFipsEndpoints": "true", "IdpDocumentClass": "", "IdpFieldMap": ""}
+
+
+def test_the_tuning_parameters_are_always_passed_with_the_codes_own_defaults(run):
+    p, calls = run({**BASE, **CREATE})
+    assert p.returncode == 0, p.stderr
+    o = overrides(calls)
+    assert {k: o[k] for k in TUNING} == TUNING  # always given, so an earlier value is cleared
+
+
+def test_the_tuning_settings_are_passed_through(run):
+    p, calls = run({**BASE, **CREATE, "SQL_VERIFY_HOSTNAME": "false", "SQL_LOGIN_TIMEOUT": "8", "SQL_TIMEOUT": "20",
+                    "SITE_ID": "20", "MATCH_MIN_SCORE": "80.5", "MATCH_MARGIN": "5", "MATCH_CAP": "200",
+                    "USE_FIPS_ENDPOINTS": "false", "IDP_DOCUMENT_CLASS": "PurchaseOrder"})
+    o = overrides(calls)
+    assert (o["SqlVerifyHostname"], o["SqlLoginTimeout"], o["SqlTimeout"], o["SiteId"]) == ("false", "8", "20", "20")
+    assert (o["MatchMinScore"], o["MatchMargin"], o["MatchCap"]) == ("80.5", "5", "200")
+    assert (o["UseFipsEndpoints"], o["IdpDocumentClass"]) == ("false", "PurchaseOrder")
+
+
+@pytest.mark.parametrize("name,value,message", [
+    ("SQL_VERIFY_HOSTNAME", "maybe", "SQL_VERIFY_HOSTNAME must be true or false"),
+    ("USE_FIPS_ENDPOINTS", "1", "USE_FIPS_ENDPOINTS must be true or false"),
+    ("SQL_TIMEOUT", "ten", "SQL_TIMEOUT must be a whole number"),
+    ("MATCH_CAP", "1.5", "MATCH_CAP must be a whole number"),
+    ("MATCH_MIN_SCORE", "high", "MATCH_MIN_SCORE must be a number")])
+def test_a_bad_tuning_value_is_refused_before_any_sam_call(run, name, value, message):
+    p, calls = run({**BASE, **CREATE, name: value})
+    assert p.returncode != 0 and message in (p.stdout + p.stderr) and not deployed(calls)
+
+
+def test_the_idp_field_map_json_keeps_its_quotes_through_sams_parser(run):
+    p, calls = run({**BASE, **CREATE, "IDP_FIELD_MAP": '{\\"po_number\\":\\"purchase_order\\"}'})
+    assert p.returncode == 0, p.stdout + p.stderr
+    line = [l for l in calls.splitlines() if l.startswith("SAM deploy")][0]
+    assert 'IdpFieldMap="{\\"po_number\\":\\"purchase_order\\"}"' in line
+
+
+def test_an_idp_field_map_that_is_not_a_json_object_is_refused(run):
+    p, calls = run({**BASE, **CREATE, "IDP_FIELD_MAP": "{po_number:purchase_order}"})
+    assert p.returncode != 0 and "IDP_FIELD_MAP must be a JSON object" in (p.stdout + p.stderr) and not deployed(calls)
+
+
 # ---- US2: supply mode / partial sets / mode-switch guard ---------------------------------
 def test_feature_001_style_deploy_env_deploys_with_the_same_parameters(run):
     p, calls = run({**BASE, **SUPPLY, "CREATE_VPC_ENDPOINTS": "true"})
@@ -349,6 +393,15 @@ def test_standalone_missing_required_settings(run):
 def test_http_address_without_the_override_is_refused_before_any_sam_call(run):
     p, calls = sa(run, {"SYTELINE_WSDL": "http://erp.example.com/x?wsdl"})
     assert p.returncode != 0 and "ALLOW_PLAIN_HTTP=true" in p.stderr and "SAM" not in calls
+
+
+def test_standalone_passes_use_fips_endpoints_and_refuses_a_bad_value(run):
+    p, calls = sa(run)
+    assert overrides(calls)["UseFipsEndpoints"] == "true"
+    p, calls = sa(run, {"USE_FIPS_ENDPOINTS": "false"})
+    assert overrides(calls)["UseFipsEndpoints"] == "false"
+    p, calls = sa(run, {"USE_FIPS_ENDPOINTS": "x"})
+    assert p.returncode != 0 and "USE_FIPS_ENDPOINTS must be true or false" in (p.stdout + p.stderr) and not deployed(calls)
 
 
 def test_http_address_with_the_override_uses_the_http_parameter_and_warns(run):

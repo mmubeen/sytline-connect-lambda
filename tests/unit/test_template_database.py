@@ -65,7 +65,8 @@ def test_no_ingress_and_nothing_open_to_the_world_on_the_database_port(template)
 
 def test_no_new_function_and_no_new_permission_for_the_database(template):
     text = repr({n: r for n, r in template["Resources"].items() if r["Type"] == "AWS::Serverless::Function"})
-    text = text.replace("SYTELINE_SQL_ENCRYPT", "").replace("SqlEncrypt", "")  # the one non-secret setting
+    for known in list(TUNING_VARS) + list(TUNING_VARS.values()) + ["SYTELINE_SQL_ENCRYPT", "SqlEncrypt"]:
+        text = text.replace(known, "")  # the one non-secret setting
     assert "sql" not in text.lower().replace("sytline", "")  # the login lives in the existing secret, already readable
 
 
@@ -85,3 +86,35 @@ def test_the_standalone_template_has_no_encryption_setting():
 
     standalone = load_template(os.path.join(os.path.dirname(__file__), "..", "..", "src", "template-standalone.yaml"))
     assert "SqlEncrypt" not in repr(standalone) and "SYTELINE_SQL_ENCRYPT" not in repr(standalone)
+
+
+TUNING_VARS = {"SYTELINE_SITE_ID": "SiteId", "SYTELINE_MATCH_MIN_SCORE": "MatchMinScore",
+               "SYTELINE_MATCH_MARGIN": "MatchMargin", "SYTELINE_MATCH_CAP": "MatchCap",
+               "SYTELINE_SQL_VERIFY_HOSTNAME": "SqlVerifyHostname", "SYTELINE_SQL_LOGIN_TIMEOUT": "SqlLoginTimeout",
+               "SYTELINE_SQL_TIMEOUT": "SqlTimeout"}
+CODE_DEFAULTS = {"SiteId": "10", "MatchMinScore": "70", "MatchMargin": "3", "MatchCap": "1000",
+                 "SqlVerifyHostname": "true", "SqlLoginTimeout": "5", "SqlTimeout": "10"}
+
+
+def test_the_tuning_parameters_default_to_the_codes_own_defaults_and_are_wired_to_the_database_functions(template):
+    for name, default in CODE_DEFAULTS.items():
+        assert template["Parameters"][name]["Default"] == default, name
+    for fn in ("ReserveFunction", "WorkerFunction", "DirectFunction"):
+        env = env_of(template, fn)
+        assert {k: env[k] for k in TUNING_VARS} == {k: {"Ref": v} for k, v in TUNING_VARS.items()}, fn
+
+
+def test_the_idp_mapping_parameters_are_empty_by_default_and_wired_to_the_functions_that_read_idp(template):
+    for name in ("IdpDocumentClass", "IdpFieldMap"):
+        assert template["Parameters"][name]["Default"] == ""
+    for fn in ("ReserveFunction", "SaveIntakeFunction", "WorkerFunction"):
+        env = env_of(template, fn)
+        assert env["IDP_DOCUMENT_CLASS"] == {"Ref": "IdpDocumentClass"} and env["IDP_FIELD_MAP"] == {"Ref": "IdpFieldMap"}
+    assert "IDP_FIELD_MAP" not in env_of(template, "DirectFunction")
+
+
+def test_every_numeric_default_is_a_value_the_code_accepts(template):
+    from syteline import config
+
+    # the defaults really are what config.py falls back to, so an unset deploy.env changes nothing
+    assert config.match_settings() == (70.0, 3.0, 1000) and config.sql_timeouts() == (5.0, 10.0) and config.site_id() == 10

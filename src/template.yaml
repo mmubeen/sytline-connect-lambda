@@ -128,6 +128,55 @@ Parameters:
       login and password then cross the network unprotected, a warning is logged on every connection and the
       connectivity check reports it. A SQL Server set to Force Encryption refuses unencrypted clients.
 
+  # --- Tuning (feature 004 / 005). Defaults equal the code's own defaults, so leaving these alone changes nothing. ---
+  SiteId:
+    Type: String
+    Default: "10"
+    AllowedPattern: '^[0-9]{1,6}$'
+    Description: SyteLine site id passed to the numbering routines when the database route reserves numbers.
+  MatchMinScore:
+    Type: String
+    Default: "70"
+    AllowedPattern: '^[0-9]{1,3}(\.[0-9]+)?$'
+    Description: Customer search (database route) - minimum score, 0 to 100, for a confident customer match.
+  MatchMargin:
+    Type: String
+    Default: "3"
+    AllowedPattern: '^[0-9]{1,3}(\.[0-9]+)?$'
+    Description: Customer search - how far the best candidate must lead the runner-up, otherwise the match is ambiguous.
+  MatchCap:
+    Type: String
+    Default: "1000"
+    AllowedPattern: '^[0-9]{1,5}$'
+    Description: Customer search - most candidate rows read from the customer address data.
+  SqlVerifyHostname:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Encrypted database connections only: "false" turns off just the host-name check of the server certificate
+      (the certificate chain is still verified); a warning is logged on every connection.
+  SqlLoginTimeout:
+    Type: String
+    Default: "5"
+    AllowedPattern: '^[0-9]{1,3}$'
+    Description: Seconds allowed for the database connection and login.
+  SqlTimeout:
+    Type: String
+    Default: "10"
+    AllowedPattern: '^[0-9]{1,3}$'
+    Description: Seconds allowed for a database statement.
+  IdpDocumentClass:
+    Type: String
+    Default: ""
+    Description: Expected IDP document class of a PO (empty = accept any). UNCONFIRMED until the IDP configuration is known.
+  IdpFieldMap:
+    Type: String
+    Default: ""
+    Description: >-
+      JSON object overriding where the PO details sit in the IDP result, e.g. {"po_number":"purchase_order"}
+      (keys as in src/syteline/idp_fields.py). Empty = the defaults. UNCONFIRMED names.
+
   # --- Job-number workflow (reserve / save): where the PO details are read from (an IDP accelerator stack) ---
   IdpStackName:
     Type: String
@@ -569,8 +618,17 @@ Resources:
           SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo
           SYTELINE_DEFAULTS_IDO: !Ref DefaultsIdo
           SYTELINE_SQL_ENCRYPT: !Ref SqlEncrypt
+          SYTELINE_SITE_ID: !Ref SiteId
+          SYTELINE_MATCH_MIN_SCORE: !Ref MatchMinScore
+          SYTELINE_MATCH_MARGIN: !Ref MatchMargin
+          SYTELINE_MATCH_CAP: !Ref MatchCap
+          SYTELINE_SQL_VERIFY_HOSTNAME: !Ref SqlVerifyHostname
+          SYTELINE_SQL_LOGIN_TIMEOUT: !Ref SqlLoginTimeout
+          SYTELINE_SQL_TIMEOUT: !Ref SqlTimeout
           IDP_STACK_NAME: !Ref IdpStackName
           IDP_REGION: !Ref IdpRegion
+          IDP_DOCUMENT_CLASS: !Ref IdpDocumentClass
+          IDP_FIELD_MAP: !Ref IdpFieldMap
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref JobsTable
@@ -625,6 +683,8 @@ Resources:
           WORKER_FUNCTION_NAME: !Ref WorkerFunction
           IDP_STACK_NAME: !Ref IdpStackName
           IDP_REGION: !Ref IdpRegion
+          IDP_DOCUMENT_CLASS: !Ref IdpDocumentClass
+          IDP_FIELD_MAP: !Ref IdpFieldMap
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref JobsTable
@@ -707,8 +767,17 @@ Resources:
           SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo
           SYTELINE_DEFAULTS_IDO: !Ref DefaultsIdo
           SYTELINE_SQL_ENCRYPT: !Ref SqlEncrypt
+          SYTELINE_SITE_ID: !Ref SiteId
+          SYTELINE_MATCH_MIN_SCORE: !Ref MatchMinScore
+          SYTELINE_MATCH_MARGIN: !Ref MatchMargin
+          SYTELINE_MATCH_CAP: !Ref MatchCap
+          SYTELINE_SQL_VERIFY_HOSTNAME: !Ref SqlVerifyHostname
+          SYTELINE_SQL_LOGIN_TIMEOUT: !Ref SqlLoginTimeout
+          SYTELINE_SQL_TIMEOUT: !Ref SqlTimeout
           IDP_STACK_NAME: !Ref IdpStackName
           IDP_REGION: !Ref IdpRegion
+          IDP_DOCUMENT_CLASS: !Ref IdpDocumentClass
+          IDP_FIELD_MAP: !Ref IdpFieldMap
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref JobsTable
@@ -787,6 +856,13 @@ Resources:
           SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo
           SYTELINE_DEFAULTS_IDO: !Ref DefaultsIdo
           SYTELINE_SQL_ENCRYPT: !Ref SqlEncrypt
+          SYTELINE_SITE_ID: !Ref SiteId
+          SYTELINE_MATCH_MIN_SCORE: !Ref MatchMinScore
+          SYTELINE_MATCH_MARGIN: !Ref MatchMargin
+          SYTELINE_MATCH_CAP: !Ref MatchCap
+          SYTELINE_SQL_VERIFY_HOSTNAME: !Ref SqlVerifyHostname
+          SYTELINE_SQL_LOGIN_TIMEOUT: !Ref SqlLoginTimeout
+          SYTELINE_SQL_TIMEOUT: !Ref SqlTimeout
       Policies:
         - Statement:
             - Effect: Allow

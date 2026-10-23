@@ -111,6 +111,7 @@ if [[ "$standalone" == "true" ]]; then
   [[ "$SYTELINE_WSDL" =~ ^https?://[^/]*@ ]] && die "SYTELINE_WSDL must not contain credentials (user:password@host)"
   allow_http="${ALLOW_PLAIN_HTTP:-false}"
   [[ "$allow_http" == "true" || "$allow_http" == "false" ]] || die "ALLOW_PLAIN_HTTP must be true or false"
+  [[ "${USE_FIPS_ENDPOINTS:-true}" == "true" || "${USE_FIPS_ENDPOINTS:-true}" == "false" ]] || die "USE_FIPS_ENDPOINTS must be true or false"
   verify_tls="${VERIFY_TLS:-true}"
   [[ "$verify_tls" == "true" || "$verify_tls" == "false" ]] || die "VERIFY_TLS must be true or false"
   wsdl_param=""
@@ -158,6 +159,7 @@ if [[ "$standalone" == "true" ]]; then
     "$(q SytelineSecretArn "$SYTELINE_SECRET_ARN")" \
     "$(q SytelineConfig "${SYTELINE_CONFIG:-CCT}")" \
     "$(q LiveWrites "$live")" \
+    "$(q UseFipsEndpoints "${USE_FIPS_ENDPOINTS:-true}")" \
     ${attach_overrides[@]+"${attach_overrides[@]}"}
   exit 0
 fi
@@ -245,6 +247,27 @@ fi
 if [[ "${SQL_ENCRYPT:-true}" == "false" ]]; then
   echo "WARNING: SQL_ENCRYPT=false: the database connection will be UNENCRYPTED; the database login and password cross the network unprotected."
 fi
+for flag in SQL_VERIFY_HOSTNAME USE_FIPS_ENDPOINTS; do
+  [[ "${!flag:-true}" == "true" || "${!flag:-true}" == "false" ]] || die "$flag must be true or false"
+done
+for num in SQL_LOGIN_TIMEOUT SQL_TIMEOUT SITE_ID MATCH_CAP; do
+  [[ "${!num:-0}" =~ ^[0-9]+$ ]] || die "$num must be a whole number"
+done
+for num in MATCH_MIN_SCORE MATCH_MARGIN; do
+  [[ "${!num:-0}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "$num must be a number"
+done
+# IDP_FIELD_MAP is JSON: its double quotes are escaped so sam's parameter parser keeps them (checked with sam's own parser)
+idp_field_map="${IDP_FIELD_MAP:-}"
+if [[ -n "$idp_field_map" ]]; then
+  # deploy.env is sourced as shell: the value must be single-quoted there, or its double quotes are lost
+  if command -v python3 >/dev/null; then
+    printf '%s' "$idp_field_map" | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), dict)' 2>/dev/null \
+      || die "IDP_FIELD_MAP must be a JSON object in single quotes, e.g. IDP_FIELD_MAP='{\"po_number\":\"purchase_order\"}'"
+  else
+    [[ "$idp_field_map" == \{*\} ]] || die "IDP_FIELD_MAP must be a JSON object"
+  fi
+  idp_field_map="${idp_field_map//\"/\\\"}"
+fi
 if [[ -n "${IDP_STACK_NAME:-}" ]]; then
   [[ -n "${IDP_OUTPUT_BUCKET:-}" && -n "${IDP_TRACKING_TABLE:-}" ]] || die "IDP_STACK_NAME needs IDP_OUTPUT_BUCKET and IDP_TRACKING_TABLE too"
   [[ -n "${IDP_REPO:-}" ]] || echo "WARNING: IDP_REPO is not set: the IDP SDK will not be packaged, so reserve and save will answer IDP_UNAVAILABLE."
@@ -275,6 +298,16 @@ overrides=(
   "$(q CustomerIdo "${CUSTOMER_IDO:-database}")"
   "$(q DefaultsIdo "${DEFAULTS_IDO:-database}")"
   "$(q SqlEncrypt "${SQL_ENCRYPT:-true}")"
+  "$(q SqlVerifyHostname "${SQL_VERIFY_HOSTNAME:-true}")"
+  "$(q SqlLoginTimeout "${SQL_LOGIN_TIMEOUT:-5}")"
+  "$(q SqlTimeout "${SQL_TIMEOUT:-10}")"
+  "$(q SiteId "${SITE_ID:-10}")"
+  "$(q MatchMinScore "${MATCH_MIN_SCORE:-70}")"
+  "$(q MatchMargin "${MATCH_MARGIN:-3}")"
+  "$(q MatchCap "${MATCH_CAP:-1000}")"
+  "$(q UseFipsEndpoints "${USE_FIPS_ENDPOINTS:-true}")"
+  "$(q IdpDocumentClass "${IDP_DOCUMENT_CLASS:-}")"
+  "$(q IdpFieldMap "$idp_field_map")"
   "$(q IdpStackName "${IDP_STACK_NAME:-}")"
   "$(q IdpRegion "${IDP_REGION:-}")"
   "$(q IdpOutputBucketName "${IDP_OUTPUT_BUCKET:-}")"
