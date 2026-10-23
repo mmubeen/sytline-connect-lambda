@@ -1,6 +1,7 @@
 import logging
 import os
 import stat
+import tempfile
 import threading
 
 import pytest
@@ -220,3 +221,107 @@ def test_nothing_secret_reaches_any_log_record(monkeypatch, caplog):
     with sqlserver.SqlServer(dict(DB_CFG)) as db:
         db.next_number("co")
     assert "S3cr3t-DB-Pass" not in caplog.text and "svc-login" not in caplog.text
+
+
+# ---- the explicit unencrypted option (revision 2026-10-22) ---------------------------------------------------
+UNENC = "database connection is UNENCRYPTED"
+
+
+def no_ca(**extra):
+    return dict(DB_CFG, SQL_CA_PEM="", **extra)
+
+
+def test_the_explicit_option_connects_without_a_ca_file_and_warns_on_every_connection(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING)
+    f = FakeSqlServer().install(monkeypatch)
+    monkeypatch.setenv("SYTELINE_SQL_ENCRYPT", "false")
+    before = {n for n in os.listdir(tempfile.gettempdir()) if n.startswith("sqlca-")}
+    for _ in range(2):
+        with sqlserver.SqlServer(no_ca()) as db:
+            assert db.encrypted is False and db.ping() is True
+    assert all("cafile" not in kw and "validate_host" not in kw for kw in f.connect_kwargs) and len(f.connect_kwargs) == 2
+    assert f.connect_kwargs[0]["autocommit"] is True and f.connect_kwargs[0]["server"] == DB_CFG["SQL_SERVER"]
+    assert len([r for r in caplog.records if UNENC in r.getMessage()]) == 2
+    assert {n for n in os.listdir(tempfile.gettempdir()) if n.startswith("sqlca-")} == before  # no CA file was written
+
+
+def test_the_explicit_option_still_requires_the_other_settings(monkeypatch):
+    f = FakeSqlServer().install(monkeypatch)
+    monkeypatch.setenv("SYTELINE_SQL_ENCRYPT", "false")
+    with pytest.raises(IntegrationError) as ei:
+        with sqlserver.SqlServer(no_ca(SQL_PASS="")):
+            pass
+    assert ei.value.err["code"] == errors.DATABASE_NOT_CONFIGURED and "SQL_PASS" in ei.value.err["message"]
+    assert "SQL_CA_PEM" not in ei.value.err["message"] and f.connect_kwargs == []
+
+
+def test_numbers_and_reads_work_the_same_unencrypted(monkeypatch):
+    f = FakeSqlServer(co_rows=[{"co_num": 1, "cust_num": "C1", "cust_seq": 0, "terms_code": "N30",
+                                "ship_code": "UPS"}]).install(monkeypatch)
+    monkeypatch.setenv("SYTELINE_SQL_ENCRYPT", "false")
+    with sqlserver.SqlServer(no_ca()) as db:
+        assert db.next_number("co") == "100" and db.latest_order_codes("C1", 0) == ("N30", "UPS", "same_ship_to")
+    assert f.committed == [100]
+
+
+@pytest.mark.parametrize("value", [None, "", "true", "TRUE", "0", "no", "off", "False!", "falsee"])
+def test_every_other_value_keeps_the_default_a_missing_ca_is_refused_and_nothing_connects(monkeypatch, value):
+    f = FakeSqlServer().install(monkeypatch)
+    if value is None:
+        monkeypatch.delenv("SYTELINE_SQL_ENCRYPT", raising=False)
+    else:
+        monkeypatch.setenv("SYTELINE_SQL_ENCRYPT", value)
+    with pytest.raises(IntegrationError) as ei:
+        with sqlserver.SqlServer(no_ca()):
+            pass
+    assert ei.value.err["code"] == errors.DATABASE_NOT_CONFIGURED and "SQL_CA_PEM" in ei.value.err["message"]
+    assert f.connect_kwargs == []
+
+
+@pytest.mark.parametrize("mode", ["connect_fail", "login_fail"])
+def test_no_failure_in_the_default_mode_ever_leads_to_a_connection_without_a_ca(monkeypatch, mode):
+    """SC-010: a failed connect, a failed login or a handshake error is reported; it is never retried without TLS."""
+    f = FakeSqlServer(connect_error=mode).install(monkeypatch)
+    monkeypatch.delenv("SYTELINE_SQL_ENCRYPT", raising=False)
+    with pytest.raises(ErpUnreachable):
+        with sqlserver.SqlServer(dict(DB_CFG)):
+            pass
+    assert len(f.connect_kwargs) == 1 and "cafile" in f.connect_kwargs[0]  # exactly one attempt, with the CA
+
+
+def test_a_handshake_error_is_not_retried_unencrypted(monkeypatch):
+    calls = []
+
+    def boom(**kw):
+        calls.append(kw)
+        raise RuntimeError("certificate verify failed: unable to get local issuer certificate")
+
+    monkeypatch.setattr(sqlserver, "_connect", boom)
+    monkeypatch.delenv("SYTELINE_SQL_ENCRYPT", raising=False)
+    with pytest.raises(ErpUnreachable):
+        with sqlserver.SqlServer(dict(DB_CFG)):
+            pass
+    assert len(calls) == 1 and "cafile" in calls[0]
+
+
+def test_no_connection_is_made_without_a_ca_file_unless_the_explicit_option_is_set(monkeypatch):
+    seen = []
+    f = FakeSqlServer().install(monkeypatch)
+    real = f.connect
+    monkeypatch.setattr(sqlserver, "_connect", lambda **kw: (seen.append(("cafile" in kw)), real(**kw))[1])
+    monkeypatch.delenv("SYTELINE_SQL_ENCRYPT", raising=False)
+    with sqlserver.SqlServer(dict(DB_CFG)):
+        pass
+    monkeypatch.setenv("SYTELINE_SQL_ENCRYPT", "false")
+    with sqlserver.SqlServer(no_ca()):
+        pass
+    assert seen == [True, False]
+
+
+def test_the_unencrypted_mode_leaks_no_credentials_either(monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG)
+    FakeSqlServer(infobar=f"pw {DB_CFG['SQL_PASS']}").install(monkeypatch)
+    monkeypatch.setenv("SYTELINE_SQL_ENCRYPT", "false")
+    with sqlserver.SqlServer(no_ca()) as db:
+        db.next_number("co")
+    assert DB_CFG["SQL_PASS"] not in caplog.text and DB_CFG["SQL_USER"] not in caplog.text

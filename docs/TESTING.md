@@ -14,7 +14,7 @@ cfn-lint src/template.yaml
 Expect only the failures that already exist: 12 failures and 2 errors in `tests/unit/test_transport.py`, `tests/contract/test_health.py` and `tests/unit/test_standalone_parity.py`. Nothing else should fail.
 
 ## Step 1: Gather what the deployment needs
-- **ERP secret** (Secrets Manager, JSON): `SYTELINE_PASS` and the database keys `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, `SQL_CA_PEM` (optional `SQL_PORT`). See [DATABASE.md](DATABASE.md).
+- **ERP secret** (Secrets Manager, JSON): `SYTELINE_PASS` and the database keys `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, `SQL_CA_PEM` (optional `SQL_PORT`). `SQL_CA_PEM` is needed in the default (encrypted) mode; if the plant server has no verifiable certificate, deploy with `SQL_ENCRYPT=false` instead (no CA needed, the connection is unencrypted, warnings appear: see [DATABASE.md](DATABASE.md)). See [DATABASE.md](DATABASE.md).
 - **IDP stack:** its name, output bucket and tracking table, and one test document that has finished processing and whose result contains the fields named in `src/syteline/idp_fields.py` (or set `IDP_FIELD_MAP`). See [RESERVATIONS.md](RESERVATIONS.md).
 - **Network:** subnets with routes to the plant web service (TCP 80) and the database (TCP 1433), and private paths to S3, CloudFormation, DynamoDB and Secrets Manager; an execute-api VPC endpoint if you will call the API.
 - **A checkout of the IDP accelerator** (`IDP_REPO`).
@@ -52,7 +52,7 @@ Expect `token`, and, when any operation uses the database, `db_dns`, `db_tcp` an
 |---|---|
 | `db_dns` | the database name does not resolve from the function's network |
 | `db_tcp` | no route or security-group rule to the database port |
-| `db_login`: `certificate not trusted` | `SQL_CA_PEM` is not the server's authority |
+| `db_login`: `certificate not trusted` | `SQL_CA_PEM` is not the server's authority (or deploy with `SQL_ENCRYPT=false`) |
 | `db_login`: `host name does not match the certificate` | use the certificate's name, or set `SYTELINE_SQL_VERIFY_HOSTNAME=false` (only the host-name check is switched off) |
 | `db_login`: `login refused` | wrong login or password |
 | `db_login`: `database not configured: <keys>` | those keys are missing from the secret |
@@ -84,7 +84,7 @@ Expect `422 LIVE_WRITES_DISABLED`: the IDP document was read and the customer ma
 |---|---|
 | `DOCUMENT_NOT_FOUND`, `DOCUMENT_NOT_READY`, `DOCUMENT_INCOMPLETE`, `DOCUMENT_NEEDS_REVIEW`, `IDP_UNAVAILABLE` | the IDP document or access to it (`fields` names the fields) |
 | `CUSTOMER_AMBIGUOUS`, `CUSTOMER_LOW_CONFIDENCE`, `CUSTOMER_NOT_FOUND` | the customer match; `candidates` shows the best matches and scores |
-| `DATABASE_NOT_CONFIGURED` (503) | a `SQL_*` key or `SQL_CA_PEM` is missing from the secret |
+| `DATABASE_NOT_CONFIGURED` (503) | a `SQL_*` key is missing from the secret (`SQL_CA_PEM` counts only while encrypted) |
 
 ## Step 8: Reserve with live writes on (approved test window)
 Redeploy with `LIVE_WRITES=true` and `LIVE_APPROVAL_REF=<the ERP owner's reference>`, then repeat step 7 with a new `request_ref`. Expect `201`, `state: reserved`, `co_num` and one `job` per line. In SyteLine check that the numbers advanced and nothing else changed. Repeating the same `request_ref` returns the same numbers without reserving new ones.
@@ -113,7 +113,8 @@ Wait for `saved` (or investigate `partly_saved`, `failed`, `needs_reconciliation
 | Save with a different `document_id` | `422 RESERVATION_MISMATCH` |
 | Save with another caller ARN or another `uploaded_by` | `403 RESERVATION_FORBIDDEN` |
 | Use a document still in review, or with a low-confidence field | `409 DOCUMENT_NOT_READY` / `422 DOCUMENT_NEEDS_REVIEW` |
-| Remove `SQL_CA_PEM` from the secret and reserve | `503 DATABASE_NOT_CONFIGURED`, nothing reserved |
+| Remove `SQL_CA_PEM` from the secret (default encrypted mode) and reserve | `503 DATABASE_NOT_CONFIGURED`, nothing reserved, no connection made |
+| Deploy with `SQL_ENCRYPT=false` and run the health check | `db_login` says `UNENCRYPTED` and `warnings` carries the unencrypted warning; the logs show it on every connection |
 | Reserve for a customer that does not match | `422` with the candidates; nothing reserved |
 
 ## Step 11: Through the real API (optional)

@@ -118,6 +118,16 @@ Parameters:
     Default: database
     Description: Order collection the web service reads the customer's terms and ship-via from, or `database`.
 
+  SqlEncrypt:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      "true" (default): the database connection is encrypted and the server certificate verified (SQL_CA_PEM in the ERP
+      secret is required). "false": an UNENCRYPTED database connection is allowed and no CA is needed; the database
+      login and password then cross the network unprotected, a warning is logged on every connection and the
+      connectivity check reports it. A SQL Server set to Force Encryption refuses unencrypted clients.
+
   # --- Job-number workflow (reserve / save): where the PO details are read from (an IDP accelerator stack) ---
   IdpStackName:
     Type: String
@@ -558,6 +568,7 @@ Resources:
           SYTELINE_NEXT_JOB_IDO: !Ref NextJobIdo
           SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo
           SYTELINE_DEFAULTS_IDO: !Ref DefaultsIdo
+          SYTELINE_SQL_ENCRYPT: !Ref SqlEncrypt
           IDP_STACK_NAME: !Ref IdpStackName
           IDP_REGION: !Ref IdpRegion
       Policies:
@@ -695,6 +706,7 @@ Resources:
           SYTELINE_NEXT_JOB_IDO: !Ref NextJobIdo
           SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo
           SYTELINE_DEFAULTS_IDO: !Ref DefaultsIdo
+          SYTELINE_SQL_ENCRYPT: !Ref SqlEncrypt
           IDP_STACK_NAME: !Ref IdpStackName
           IDP_REGION: !Ref IdpRegion
       Policies:
@@ -774,6 +786,7 @@ Resources:
           SYTELINE_NEXT_JOB_IDO: !Ref NextJobIdo
           SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo
           SYTELINE_DEFAULTS_IDO: !Ref DefaultsIdo
+          SYTELINE_SQL_ENCRYPT: !Ref SqlEncrypt
       Policies:
         - Statement:
             - Effect: Allow

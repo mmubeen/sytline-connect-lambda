@@ -116,9 +116,16 @@ def verify_tls():
 SQL_REQUIRED = ("SQL_SERVER", "SQL_DATABASE", "SQL_USER", "SQL_PASS", "SQL_CA_PEM")
 
 
+def sql_encrypt():
+    """False only when SYTELINE_SQL_ENCRYPT is exactly `false` (trimmed, any case): the explicit option to allow an
+    UNENCRYPTED database connection. Any other value, including empty or unset, means encrypted (the default)."""
+    return os.environ.get("SYTELINE_SQL_ENCRYPT", "true").strip().lower() != "false"
+
+
 def sql_missing(cfg):
-    """Names (never values) of the required database settings that are not set."""
-    return [k for k in SQL_REQUIRED if not str(cfg.get(k) or "").strip()]
+    """Names (never values) of the required database settings that are not set. The CA certificate (`SQL_CA_PEM`) is
+    required only while the connection is encrypted; its absence never makes the connection unencrypted."""
+    return [k for k in SQL_REQUIRED if (k != "SQL_CA_PEM" or sql_encrypt()) and not str(cfg.get(k) or "").strip()]
 
 
 def sql_verify_hostname():

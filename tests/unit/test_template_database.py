@@ -65,4 +65,23 @@ def test_no_ingress_and_nothing_open_to_the_world_on_the_database_port(template)
 
 def test_no_new_function_and_no_new_permission_for_the_database(template):
     text = repr({n: r for n, r in template["Resources"].items() if r["Type"] == "AWS::Serverless::Function"})
+    text = text.replace("SYTELINE_SQL_ENCRYPT", "").replace("SqlEncrypt", "")  # the one non-secret setting
     assert "sql" not in text.lower().replace("sytline", "")  # the login lives in the existing secret, already readable
+
+
+def test_the_encryption_parameter_defaults_to_true_and_is_on_exactly_the_database_functions(template):
+    p = template["Parameters"]["SqlEncrypt"]
+    assert p["Default"] == "true" and p["AllowedValues"] == ["true", "false"]
+    assert "UNENCRYPTED" in p["Description"] and "Force Encryption" in p["Description"]
+    for fn in ("ReserveFunction", "WorkerFunction", "DirectFunction"):
+        assert env_of(template, fn)["SYTELINE_SQL_ENCRYPT"] == {"Ref": "SqlEncrypt"}, fn
+    for fn, r in template["Resources"].items():
+        if r["Type"] == "AWS::Serverless::Function" and fn not in ("ReserveFunction", "WorkerFunction", "DirectFunction"):
+            assert "SYTELINE_SQL_ENCRYPT" not in env_of(template, fn), fn
+
+
+def test_the_standalone_template_has_no_encryption_setting():
+    import os
+
+    standalone = load_template(os.path.join(os.path.dirname(__file__), "..", "..", "src", "template-standalone.yaml"))
+    assert "SqlEncrypt" not in repr(standalone) and "SYTELINE_SQL_ENCRYPT" not in repr(standalone)

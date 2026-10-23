@@ -13,7 +13,7 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 
 **Organization**: Grouped by user story. Paths are relative to the repo root. Existing behaviour must not change when an operation's web-service endpoint is configured or its setting is absent (research.md R2): run `python -m pytest tests -q` after each phase and compare with the failures that already exist (12 failures and 2 errors in `tests/unit/test_transport.py`, `tests/contract/test_health.py`, `tests/unit/test_standalone_parity.py`).
 
-**Hard rules**: the driver is imported in `src/syteline/sqlserver.py` only; its statements are exactly the five in data-model.md ("Statement whitelist"), all values passed as parameters, the routine name taken from a two-entry constant; the connection is never made without `SQL_CA_PEM` (no unencrypted connection exists) and the certificate chain is always verified; the route is decided from settings alone and never switched after a failure; the password and login never appear in logs, errors or responses; numbering is refused unless live writes are enabled; an unknown number outcome is `UNCERTAIN_OUTCOME` and is never retried.
+**Hard rules**: the driver is imported in `src/syteline/sqlserver.py` only; its statements are exactly the five in data-model.md ("Statement whitelist"), all values passed as parameters, the routine name taken from a two-entry constant; by default the connection is encrypted with the certificate chain verified and `SQL_CA_PEM` required; an unencrypted connection exists only behind the explicit `SYTELINE_SQL_ENCRYPT=false` setting (warned on every connection; Phase 8) and is never reached by fallback; the route is decided from settings alone and never switched after a failure; the password and login never appear in logs, errors or responses; numbering is refused unless live writes are enabled; an unknown number outcome is `UNCERTAIN_OUTCOME` and is never retried.
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -115,6 +115,20 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 
 ---
 
+## Phase 8: Revision 2026-10-22 - explicit unencrypted option (spec FR-010, FR-011, SC-010; research.md R4)
+
+**Goal**: the plant database offers no certificate the functions can verify, so `SQL_CA_PEM` must not be needed there: an explicit setting allows an unencrypted connection (as the demo's `Encrypt=no`), warned on every connection and reported by the connectivity check; the default stays encrypted and verified, and nothing ever falls back to unencrypted by itself. Phases 1-7 are done; this phase changes what they enforce.
+
+- [X] T033 In `src/syteline/config.py` add `sql_encrypt()` (False only when `SYTELINE_SQL_ENCRYPT`, trimmed and lower-cased, is exactly `false`; any other value, including empty, means encrypted) and make `sql_missing(cfg)` require `SQL_CA_PEM` only when `sql_encrypt()` is True (the other four keys stay required in both modes); update `tests/unit/test_config.py`
+- [X] T034 In `src/syteline/sqlserver.py` (`SqlServer.__enter__`): when `config.sql_encrypt()` is False, pass **no** `cafile` and no `validate_host`, write no CA file, and log `WARNING "database connection is UNENCRYPTED: the login and password cross the network unprotected"` on every connection; when True keep today's behaviour exactly (CA required, `cafile` always passed, `validate_host` per `SYTELINE_SQL_VERIFY_HOSTNAME`); add a guard so a connection is made without `cafile` ONLY in the explicit unencrypted mode (assert in the connect path), and expose `self.encrypted` for the health check; never retry a failed handshake without TLS
+- [X] T035 [P] Extend `FakeSqlServer` / `tests/unit/test_sqlserver.py`: with `SYTELINE_SQL_ENCRYPT=false` the connect call has no `cafile`, no CA file is written, `SQL_CA_PEM` is not required and a WARNING is logged on every connection; the default still refuses a missing `SQL_CA_PEM` with `DATABASE_NOT_CONFIGURED` and makes no connection; values such as `FALSE `, `0`, `no`, empty and `true` handle as specified (only exact `false` after trimming and lower-casing disables encryption); a connect failure, a handshake error or a missing CA in encrypted mode never results in a connection without `cafile` (SC-010: parametrise over every failure the fake can raise); the password and login still appear in no log record
+- [X] T036 In `src/syteline/health.py` (`db_login`) report `encrypted` or `UNENCRYPTED` in the stage detail and, when unencrypted, add `warnings` to the response with `database connection is UNENCRYPTED: the login and password cross the network unprotected` (merge with any existing warnings); update `tests/unit/test_health_database.py` (both modes; the missing-keys message omits `SQL_CA_PEM` when unencrypted)
+- [X] T037 In `src/template.yaml` add parameter `SqlEncrypt` (String, default `"true"`, `AllowedValues: ["true","false"]`, description stating that `false` allows an unencrypted connection and sends the login and password unprotected) and set `SYTELINE_SQL_ENCRYPT: !Ref SqlEncrypt` on `ReserveFunction`, `WorkerFunction` and `DirectFunction`; add `SQL_ENCRYPT` (default `true`, always passed) to `src/deploy.sh` and `src/deploy.env.example` with a comment about the warning and the SQL Server *Force Encryption* limit; extend `tests/unit/test_template_database.py` and `tests/unit/test_deploy_script.py` (the parameter defaults to `true`, is on exactly those three functions, is absent from the stand-alone template, and is always passed)
+- [X] T038 Update `docs/DATABASE.md` (the "Encryption and certificates" section: the default, the explicit unencrypted setting, the warning, the Force Encryption limit, that `SQL_CA_PEM` is required only when encrypted; the settings table; the failures table), `docs/TESTING.md` (step 1 and the step 4 failure table) and `docs/SAVE_WORKFLOW.md` if it states that the connection is always encrypted
+- [X] T039 Run the whole suite, `cfn-lint`, `sam validate --lint`; only the pre-existing failures (12 failures, 2 errors in `tests/unit/test_transport.py`, `tests/contract/test_health.py`, `tests/unit/test_standalone_parity.py`) may remain
+
+---
+
 ## Dependencies and order
 
 - Phase 1 first (T001 to T004 touch different files and can run together). T005 and T006 need T002 and T004; T007 needs T006's interface; T008 needs T006 and T007; T009 needs T006 and T007.
@@ -123,9 +137,11 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 - US3 (T021 to T024) needs T006 and T003; T023 follows T013 and T012's file changes (`pipeline.py`, `reserve.py` are touched by earlier tasks) and US2's `resolver.py` (customer match is its input).
 - US4 (T025 to T026) needs T005 and T006 and can run any time after Phase 2.
 - Polish after the stories it documents or checks (T027 needs T005's setting names).
+- Phase 8 (revision) after Phases 1-7: T033 first (config); T034 needs T033; T035 needs T034 and the existing `FakeSqlServer`; T036 needs T034 (`SqlServer.encrypted`); T037 needs only the setting name from T033 and can run in parallel with T034 to T036; T038 after T034 to T037; T039 last.
 
 ## Parallel examples
 
+- Phase 8: T037 (template, deploy script) alongside T034 to T036 (code and tests); T035 and T036 are different test files and can run together once T034 is done.
 - Phase 1: T001, T002, T003 together; T004 alone (it edits `config.py`).
 - Phase 2: after T006, T007 and T009 together; T008 after T007.
 - US1: T010 while T011 is written; T012 and T013 touch different files and can run together after T011.
@@ -135,3 +151,4 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 
 - **MVP**: Phases 1, 2 and US1 (T001-T015): numbers from the database with the specified failure behaviour, on both the reservation and the one-step upload.
 - **Then**: US2 makes the customer decision identical to the demo, US3 fills the header defaults, US4 makes the whole path observable. Do not enable live writes or run any step against the plant database until the unconfirmed names (`LongList`, `Infobar`, routine signatures, `custaddr` / `co` columns, `SLCos` terms and ship property names) have been verified read-only.
+- **Revision (Phase 8)**: T033 to T039 make `SQL_CA_PEM` optional by adding the explicit, warned unencrypted option; the default stays encrypted and verified. Do it before the first run against the plant database, because that server offers no certificate the functions can verify.
