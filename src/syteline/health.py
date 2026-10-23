@@ -47,6 +47,9 @@ def _stage(name, fn, results):
         return False
 
 
+UNENCRYPTED_WARNING = "database connection is UNENCRYPTED: the login and password cross the network unprotected"
+
+
 def _database_stages(cfg, timeout, results):
     """db_dns / db_tcp / db_login: only a name lookup, a connection and `SELECT 1`; never any credential in the output."""
     from .errors import IntegrationError
@@ -87,7 +90,9 @@ def _database_stages(cfg, timeout, results):
                 raise RuntimeError("host name does not match the certificate (SYTELINE_SQL_VERIFY_HOSTNAME=false "
                                    "switches only this check off)") from None
             raise RuntimeError(text) from None
-        return "TLS connection, certificate and login accepted; SELECT 1 answered"
+        if not db.encrypted:
+            return "UNENCRYPTED connection (SYTELINE_SQL_ENCRYPT=false) and login accepted; SELECT 1 answered"
+        return "encrypted connection, certificate and login accepted; SELECT 1 answered"
 
     ok = True
     for name, fn in (("db_dns", db_dns), ("db_tcp", db_tcp), ("db_login", db_login)):
@@ -209,6 +214,8 @@ def run_health(event, context=None):
     if not dry_run and routes.uses_database():  # the database is checked on its own: a web-service failure must not hide it
         db_ok = _database_stages(cfg, timeout, results)
         ok = ok and db_ok
+        if not cfgmod.sql_encrypt():  # the explicit option is in use: say so, loudly
+            warnings.append(UNENCRYPTED_WARNING)
     out = {"ok": ok, "dry_run": dry_run, "host": host, "config": cfg["SYTELINE_CONFIG"], "stages": results,
            "routes": routes.describe()}
     insecure = [r for r in results if r.get("code") == errors.INSECURE_TRANSPORT]

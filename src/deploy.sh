@@ -241,6 +241,10 @@ fi
 
 # Job-number workflow: where the PO details are read from (an IDP accelerator stack). IDP_REPO is the checkout whose
 # idp_sdk and idp_common are packaged with the functions (never installed by name: `idp-common` on PyPI is not ours).
+[[ "${SQL_ENCRYPT:-true}" == "true" || "${SQL_ENCRYPT:-true}" == "false" ]] || die "SQL_ENCRYPT must be true or false"
+if [[ "${SQL_ENCRYPT:-true}" == "false" ]]; then
+  echo "WARNING: SQL_ENCRYPT=false: the database connection will be UNENCRYPTED; the database login and password cross the network unprotected."
+fi
 if [[ -n "${IDP_STACK_NAME:-}" ]]; then
   [[ -n "${IDP_OUTPUT_BUCKET:-}" && -n "${IDP_TRACKING_TABLE:-}" ]] || die "IDP_STACK_NAME needs IDP_OUTPUT_BUCKET and IDP_TRACKING_TABLE too"
   [[ -n "${IDP_REPO:-}" ]] || echo "WARNING: IDP_REPO is not set: the IDP SDK will not be packaged, so reserve and save will answer IDP_UNAVAILABLE."
@@ -270,6 +274,7 @@ overrides=(
   "$(q NextJobIdo "${NEXT_JOB_IDO:-database}")"
   "$(q CustomerIdo "${CUSTOMER_IDO:-database}")"
   "$(q DefaultsIdo "${DEFAULTS_IDO:-database}")"
+  "$(q SqlEncrypt "${SQL_ENCRYPT:-true}")"
   "$(q IdpStackName "${IDP_STACK_NAME:-}")"
   "$(q IdpRegion "${IDP_REGION:-}")"
   "$(q IdpOutputBucketName "${IDP_OUTPUT_BUCKET:-}")"

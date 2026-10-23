@@ -163,3 +163,53 @@ def test_a_failing_web_service_does_not_hide_the_database_result(env):
     out = health.run_health({"action": "health"})  # nothing listens on 127.0.0.1:9: the tcp stage fails
     assert [s["ok"] for s in out["stages"] if s["stage"] == "tcp"] == [False]
     assert [s["stage"] for s in db_stages(out)] == ["db_dns", "db_tcp", "db_login"] and out["ok"] is False
+
+
+# ---- the explicit unencrypted option (revision 2026-10-22) ------------------------------------------------------
+UNENC_WARNING = "database connection is UNENCRYPTED: the login and password cross the network unprotected"
+
+
+def test_the_default_mode_says_encrypted_and_has_no_warning(env):
+    database_everywhere(env)
+    with_db_settings(env)
+    fake_network(env)
+    FakeSqlServer().install(env)
+    out = health.run_health({"action": "health"})
+    login = [s for s in out["stages"] if s["stage"] == "db_login"][0]
+    assert login["ok"] is True and login["detail"].startswith("encrypted connection")
+    assert UNENC_WARNING not in out.get("warnings", [])
+
+
+def test_the_explicit_unencrypted_option_needs_no_ca_and_is_reported_in_the_stage_and_as_a_warning(env):
+    database_everywhere(env)
+    with_db_settings(env, SQL_CA_PEM="")
+    env.setenv("SYTELINE_SQL_ENCRYPT", "false")
+    fake_network(env)
+    f = FakeSqlServer().install(env)
+    out = health.run_health({"action": "health"})
+    login = [s for s in out["stages"] if s["stage"] == "db_login"][0]
+    assert login["ok"] is True and login["detail"].startswith("UNENCRYPTED connection")
+    assert UNENC_WARNING in out["warnings"]
+    assert "cafile" not in f.connect_kwargs[0]
+    assert DB_CFG["SQL_PASS"] not in repr(out)
+
+
+def test_missing_keys_omit_the_ca_when_unencrypted_and_name_it_when_encrypted(env):
+    database_everywhere(env)
+    with_db_settings(env, SQL_CA_PEM="", SQL_PASS="")
+    fake_network(env)
+    FakeSqlServer().install(env)
+    env.setenv("SYTELINE_SQL_ENCRYPT", "false")
+    msg = [s for s in health.run_health({"action": "health"})["stages"] if s["stage"] == "db_login"][0]["error"]
+    assert "SQL_PASS" in msg and "SQL_CA_PEM" not in msg
+    env.delenv("SYTELINE_SQL_ENCRYPT")
+    msg = [s for s in health.run_health({"action": "health"})["stages"] if s["stage"] == "db_login"][0]["error"]
+    assert "SQL_PASS" in msg and "SQL_CA_PEM" in msg
+
+
+def test_no_warning_and_no_database_stage_when_no_operation_uses_the_database(env):
+    for v in OPS.values():
+        env.setenv(v, "SomeEndpoint")
+    env.setenv("SYTELINE_SQL_ENCRYPT", "false")
+    out = health.run_health({"action": "health"})
+    assert db_stages(out) == [] and UNENC_WARNING not in out.get("warnings", [])

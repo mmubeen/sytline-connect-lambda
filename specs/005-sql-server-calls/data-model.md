@@ -14,12 +14,12 @@ Nothing new is stored: the database is read (and, for numbering, driven through 
 ## Database Connection Settings (in the ERP credentials secret)
 | Key | Meaning | Rule |
 |---|---|---|
-| `SQL_SERVER` | host name (must match the certificate unless host-name checking is switched off) | required for any database route |
+| `SQL_SERVER` | host name (must match the certificate unless host-name checking is switched off or the connection is unencrypted) | required for any database route |
 | `SQL_DATABASE` | database name | required |
 | `SQL_USER`, `SQL_PASS` | login | required; never logged or returned |
 | `SQL_PORT` | TCP port | optional, default 1433 |
-| `SQL_CA_PEM` | PEM text of the certificate(s) to trust | required: no connection is made without it (no unencrypted connection exists) |
-Environment: `SYTELINE_SITE_ID` (default 10), `SYTELINE_SQL_VERIFY_HOSTNAME` (`false` turns the host-name check off, warns each time), `SYTELINE_SQL_LOGIN_TIMEOUT` (5 s), `SYTELINE_SQL_TIMEOUT` (10 s), `SYTELINE_MATCH_MIN_SCORE` (70), `SYTELINE_MATCH_MARGIN` (3), `SYTELINE_MATCH_CAP` (1000).
+| `SQL_CA_PEM` | PEM text of the certificate(s) to trust | **required in the default (encrypted) mode**: no connection is made without it, and its absence never makes the connection unencrypted; not needed when `SYTELINE_SQL_ENCRYPT=false` |
+Environment: `SYTELINE_SQL_ENCRYPT` (default `true`; exactly `false` = the explicit unencrypted option: no CA needed, warning on every connection, reported by the connectivity check), `SYTELINE_SITE_ID` (default 10), `SYTELINE_SQL_VERIFY_HOSTNAME` (`false` turns the host-name check off, warns each time), `SYTELINE_SQL_LOGIN_TIMEOUT` (5 s), `SYTELINE_SQL_TIMEOUT` (10 s), `SYTELINE_MATCH_MIN_SCORE` (70), `SYTELINE_MATCH_MARGIN` (3), `SYTELINE_MATCH_CAP` (1000).
 
 ## Reserved Number
 Returned by `NumberSource.next_co()` / `next_job()` as a string of digits. Created by a committed routine call; never reused. Outcomes: the number; `ErpRejected` (routine error, nothing consumed as far as is known); `ErpUncertain` (a number may be consumed); `ErpUnreachable` (nothing happened).

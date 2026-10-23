@@ -131,6 +131,18 @@ def test_an_endpoint_name_in_the_settings_keeps_that_operation_on_the_web_servic
                                                                                      "database")
 
 
+def test_sql_encrypt_defaults_to_true_is_always_passed_and_false_warns(run):
+    p, calls = run({**BASE, **CREATE})
+    assert overrides(calls)["SqlEncrypt"] == "true" and "UNENCRYPTED" not in p.stdout
+    p, calls = run({**BASE, **CREATE, "SQL_ENCRYPT": "false"})
+    assert p.returncode == 0 and overrides(calls)["SqlEncrypt"] == "false" and "UNENCRYPTED" in p.stdout
+
+
+def test_sql_encrypt_must_be_true_or_false_and_nothing_is_deployed_otherwise(run):
+    p, calls = run({**BASE, **CREATE, "SQL_ENCRYPT": "maybe"})
+    assert p.returncode != 0 and "SQL_ENCRYPT must be true or false" in (p.stdout + p.stderr) and not deployed(calls)
+
+
 # ---- US2: supply mode / partial sets / mode-switch guard ---------------------------------
 def test_feature_001_style_deploy_env_deploys_with_the_same_parameters(run):
     p, calls = run({**BASE, **SUPPLY, "CREATE_VPC_ENDPOINTS": "true"})

@@ -12,7 +12,12 @@ No new API route. The reservation and upload routes keep their shapes; this feat
 Set on `ReserveFunction`, `WorkerFunction` and `DirectFunction` (all three, so reserve, save and the health check agree). A variable that is absent keeps the earlier web-service behaviour (stand-alone version, local runs); an absent `DefaultsIdo` means `off` (the routes object shows `"defaults": "off"`): no defaults are read and nothing connects.
 
 ## Secret keys (existing ERP secret)
-`SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, optional `SQL_PORT`, `SQL_CA_PEM` (required). See data-model.md.
+`SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, optional `SQL_PORT`, and `SQL_CA_PEM` (required unless the connection is explicitly unencrypted). See data-model.md.
+
+## Encryption setting
+| Stack parameter | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `SqlEncrypt` | `SYTELINE_SQL_ENCRYPT` | `true` | `true`: encrypted, certificate verified, `SQL_CA_PEM` required. `false` (exact value): unencrypted connection allowed, no CA needed, warning on every connection. Set on `ReserveFunction`, `WorkerFunction` and `DirectFunction` |
 
 ## Health: `{"action":"health"}`
 Added to the response (existing keys and stage order unchanged):
@@ -24,13 +29,13 @@ Outside the dry run, when any route is `database`, three stages are appended aft
 |---|---|---|
 | `db_dns` | the server name resolves | the lookup error |
 | `db_tcp` | the port accepts a connection | the connect error or timeout |
-| `db_login` | TLS handshake, certificate check, login and `SELECT 1` succeed | `certificate not trusted` / `host name does not match the certificate` / `login refused` / `database not configured: <missing keys>` |
-Dry run (`dry_run: true`): `routes` only, no database traffic and no credentials. `ok` is true only when every stage that ran passed.
+| `db_login` | TLS handshake and certificate check (when encrypted), login and `SELECT 1` succeed; the detail says `encrypted` or `UNENCRYPTED` | `certificate not trusted` / `host name does not match the certificate` / `login refused` / `database not configured: <missing keys>` |
+When the connection is unencrypted the response also carries `"warnings": ["database connection is UNENCRYPTED: the login and password cross the network unprotected"]`. Dry run (`dry_run: true`): `routes` only, no database traffic and no credentials. `ok` is true only when every stage that ran passed.
 
 ## Error codes
 | Code | When |
 |---|---|
-| `DATABASE_NOT_CONFIGURED` | an operation's route is `database` and a required setting or `SQL_CA_PEM` is missing; refused before any connection, nothing reserved or written |
+| `DATABASE_NOT_CONFIGURED` | an operation's route is `database` and a required setting is missing (including `SQL_CA_PEM` while encrypted); refused before any connection, nothing reserved or written |
 | `CUSTOMER_LOW_CONFIDENCE` | the best candidate scored below the threshold; the response lists the best candidates with scores |
 | `CUSTOMER_AMBIGUOUS`, `CUSTOMER_NOT_FOUND` | as before, now also produced by the database search |
 | `UNCERTAIN_OUTCOME` | a number reservation whose outcome is unknown (connection lost after the routine started); never retried |
@@ -39,5 +44,5 @@ Where a response carries these, `step` names the operation (`number_co`, `number
 
 ## Behaviour guarantees (testable)
 - A route is decided from the settings alone; a failure on one route never starts the same operation on the other.
-- The database connection is always TLS with a verified certificate chain (host-name check off only by `SYTELINE_SQL_VERIFY_HOSTNAME=false`, with a warning per connection).
+- By default the database connection is TLS with a verified certificate chain (host-name check off only by `SYTELINE_SQL_VERIFY_HOSTNAME=false`, with a warning per connection). The only way to an unencrypted connection is `SYTELINE_SQL_ENCRYPT=false`, which warns on every connection and is reported by the connectivity check; no failure, missing CA or handshake error ever leads to an unencrypted connection.
 - Every database statement is one of the five in data-model.md; none changes a row except the routines' own reservation.

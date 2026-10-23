@@ -4,9 +4,10 @@ It exists for the three calls the web service cannot do (see syteline.routes): r
 SyteLine's own numbering routines, searching the customer address data, and reading a customer's most recent order
 codes. Rules enforced here, not left to callers:
 
-  * the connection is ALWAYS TLS with a verified certificate chain; there is no unencrypted connection: without
-    `SQL_CA_PEM` nothing connects (`DATABASE_NOT_CONFIGURED`). Only the host-name check can be switched off
-    (SYTELINE_SQL_VERIFY_HOSTNAME=false), and every such connection logs a warning;
+  * by default the connection is TLS with a verified certificate chain and `SQL_CA_PEM` is required (without it nothing
+    connects: `DATABASE_NOT_CONFIGURED`, never a silent unencrypted fallback). Only the host-name check can be
+    switched off (SYTELINE_SQL_VERIFY_HOSTNAME=false). The ONLY way to an unencrypted connection is the explicit
+    SYTELINE_SQL_ENCRYPT=false (no CA needed); every such connection logs a warning;
   * only the statements below can be run (checked before every execute): two SELECTs, the two numbering routines in
     one batch, COMMIT / ROLLBACK and `SELECT 1`. Every value is a parameter. Nothing here inserts, updates or deletes
     a row; the only change is the numbering routines' own (committed) reservation of a number;
@@ -84,6 +85,7 @@ class SqlServer:
         self._cfg = cfg
         self._conn = None
         self._ca_path = None
+        self.encrypted = True  # set on connect: False only in the explicit unencrypted mode
 
     # -- connection ---------------------------------------------------------------------------
     def _scrub(self, text):
@@ -99,24 +101,32 @@ class SqlServer:
             raise IntegrationError(errors.DATABASE_NOT_CONFIGURED,
                                    "database settings missing: " + ", ".join(missing), step="database")
         login_timeout, timeout = config.sql_timeouts()
-        verify_host = config.sql_verify_hostname()
-        if not verify_host:
-            log.warning("database connection with the host-name check OFF (SYTELINE_SQL_VERIFY_HOSTNAME=false); "
-                        "the certificate chain is still verified")
-        fd, self._ca_path = tempfile.mkstemp(prefix="sqlca-", suffix=".pem")  # mode 0600
-        with os.fdopen(fd, "w") as fh:
-            fh.write(str(self._cfg["SQL_CA_PEM"]))
+        self.encrypted = config.sql_encrypt()
+        kw = dict(server=self._cfg["SQL_SERVER"], database=self._cfg["SQL_DATABASE"], user=self._cfg["SQL_USER"],
+                  password=self._cfg["SQL_PASS"], port=int(self._cfg.get("SQL_PORT") or 1433), autocommit=True,
+                  login_timeout=login_timeout, timeout=timeout)
+        if self.encrypted:
+            verify_host = config.sql_verify_hostname()
+            if not verify_host:
+                log.warning("database connection with the host-name check OFF (SYTELINE_SQL_VERIFY_HOSTNAME=false); "
+                            "the certificate chain is still verified")
+            fd, self._ca_path = tempfile.mkstemp(prefix="sqlca-", suffix=".pem")  # mode 0600
+            with os.fdopen(fd, "w") as fh:
+                fh.write(str(self._cfg["SQL_CA_PEM"]))
+            kw.update(cafile=self._ca_path, validate_host=verify_host)
+        else:  # the explicit option: no CA file is passed, so the driver does not encrypt
+            log.warning("database connection is UNENCRYPTED (SYTELINE_SQL_ENCRYPT=false): the login and password "
+                        "cross the network unprotected")
+        if ("cafile" not in kw) == self.encrypted:  # the only way to connect without a CA file is the explicit option
+            self._cleanup()
+            raise RuntimeError("refusing a database connection whose encryption does not match the setting")
         try:
-            self._conn = _connect(server=self._cfg["SQL_SERVER"], database=self._cfg["SQL_DATABASE"],
-                                  user=self._cfg["SQL_USER"], password=self._cfg["SQL_PASS"],
-                                  port=int(self._cfg.get("SQL_PORT") or 1433), cafile=self._ca_path,
-                                  validate_host=verify_host, autocommit=True, login_timeout=login_timeout,
-                                  timeout=timeout)
+            self._conn = _connect(**kw)
         except Exception as exc:
             self._cleanup()
             raise ErpUnreachable(self._scrub(f"database connection failed: {type(exc).__name__}: {exc}")) from None
-        log.info("database connection opened (server=%s database=%s)", self._cfg["SQL_SERVER"],
-                 self._cfg["SQL_DATABASE"])
+        log.info("database connection opened (server=%s database=%s encrypted=%s)", self._cfg["SQL_SERVER"],
+                 self._cfg["SQL_DATABASE"], self.encrypted)
         return self
 
     def __exit__(self, *exc_info):

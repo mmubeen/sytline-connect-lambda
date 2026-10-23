@@ -26,7 +26,7 @@ Each setting is either an **endpoint (IDO) name**, which keeps that operation on
 | `SQL_DATABASE` | the SyteLine database |
 | `SQL_USER`, `SQL_PASS` | the login (never logged or returned) |
 | `SQL_PORT` | optional, default 1433 |
-| `SQL_CA_PEM` | **required**: PEM text of the certificate(s) to trust (the server's certificate authority, or, for a self-signed test server, its own certificate) |
+| `SQL_CA_PEM` | PEM text of the certificate(s) to trust (the server's certificate authority, or, for a self-signed test server, its own certificate). **Required while the connection is encrypted** (the default); not needed with `SqlEncrypt=false` |
 
 Every function that can read the secret can read these. Use a login with only the rights the calls need: **execute** on `NextCoSp` and `NextWOSp` and **select** on `custaddr` and `co`.
 
@@ -34,7 +34,16 @@ Tunables (environment): `SYTELINE_SITE_ID` (default 10), `SYTELINE_SQL_LOGIN_TIM
 
 ## Encryption and certificates
 
-The connection is **always encrypted and its certificate chain is verified**; there is no unencrypted mode, and without `SQL_CA_PEM` nothing connects. The host name is checked against the certificate by default. `SYTELINE_SQL_VERIFY_HOSTNAME=false` turns **only that check** off (for example when the server is reached by IP address) and logs a warning on every connection. The driver speaks TLS 1.2 (SQL Server 2016 to 2022; not strict-encryption mode).
+**By default** the connection is encrypted and its certificate chain is verified, and `SQL_CA_PEM` is required. Without it nothing connects (`DATABASE_NOT_CONFIGURED`): a missing CA, a failed handshake or any other error **never** leads to an unencrypted connection. The host name is checked against the certificate; `SYTELINE_SQL_VERIFY_HOSTNAME=false` turns **only that check** off (for example when the server is reached by IP address) and logs a warning on every connection. The driver speaks TLS 1.2 (SQL Server 2016 to 2022; not strict-encryption mode).
+
+**Explicit unencrypted option.** If the plant server offers no certificate the functions can verify (the demo connects with `Encrypt=no`), set the stack parameter `SqlEncrypt` to `false` (`SQL_ENCRYPT=false` in `deploy.env`; environment variable `SYTELINE_SQL_ENCRYPT`, only the exact value `false` counts). Then:
+
+- no CA certificate is needed, and the connection is **not encrypted**: the database login and password cross the plant network unprotected;
+- every connection logs `database connection is UNENCRYPTED ...`;
+- the connectivity check says so in the `db_login` detail and adds the same text to `warnings`;
+- a SQL Server set to **Force Encryption** refuses an unencrypted client: either supply a CA and keep the default, or turn Force Encryption off on that server.
+
+The other settings (`SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`) stay required in both modes.
 
 ## Network
 
@@ -44,7 +53,7 @@ The functions run in the plant-routed network. They need a route to the database
 
 | Situation | Result |
 |---|---|
-| A required setting or `SQL_CA_PEM` is missing | `DATABASE_NOT_CONFIGURED` (names the keys only), nothing sent |
+| A required setting is missing (including `SQL_CA_PEM` while encrypted) | `DATABASE_NOT_CONFIGURED` (names the keys only), nothing sent; never an unencrypted fallback |
 | Cannot connect or log in | `ERP_UNREACHABLE`; nothing happened |
 | A numbering routine reports an error or no number | rolled back, `ERP_REJECTED` naming the routine |
 | The connection is lost after a routine started, or during the commit | `UNCERTAIN_OUTCOME`: a number may be consumed; never retried; the number is treated as consumed |
@@ -54,7 +63,7 @@ The functions run in the plant-routed network. They need a route to the database
 
 ## Checking it (before the first PO)
 
-`{"action":"health"}` reports `routes` and, when any operation uses the database, three separate stages: `db_dns` (the name resolves), `db_tcp` (the port accepts a connection) and `db_login` (TLS handshake, certificate, login, then `SELECT 1`). Failures say which: `certificate not trusted`, `host name does not match the certificate`, `login refused`, `database not configured: <keys>`. Nothing is changed and no credential is shown. The credential-free dry run reports `routes` only.
+`{"action":"health"}` reports `routes` and, when any operation uses the database, three separate stages: `db_dns` (the name resolves), `db_tcp` (the port accepts a connection) and `db_login` (TLS handshake and certificate when encrypted, login, then `SELECT 1`; the detail says `encrypted` or `UNENCRYPTED`). Failures say which: `certificate not trusted`, `host name does not match the certificate`, `login refused`, `database not configured: <keys>`. Nothing is changed and no credential is shown. The credential-free dry run reports `routes` only.
 
 ## Unconfirmed: verify read-only first
 

@@ -96,6 +96,9 @@ A two-stage alternative to the one-step order upload: `POST /job-reservations` r
 order, line or job), then `POST /job-reservations/{id}/save` saves the order information using those numbers, following the PO OCR
 demo's flow. `GET /job-reservations/{id}` explains what happened. See [`docs/RESERVATIONS.md`](docs/RESERVATIONS.md).
 
+## Testing the deployment
+A step-by-step test sequence, from credential-free checks to an approved live-write window: [`docs/TESTING.md`](docs/TESTING.md).
+
 ## Invoke (direct actions)
 `aws lambda invoke --function-name <name> --payload '{"action":"health"}' --cli-binary-format raw-in-base64-out out.json && cat out.json`
 (omit `--payload` for the default `health` action).

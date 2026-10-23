@@ -74,3 +74,25 @@ def test_database_tunables_and_the_explicit_hostname_switch(monkeypatch):
     monkeypatch.setenv("SYTELINE_MATCH_MARGIN", "5")
     monkeypatch.setenv("SYTELINE_MATCH_CAP", "50")
     assert (config.sql_timeouts(), config.site_id(), config.match_settings()) == ((2.0, 30.0), 20, (80.0, 5.0, 50))
+
+
+# ---- the explicit unencrypted option (feature 005, revision 2026-10-22) ------------------------------------
+@pytest.mark.parametrize("value,encrypted", [(None, True), ("", True), ("true", True), ("TRUE", True), ("0", True),
+                                              ("no", True), ("off", True), ("false", False), (" FALSE ", False),
+                                              ("False", False)])
+def test_only_the_exact_value_false_turns_encryption_off(monkeypatch, value, encrypted):
+    if value is None:
+        monkeypatch.delenv("SYTELINE_SQL_ENCRYPT", raising=False)
+    else:
+        monkeypatch.setenv("SYTELINE_SQL_ENCRYPT", value)
+    assert config.sql_encrypt() is encrypted
+
+
+def test_the_ca_certificate_is_required_only_while_encrypted(monkeypatch):
+    cfg = {"SQL_SERVER": "db", "SQL_DATABASE": "SL", "SQL_USER": "u", "SQL_PASS": "p", "SQL_CA_PEM": ""}
+    monkeypatch.delenv("SYTELINE_SQL_ENCRYPT", raising=False)
+    assert config.sql_missing(cfg) == ["SQL_CA_PEM"]  # default: encrypted, CA required
+    monkeypatch.setenv("SYTELINE_SQL_ENCRYPT", "false")
+    assert config.sql_missing(cfg) == []              # explicit unencrypted option: no CA needed
+    assert config.sql_missing(dict(cfg, SQL_PASS="")) == ["SQL_PASS"]  # the other keys stay required in both modes
+    assert config.sql_missing({}) == ["SQL_SERVER", "SQL_DATABASE", "SQL_USER", "SQL_PASS"]
