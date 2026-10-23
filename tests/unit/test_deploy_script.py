@@ -348,7 +348,7 @@ NETWORK_SETTINGS = ["WORKER_VPC_ID", "WORKER_SUBNET_IDS", "WORKER_SG_IDS", "WORK
 
 
 def sa(run, settings=None, args=(), **kw):
-    return run({**SA, **(settings or {})}, args=["--standalone", *args], env_name="deploy.standalone.env", **kw)
+    return run({**SA, **(settings or {})}, args=["--standalone", *args], **kw)
 
 
 def test_standalone_uses_its_own_config_environment_and_settings_file(run):
@@ -364,9 +364,28 @@ def test_standalone_uses_its_own_config_environment_and_settings_file(run):
     assert "STAND-ALONE" in p.stdout
 
 
-def test_standalone_does_not_read_the_vpc_settings_file(run, tmp_path):
-    p, calls = run({**SA}, args=["--standalone"], env_name="deploy.env")  # only deploy.env exists
-    assert p.returncode != 0 and "deploy.standalone.env missing" in p.stdout and not deployed(calls)
+def test_standalone_reads_the_same_settings_file_as_the_plant_stack(run):
+    p, calls = run({**SA}, args=["--standalone"], env_name="deploy.env")
+    assert p.returncode == 0, p.stderr
+    assert overrides(calls)["SytelineUser"] == "svc"
+
+
+def test_a_leftover_standalone_settings_file_stops_the_standalone_deployment(run):
+    run.work.joinpath("deploy.standalone.env").write_text('SYTELINE_USER="old"\n')
+    p, calls = run({**SA}, args=["--standalone"])
+    assert p.returncode == 1 and "deploy.standalone.env is no longer read" in p.stderr and "deploy.env" in p.stderr
+    assert "SAM" not in calls and "SAM" not in p.stdout
+    p, calls = run({**SA}, args=["--standalone", "--validate"])  # refused before any mode, even validation
+    assert p.returncode == 1 and "SAM" not in calls
+
+
+def test_the_plant_deployment_ignores_a_leftover_standalone_settings_file(run):
+    run.work.joinpath("deploy.standalone.env").write_text('SYTELINE_USER="old"\n')
+    p, calls = run({"SYTELINE_WSDL": "http://erp/x?wsdl", "SYTELINE_USER": "svc",
+                    "SYTELINE_SECRET_ARN": "arn:aws-us-gov:secretsmanager:us-gov-east-1:1:secret:x",
+                    "WORKER_VPC_ID": "vpc-1", "WORKER_SUBNET_IDS": "subnet-1", "WORKER_SG_IDS": "sg-1",
+                    "WORKER_ROUTE_TABLE_IDS": "rtb-1", "API_VPCE_ID": "vpce-1"})
+    assert p.returncode == 0, p.stderr
 
 
 def test_standalone_build_and_validate_need_no_settings_file(run):
@@ -386,15 +405,18 @@ def test_standalone_honors_the_profile_flag_and_the_settings_file(run):
 
 
 @pytest.mark.parametrize("name", NETWORK_SETTINGS)
-def test_standalone_refuses_each_network_setting_as_not_applicable(run, name):
+def test_standalone_ignores_each_plant_network_setting_with_a_notice(run, name):
     p, calls = sa(run, {name: "x"})
-    assert p.returncode != 0 and "not applicable to the stand-alone version" in p.stderr and name in p.stderr
-    assert "SAM" not in calls
+    assert p.returncode == 0, p.stderr
+    assert "ignored by the stand-alone version" in p.stdout and name in p.stdout
+    o = overrides(calls)
+    assert not any(k in o for k in ("WorkerVpcId", "WorkerSubnetIds", "HostNetworkCidr", "PlantCidr1", "ApiVpcEndpointId",
+                                    "CreateApiEndpoint", "CreateVpcEndpoints", "DynamoDbPrefixListId"))
 
 
 def test_standalone_missing_required_settings(run):
-    p, calls = run({"SYTELINE_USER": "svc"}, args=["--standalone"], env_name="deploy.standalone.env")
-    assert p.returncode != 0 and "SYTELINE_WSDL" in p.stderr and "SYTELINE_SECRET_ARN" in p.stderr
+    p, calls = run({"SYTELINE_USER": "svc"}, args=["--standalone"])
+    assert p.returncode != 0 and "missing in deploy.env" in p.stderr and "SYTELINE_WSDL" in p.stderr and "SYTELINE_SECRET_ARN" in p.stderr
 
 
 # -- HTTPS by default / override / TLS / approval (US3) --
@@ -525,10 +547,11 @@ def test_malformed_attachment_identifiers_are_refused(run, name, value):
     assert p.returncode != 0 and name in p.stderr and "SAM" not in calls
 
 
-def test_other_network_settings_are_still_not_applicable_even_when_attaching(run):
+def test_other_network_settings_are_ignored_even_when_attaching(run):
     p, calls = sa(run, {**ATTACH, "WORKER_ROUTE_TABLE_IDS": "rtb-1", "API_VPCE_ID": "vpce-1"})
-    assert p.returncode != 0 and "not applicable" in p.stderr and "WORKER_ROUTE_TABLE_IDS" in p.stderr
-    assert "SAM" not in calls
+    assert p.returncode == 0, p.stderr
+    assert "ignored by the stand-alone version" in p.stdout and "WORKER_ROUTE_TABLE_IDS" in p.stdout
+    assert overrides(calls)["AttachVpcId"] == ATTACH["ATTACH_VPC_ID"] and "WorkerRouteTableIds" not in overrides(calls)
 
 
 def test_attached_mode_keeps_the_https_rule_and_the_live_write_approval(run):

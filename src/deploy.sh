@@ -7,9 +7,10 @@
 #   ./deploy.sh --profile NAME           use this AWS credentials profile (flag > AWS_PROFILE_NAME in the settings file > default chain)
 #   ./deploy.sh --yes                    do not ask before writing the database settings into the credentials secret
 #   ./deploy.sh --standalone             the STAND-ALONE (no VPC) deployment: stack "sytline-connect-standalone",
-#                                        settings in deploy.standalone.env (no network settings; https:// ERP required)
+#                                        same deploy.env (its STAND-ALONE ONLY block; https:// ERP required)
 # Flags can be combined, e.g. ./deploy.sh --profile govcloud-prod --validate
-# Settings come from deploy.env (copy deploy.env.example), or deploy.standalone.env with --standalone (both git-ignored).
+# Settings come from deploy.env (copy deploy.env.example; git-ignored) in both modes: shared settings once, then a PLANT ONLY
+# block and a STAND-ALONE ONLY block; each mode ignores the other's block.
 # The database login (SQL_SERVER, SQL_DATABASE, SQL_USER, SQL_PASS, SQL_PORT, SQL_CA_PEM_FILE) may be given there too: it is MERGED
 # into the existing credentials secret (SYTELINE_SECRET_ARN) before deploying, never passed to CloudFormation and never printed.
 set -euo pipefail
@@ -39,7 +40,10 @@ done
 env_file="deploy.env"
 cfg_args=()
 if [[ "$standalone" == "true" ]]; then
-  env_file="deploy.standalone.env"
+  if [[ -f deploy.standalone.env ]]; then
+    echo "ERROR: deploy.standalone.env is no longer read: move its settings into deploy.env (stand-alone block) and delete it" >&2
+    exit 1
+  fi
   cfg_args=(--config-env standalone)   # separate stack, template and build directory (samconfig.toml)
 fi
 if [[ -z "$profile" && -f "$env_file" ]]; then
@@ -168,13 +172,13 @@ if [[ "$standalone" == "true" ]]; then
     echo "WARNING: SQL_ENCRYPT=false: the database connection will be UNENCRYPTED; the database login and password cross the network unprotected."
   fi
 
-  # every other network setting does not apply to this version
+  # the plant network settings share the file but do not apply to this version: not read, not passed
   na=()
   for v in WORKER_VPC_ID WORKER_SUBNET_IDS WORKER_SG_IDS WORKER_ROUTE_TABLE_IDS HOST_NETWORK_CIDR PLANT_CIDR_1 \
            PLANT_CIDR_2 PLANT_CIDR_3 DYNAMODB_PREFIX_LIST_ID API_VPCE_ID CREATE_API_ENDPOINT CREATE_VPC_ENDPOINTS; do
     [[ -z "${!v:-}" ]] || na+=("$v")
   done
-  if (( ${#na[@]} )); then die "not applicable to the stand-alone version (it only attaches to an existing VPC, subnets and security group): ${na[*]}"; fi
+  if (( ${#na[@]} )); then echo "Note: ignored by the stand-alone version (it only attaches to an existing VPC, subnets and security group): ${na[*]}"; fi
 
   # ERP address: the scheme decides which template parameter carries it; http:// needs the explicit override
   [[ "$SYTELINE_WSDL" =~ ^https?://[^/]*@ ]] && die "SYTELINE_WSDL must not contain credentials (user:password@host)"
@@ -243,7 +247,7 @@ missing=()
 for v in SYTELINE_WSDL SYTELINE_USER SYTELINE_SECRET_ARN; do
   [[ -n "${!v:-}" ]] || missing+=("$v")
 done
-if (( ${#missing[@]} )); then die "missing in deploy.env: ${missing[*]}"; fi
+if (( ${#missing[@]} )); then die "missing in $env_file: ${missing[*]}"; fi
 
 # --- host network: supply all four identifiers, or none to create the network -----------
 net_vars=(WORKER_VPC_ID WORKER_SUBNET_IDS WORKER_SG_IDS WORKER_ROUTE_TABLE_IDS)

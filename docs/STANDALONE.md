@@ -59,17 +59,18 @@ region, and an ERP address reachable from the internet. See [DEPLOYMENT.md](DEPL
 
 ```
 cd src
-cp deploy.standalone.env.example deploy.standalone.env     # fill in; git-ignored, holds no passwords
+cp deploy.env.example deploy.env     # the same file the plant stack uses; fill in the shared block and the STAND-ALONE ONLY block; git-ignored, holds no passwords
 ./deploy.sh --standalone --profile <govcloud-profile> --validate
 ./deploy.sh --standalone --profile <govcloud-profile> --build
 ./deploy.sh --standalone --profile <govcloud-profile>      # build + deploy, interactive change-set review
 ```
 
 `deploy.sh --standalone` uses its own stack (`sytline-connect-standalone`), template (`src/template-standalone.yaml`), build directory
-(`.aws-sam/standalone`) and settings file. It **refuses any network setting** (`WORKER_*`, `HOST_NETWORK_CIDR`, `PLANT_CIDR_*`,
-`DYNAMODB_PREFIX_LIST_ID`, `API_VPCE_ID`, `CREATE_API_ENDPOINT`, `CREATE_VPC_ENDPOINTS`) as not applicable; the only network settings it accepts are the three `ATTACH_*` ones.
+(`.aws-sam/standalone`) and reads the **same `deploy.env`** as the plant stack (shared settings once, then a `PLANT ONLY` and a `STAND-ALONE ONLY` block). It ignores the
+plant block: a plant network setting (`WORKER_*`, `HOST_NETWORK_CIDR`, `PLANT_CIDR_*`, `DYNAMODB_PREFIX_LIST_ID`, `API_VPCE_ID`, `CREATE_API_ENDPOINT`,
+`CREATE_VPC_ENDPOINTS`) is not passed and `deploy.sh` prints one "ignored by the stand-alone version" line naming it; the only network settings it uses are the three `ATTACH_*` ones. A leftover `deploy.standalone.env` from an earlier version is **no longer read**: `deploy.sh --standalone` stops and asks you to move its settings into `deploy.env` and delete it.
 
-| Setting (`deploy.standalone.env`) | Meaning |
+| Setting (`deploy.env`) | Meaning |
 |---|---|
 | `SYTELINE_WSDL` | the ERP web service WSDL; `https://` (an `http://` address needs `ALLOW_PLAIN_HTTP=true`) |
 | `SYTELINE_USER`, `SYTELINE_SECRET_ARN`, `SYTELINE_CONFIG` | as in the VPC deployment |
@@ -85,7 +86,7 @@ exports. Deploying or deleting it does not touch the VPC deployment.
 ## 3a. Attach to an existing VPC, subnets and security group
 
 Fill in all three of `ATTACH_VPC_ID`, `ATTACH_SUBNET_IDS` (comma-separated, no spaces) and `ATTACH_SG_IDS` in
-`deploy.standalone.env`, then deploy as usual. The functions then run inside those subnets with that security group. The stack
+`deploy.env` (stand-alone block), then deploy as usual. The functions then run inside those subnets with that security group. The stack
 creates **no** network resource, and attaching adds **no** API gateway, function URL or public address: the only way in is still a
 direct invocation by a permitted cloud identity. The function's role gets network-interface permission **only** in this mode.
 
@@ -113,7 +114,7 @@ When the function is attached, its health check can also test the plant **SyteLi
 
 Details and failure meanings: [DATABASE.md](DATABASE.md).
 
-> **Adding a setting that both deployments have?** The plant stack (`template.yaml`) and the stand-alone stack (`template-standalone.yaml`) are separate files, so a setting they share must be added to **both** templates (same name, default and allowed values, wired to the same environment variable), to **both** branches of `deploy.sh`, and to **both** `deploy*.env.example` files. `tests/unit/test_mode_parity.py` fails, naming the setting, when any of these differ; a setting that only one mode has is never flagged. See [DEPLOYMENT.md](DEPLOYMENT.md).
+> **Adding a setting that both deployments have?** The plant stack (`template.yaml`) and the stand-alone stack (`template-standalone.yaml`) are separate files, so a setting they share must be added to **both** templates (same name, default and allowed values, wired to the same environment variable), to **both** branches of `deploy.sh`, and **once** to the shared block of `deploy.env.example` (a setting only one mode has goes in that mode's block). `tests/unit/test_mode_parity.py` fails, naming the setting, when any of these differ or a variable sits in the wrong block; a setting that only one mode has is never flagged for being absent from the other. See [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## 4. Allow a caller to invoke it
 
@@ -145,7 +146,8 @@ aws lambda invoke --region us-gov-east-1 --function-name <DirectFunctionName> \
 |---|---|
 | Deployment refused: "Give exactly one of SytelineWsdlHttps or SytelineWsdlHttp" | use `deploy.sh --standalone`, or pass exactly one address |
 | Deployment refused: "An http:// ERP address needs AllowPlainHttp=true" | use an `https://` address, or set `ALLOW_PLAIN_HTTP=true` knowing the consequence |
-| `deploy.sh`: "not applicable to the stand-alone version" | a network setting is in `deploy.standalone.env`; remove it |
+| `deploy.sh`: "deploy.standalone.env is no longer read" | move its settings into `deploy.env` (stand-alone block) and delete the old file |
+| `deploy.sh`: "ignored by the stand-alone version: ..." | not an error: those plant settings in `deploy.env` are skipped for this stack |
 | `INSECURE_TRANSPORT` at run time | the ERP address (or the service address in its WSDL) is `http://`; fix the ERP or set the override |
 | `health` fails at `dns` / `tcp` | no-VPC mode: the ERP name is not publicly resolvable or the ERP is not reachable from the internet, or a firewall blocks the function. Private plant name: use attached mode |
 | `SECRET_STORE_UNREACHABLE` | attached mode without a path to Secrets Manager (add an endpoint with private DNS or a NAT route; allow HTTPS from the security group), or a wrong/denied secret ARN |

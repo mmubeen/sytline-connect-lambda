@@ -121,7 +121,7 @@ Wait for `saved` (or investigate `partly_saved`, `failed`, `needs_reconciliation
 The API is private: call it from inside the VPC or through the execute-api endpoint with an IAM-signed request (for example `awscurl --service execute-api`). Routes: `POST /job-reservations`, `POST /job-reservations/{id}/save`, `GET /job-reservations/{id}` (and `POST /confirmed-orders` for the one-step upload). The API ID is the `ApiId` stack output. The caller identity is then the signing principal.
 
 ## Step 11b: Stand-alone version, database check (optional)
-Deploy `./deploy.sh --standalone` with the three `ATTACH_*` settings (the database check is automatic when attached; `DATABASE_CHECK=auto` is the default), the database keys in the secret and TCP 1433 allowed from the function's security group, then:
+Deploy `./deploy.sh --standalone` (same `deploy.env`, stand-alone block) with the three `ATTACH_*` settings (the database check is automatic when attached; `DATABASE_CHECK=auto` is the default), the database keys in the secret and TCP 1433 allowed from the function's security group, then:
 ```
 aws lambda invoke --function-name <StandaloneDirectFunction> --cli-binary-format raw-in-base64-out \
   --payload '{"action":"health"}' out.json && cat out.json

@@ -71,3 +71,15 @@ A missing database key makes `db_login` fail naming the keys (`database not conf
 
 ## Revision 2026-10-22: parity contract (test contract, no runtime interface)
 `tests/unit/test_mode_parity.py` exposes pure functions used by the tests and the self-test: `shared_parameters(plant, standalone)`, `template_violations(plant, standalone)`, `wiring_violations(plant, standalone)`, `script_violations(script_text, plant, standalone)`, `example_violations(example_texts, plant, standalone)`; each returns a list of violation strings (empty = in sync). Adding a setting to both modes must require updating all four places or the suite fails; adding it to one mode only never fails the parity tests.
+
+## Settings file (revision: one file for both modes)
+
+`src/deploy.env` (copied from `src/deploy.env.example`, git-ignored) is read by `./deploy.sh` and `./deploy.sh --standalone`.
+
+| Block | Variables | Read by |
+|---|---|---|
+| Shared | `SYTELINE_WSDL`, `SYTELINE_USER`, `SYTELINE_SECRET_ARN`, `SYTELINE_CONFIG`, `AWS_PROFILE_NAME`, `LIVE_WRITES`, `LIVE_APPROVAL_REF`, `USE_FIPS_ENDPOINTS`, `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, `SQL_PORT`, `SQL_CA_PEM_FILE`, `SQL_ENCRYPT`, `SQL_VERIFY_HOSTNAME`, `SQL_LOGIN_TIMEOUT` | both modes |
+| `PLANT ONLY` | `WORKER_*`, `CREATE_VPC_ENDPOINTS`, `HOST_NETWORK_CIDR`, `PLANT_CIDR_*`, `DYNAMODB_PREFIX_LIST_ID`, `API_VPCE_ID`, `CREATE_API_ENDPOINT`, `IDP_*`, `*_IDO`, `SITE_ID`, `SQL_TIMEOUT`, `MATCH_*`, `SYTELINE_DEFAULT_*` | plant mode; ignored by `--standalone` |
+| `STAND-ALONE ONLY` | `ATTACH_VPC_ID`, `ATTACH_SUBNET_IDS`, `ATTACH_SG_IDS`, `ALLOW_PLAIN_HTTP`, `VERIFY_TLS`, `DATABASE_CHECK` | `--standalone`; ignored by plant mode |
+
+`./deploy.sh --standalone` with a `deploy.standalone.env` present exits before building: "deploy.standalone.env is no longer read: move its settings into deploy.env (stand-alone block) and delete it". No other behaviour changes.

@@ -97,3 +97,30 @@ A missing database key is not special-cased: `db_login` fails naming the keys, a
 ## R19. Proving the tests catch drift (SC-011)
 **Decision**: besides checking the real files, the module has a self-test that mutates in-memory copies (a changed default, a changed allowed value, a parameter missing from `deploy.sh` text, a variable missing from an example, a differently named environment variable) and asserts the checker reports each, so a future edit that weakens the checker is itself caught. The checker is a set of plain functions returning lists of violation strings; the real-file tests assert the lists are empty.
 **Alternatives**: snapshot/golden files of the parameter tables (hide intent, produce noisy diffs); generating one file from the other (structural change, rejected by the clarification).
+
+
+## Revision 2026-10-22: single settings file (R20 to R23)
+
+## R20. One file for both modes
+**Decision**: `deploy.env` and `deploy.env.example` serve `./deploy.sh` and `./deploy.sh --standalone` (clarified, FR-017). `env_file` is always `deploy.env`; `--standalone` still selects the stack, template and build directory (`--config-env standalone`). `deploy.standalone.env.example` is deleted. The example is laid out as: (1) shared settings, written once (ERP address, user, secret ARN, config, AWS profile, live-writes gate, FIPS, database login block, `SQL_ENCRYPT`, `SQL_VERIFY_HOSTNAME`, `SQL_LOGIN_TIMEOUT`); (2) a `PLANT ONLY` block (`WORKER_*`, network creation, `API_*`, `IDP_*`, route IDOs, `SITE_ID`, `SQL_TIMEOUT`, `MATCH_*`, default warehouse/order type); (3) a `STAND-ALONE ONLY` block (`ATTACH_*`, `ALLOW_PLAIN_HTTP`, `VERIFY_TLS`, `DATABASE_CHECK`).
+**Rationale**: a setting both modes share has one name, one default and one place; the parity tests no longer need to compare two example files.
+**Alternatives**: a common file loaded by two mode files (rejected in the clarification: three files); keep two files with a drift check (rejected).
+
+## R21. A shared value is shared
+**Decision**: a shared setting has one value for both stacks (for example the same `SYTELINE_WSDL`). Where the modes would differ, the setting is not shared but mode-only. Nothing is renamed. Consequence stated in the example: the stand-alone mode still refuses an `http://` ERP address unless `ALLOW_PLAIN_HTTP=true`, so a plant address that is plain HTTP needs that explicit stand-alone-only opt-in.
+**Rationale**: no hidden per-mode overrides; the file reads the same whichever mode runs.
+
+## R22. Each mode ignores the other's block
+**Decision**: the stand-alone branch of `deploy.sh` never reads plant-only variables and the plant branch never reads stand-alone-only variables; a value present in the other block is neither validated nor passed. The "missing" error text names `deploy.env` in both branches. The database-login merge (`update_secret`) is unchanged and runs from the shared block in both modes.
+
+## R23. The retired file is refused, not read
+**Decision**: when `--standalone` is used and `deploy.standalone.env` exists, `deploy.sh` exits before building with a message that names the file and says to move its settings into `deploy.env` (stand-alone-only block) and delete it. No silent fallback to the old file. The `.gitignore` entry for `src/deploy.standalone.env` stays so a leftover file is never committed.
+**Alternatives**: read the old file for a transition period (rejected: two sources of truth, the problem being solved).
+
+## R24. Parity tests follow the new layout
+**Decision**: `tests/unit/test_mode_parity.py` changes the example check only: the single example must contain `VAR=` for every shared variable (its default equal to the template default) in the shared part, every plant-only variable only in the `PLANT ONLY` block and every stand-alone-only variable only in the `STAND-ALONE ONLY` block; the script check adds that each branch references no variable of the other mode's block. The self-test mutates copies to prove each rule fires (misplaced variable, missing shared variable, cross-mode read). `test_deploy_script.py` gains: `--standalone` reads `deploy.env`; leftover `deploy.standalone.env` stops it.
+
+## R25. The stand-alone refusal of plant network settings is replaced by a notice
+**Decision**: today `--standalone` stops with "not applicable to the stand-alone version" when a plant network setting (`WORKER_*`, `HOST_NETWORK_CIDR`, `PLANT_CIDR_*`, `DYNAMODB_PREFIX_LIST_ID`, `API_VPCE_ID`, `CREATE_API_ENDPOINT`, `CREATE_VPC_ENDPOINTS`) is set. With one shared file those values are normal, so the refusal is removed: the settings are not passed to CloudFormation and one line names them ("ignored by the stand-alone version: ..."). Consistent with R22 and with the plant branch's existing "ignored" warning for create-mode settings.
+**Consequence**: two tests that expect the refusal (`test_deploy_script.py`, "not applicable") change to expect the notice and no pass-through.
+

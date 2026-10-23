@@ -14,6 +14,8 @@ Add the PO OCR demo's three database calls to the VPC deployment, each used **on
 
 **Revision 2026-10-22 (mode parity):** a new test module `tests/unit/test_mode_parity.py` keeps the settings shared by the plant and stand-alone deployments in sync across the two templates, `deploy.sh` and the example files (spec FR-015, SC-011). Tests only: no structural change (research.md R17 to R19).
 
+**Revision 2026-10-22 (single settings file):** both deployment modes read one `deploy.env` with one `deploy.env.example`; shared settings appear once, mode-specific settings sit in marked blocks, and `deploy.standalone.env` is retired (research.md R20 to R23, FR-017).
+
 ## Technical Context
 
 **Language/Version**: Python 3.13 (Lambda; existing code), SAM/CloudFormation YAML
@@ -75,6 +77,8 @@ src/
     ├── config.py                  # + database settings from the secret; route helpers
     ├── idos.py                    # + SLCos terms/ship property names (UNCONFIRMED); route setting names
     └── errors.py                  # + DATABASE_NOT_CONFIGURED, CUSTOMER_LOW_CONFIDENCE
+src/deploy.sh                    # revision (single file): both branches read deploy.env; a leftover deploy.standalone.env stops --standalone with a message
+src/deploy.env.example           # revision: shared block, PLANT ONLY block, STAND-ALONE ONLY block; src/deploy.standalone.env.example is deleted
 src/template-standalone.yaml     # revision: + DatabaseCheck, SqlEncrypt, SqlVerifyHostname, SqlLoginTimeout parameters and env on DirectFunction
 src/syteline/health.py           # revision: database stages also when SYTELINE_DB_CHECK=true and the function is attached (SYTELINE_ATTACHED)
 src/syteline/config.py           # revision: db_check(), attached()
@@ -85,6 +89,7 @@ tests/
 ├── fixtures/customer_match_golden.json   # NEW: decisions from the demo's scoring code
 ├── tools/make_customer_golden.py         # NEW: regenerates the golden file from the demo checkout
 └── unit/
+    ├── test_mode_parity.py, test_deploy_script.py (revision: one settings file, retired-file refusal, mode blocks)
     ├── test_routes.py, test_sqlserver.py, test_numbers.py, test_customer_match.py, test_defaults.py,
     ├── test_no_sql.py (changed: allow only sqlserver.py, audit statements), test_health_database.py,
     └── test_template_database.py

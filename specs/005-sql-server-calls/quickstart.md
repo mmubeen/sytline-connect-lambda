@@ -48,3 +48,10 @@ Verify the `LongList` / `Infobar` types, the routine signatures and the `custadd
 
 ## 8. Mode parity (revision 2026-10-22)
 `python -m pytest tests/unit/test_mode_parity.py -q`: all pass on the current files. To see it work, change `Default: "5"` of `SqlLoginTimeout` in only one template (or delete `SQL_LOGIN_TIMEOUT` from one example file) and re-run: the suite fails naming the setting; revert the change afterwards.
+
+## Single settings file (revision)
+
+1. Copy `src/deploy.env.example` to `src/deploy.env`; fill the shared block and the block for the mode you deploy.
+2. `./deploy.sh --validate` and `./deploy.sh --standalone --validate` both succeed from that one file.
+3. With a leftover `src/deploy.standalone.env`, `./deploy.sh --standalone` stops with the move-and-delete message and builds nothing.
+4. `PYENV_VERSION=3.12 pytest tests/unit/test_mode_parity.py tests/unit/test_deploy_script.py` passes; moving a variable into the wrong block makes it fail.

@@ -168,6 +168,20 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 
 ---
 
+## Phase 12: Revision 2026-10-22 - one settings file for both modes (spec FR-017, FR-015; research.md R20 to R25)
+
+**Goal**: `./deploy.sh` and `./deploy.sh --standalone` read the same `src/deploy.env` and `src/deploy.env.example`; shared settings appear once, mode-specific ones sit in marked blocks, and the stand-alone settings file is retired.
+
+- [X] T058 In `src/deploy.sh` always set `env_file="deploy.env"` (keep `--config-env standalone` for `--standalone`); when `--standalone` is used and `deploy.standalone.env` exists, exit 1 before building with: "deploy.standalone.env is no longer read: move its settings into deploy.env (stand-alone block) and delete it" (R23); make the "missing" and header comments name `deploy.env` in both branches.
+- [X] T059 In `src/deploy.sh` replace the stand-alone "not applicable to the stand-alone version" refusal (`WORKER_*`, `HOST_NETWORK_CIDR`, `PLANT_CIDR_*`, `DYNAMODB_PREFIX_LIST_ID`, `API_VPCE_ID`, `CREATE_API_ENDPOINT`, `CREATE_VPC_ENDPOINTS`) with one line "ignored by the stand-alone version: <names>" and never pass them (R25); ensure the plant branch does not read `ATTACH_*`, `ALLOW_PLAIN_HTTP`, `VERIFY_TLS` or `DATABASE_CHECK` (R22).
+- [X] T060 Rewrite `src/deploy.env.example` into three marked blocks: shared (ERP address, user, secret ARN, config, `AWS_PROFILE_NAME`, `LIVE_WRITES`, `LIVE_APPROVAL_REF`, `USE_FIPS_ENDPOINTS`, database login, `SQL_ENCRYPT`, `SQL_VERIFY_HOSTNAME`, `SQL_LOGIN_TIMEOUT`), `PLANT ONLY` and `STAND-ALONE ONLY` (`ATTACH_*`, `ALLOW_PLAIN_HTTP`, `VERIFY_TLS`, `DATABASE_CHECK`), each variable once, defaults equal to the templates'; then delete `src/deploy.standalone.env.example` (R20, R21).
+- [X] T061 Update `tests/unit/test_mode_parity.py` (R24): drop `STANDALONE_EXAMPLE`; `example_violations` takes the single example text and checks shared variables are in the shared part with the template default, plant-only variables only in the `PLANT ONLY` block and stand-alone-only variables only in the `STAND-ALONE ONLY` block; `script_violations` adds that each branch references no variable of the other mode's block; adjust the self-tests (misplaced variable, missing shared variable, cross-mode read) so each rule is shown to fire.
+- [X] T062 Update `tests/unit/test_deploy_script.py`: the stand-alone helper writes `deploy.env`; add tests that `--standalone` reads `deploy.env`, that a leftover `deploy.standalone.env` stops it before any `sam` call with the move-and-delete message, that plant network settings under `--standalone` give the "ignored" line and are not passed, and change the two "not applicable" tests (lines ~391 and ~530) accordingly.
+- [X] T063 [P] Update `docs/STANDALONE.md` (copy `deploy.env.example`, setting table headed `deploy.env`, troubleshooting row replaced by the "ignored" note and the retired-file message), `docs/DATABASE.md` (lines naming `deploy.standalone.env`), `docs/DEPLOYMENT.md`, `docs/TESTING.md` and `README.md` for the single file, and add a note to `specs/003-standalone-public-lambda/quickstart.md` that the file is now `deploy.env`.
+- [X] T064 Run the whole suite, `cfn-lint src/template.yaml src/template-standalone.yaml` and `sam validate --lint` for both templates (`./deploy.sh --validate` and `--standalone --validate` from one `deploy.env`); only the pre-existing failures (12 failures, 2 errors) may remain; fix real drift in the script or example, not by weakening the tests.
+
+---
+
 ## Dependencies and order
 
 - Phase 1 first (T001 to T004 touch different files and can run together). T005 and T006 need T002 and T004; T007 needs T006's interface; T008 needs T006 and T007; T009 needs T006 and T007.
@@ -180,6 +194,8 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 - Phase 10 (automatic check) after Phase 9: T047 first; T048 needs T047; T049 needs only the new value names; T050 and T051 in parallel after T049; T052 last.
 - Phase 9 (stand-alone database check) after Phase 8: T040 first; T041 needs T040; T042 needs only the setting names from T040; T043 needs T042's parameter names (different file, parallel after T042); T044 needs T041 and T042; T045 after T041 to T043; T046 last.
 - Phase 8 (revision) after Phases 1-7: T033 first (config); T034 needs T033; T035 needs T034 and the existing `FakeSqlServer`; T036 needs T034 (`SqlServer.encrypted`); T037 needs only the setting name from T033 and can run in parallel with T034 to T036; T038 after T034 to T037; T039 last.
+
+- Phase 12 (single settings file) after Phase 11: T058 then T059 (same file); T060 needs the variable-to-block split from research.md R20; T061 needs T060; T062 needs T058 and T059; T063 in parallel with T061 and T062; T064 last.
 
 ## Parallel examples
 
@@ -196,3 +212,4 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 - **Then**: US2 makes the customer decision identical to the demo, US3 fills the header defaults, US4 makes the whole path observable. Do not enable live writes or run any step against the plant database until the unconfirmed names (`LongList`, `Infobar`, routine signatures, `custaddr` / `co` columns, `SLCos` terms and ship property names) have been verified read-only.
 - **Revision (Phases 9 and 10)**: T040 to T046 add the optional stand-alone database check (done); T047 to T052 make it automatic when the function is attached (`DatabaseCheck=auto`, the new default). Do T047 to T049 first (config, health, template), then the script and docs in parallel.
 - **Revision (Phase 8)**: T033 to T039 make `SQL_CA_PEM` optional by adding the explicit, warned unencrypted option; the default stays encrypted and verified. Do it before the first run against the plant database, because that server offers no certificate the functions can verify.
+- **Revision (Phase 12)**: T058 to T064 merge the two settings files into one `deploy.env`. Do T058 to T060 first (script and example), then the tests, then the docs; no stack parameter, template or function code changes.

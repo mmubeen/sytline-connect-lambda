@@ -30,7 +30,7 @@ Each setting is either an **endpoint (IDO) name**, which keeps that operation on
 
 ### Putting the values into the secret (`deploy.sh`)
 
-You can fill them in `deploy.env` (or `deploy.standalone.env`) and let `deploy.sh` do it: `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, `SQL_PORT` and `SQL_CA_PEM_FILE` (a path to a PEM file; its text is stored as `SQL_CA_PEM`). Before building, the script reads the secret named by `SYTELINE_SECRET_ARN`, **merges** the values you gave into it (its other keys are kept; a value left empty keeps what the secret already holds) and writes a new version. Rules:
+You can fill them in `deploy.env` (the one settings file for both stacks) and let `deploy.sh` do it: `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, `SQL_PORT` and `SQL_CA_PEM_FILE` (a path to a PEM file; its text is stored as `SQL_CA_PEM`). Before building, the script reads the secret named by `SYTELINE_SECRET_ARN`, **merges** the values you gave into it (its other keys are kept; a value left empty keeps what the secret already holds) and writes a new version. Rules:
 
 - It asks first (`./deploy.sh --yes` skips the question); with values set and no terminal it refuses rather than guess.
 - The values travel only through the environment and a private temporary file that is removed afterwards: they are never stack parameters, never on a command line and never printed (only the key names are).
@@ -77,7 +77,7 @@ The functions run in the plant-routed network. They need a route to the database
 
 The stand-alone Lambda has no actions that reserve numbers, search customers or save orders, so it never uses the database for them. When it is **attached to an existing VPC** it can run the same connectivity stages (`db_dns`, `db_tcp`, `db_login`, with the encryption detail and the unencrypted warning) in its health check:
 
-| `deploy.standalone.env` | Stack parameter | Default | Meaning |
+| `deploy.env` (stand-alone block) | Stack parameter | Default | Meaning |
 |---|---|---|---|
 | `DATABASE_CHECK` | `DatabaseCheck` | `auto` | `auto`: the database stages run whenever the function is attached to a VPC (not attached: unchanged). `true`: always (refused unless all three `ATTACH_*` settings are given). `false`: never |
 | `SQL_ENCRYPT` | `SqlEncrypt` | `true` | as above (`false` = unencrypted, warned, no CA needed) |
