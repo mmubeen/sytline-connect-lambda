@@ -94,10 +94,11 @@ def _log(started, outcome, parsed=None, summary=None, **fields):
               **counts, **fields)
 
 
-def handler(event, context):
+def process(payload, context):
+    """Run the intake for one event (the payload of the `document_event` action); returns the outcome object."""
     started = time.monotonic()
     try:
-        parsed = eventdoc.parse(event)
+        parsed = eventdoc.parse(payload)
     except IntegrationError as exc:
         _log(started, "refused", code=exc.err["code"])
         return _refused(exc)

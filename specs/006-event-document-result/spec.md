@@ -22,6 +22,9 @@ Two facts shape the work:
 ### Session 2026-10-22
 
 - Q: After the scan result is read, what should the function do? → A: Go all the way: read the result, then reserve the CO and job numbers and save the order to the ERP, with no person starting either step. All the safeguards of feature 004 stay: live ERP writes must be on, a result with a field below its confidence threshold is refused until a person has reviewed it, a customer that is not matched confidently is refused, and a document is processed at most once however many times its event is delivered. The scan result summary is still returned.
+- Q: What does "make this the default Lambda behaviour" mean? → A: Consolidate: there is one Lambda for the direct actions and the event intake, and its `action` decides what runs. The separate event-intake function is folded into it; the trigger rule (when `IDP_STATE_MACHINE_ARN` is set) targets that one Lambda. The trigger itself stays opt-in; live writes stay off by default.
+- Q: How does the IDP status-change event, which has no `action`, reach the intake? → A: The intake is the **default action**: when the payload has no `action`, the action is `document_event`. An explicit `action` always wins (`health`, `add_note`, `get_notes`, `document_event`; an unknown value is refused as today). The event is the payload itself; an `event` key holding it is also accepted.
+- Q: What does a payload with no `action` that is not an IDP event (for example `{}` or `{"dry_run": true}`) do now? → A: Strict: it is handed to the intake and refused with `EVENT_INVALID`, and the message says to pass `"action": "health"` for the health check. A health check therefore always needs `"action": "health"`; this supersedes "`action` defaults to health" of features 001 and 003 for this Lambda.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -72,6 +75,8 @@ Events that are not a finished-processing event, or that carry no document ID, m
 1. **Given** an event whose status is not `SUCCEEDED`, **When** the function is invoked, **Then** it answers "ignored" with the status and contacts nothing.
 2. **Given** a SUCCEEDED event whose `input` and `output` hold no document ID, or text that is not valid JSON, **When** invoked, **Then** it answers with a refusal naming what is missing and contacts nothing.
 3. **Given** an `input` document ID that differs from the `output` document ID, **When** invoked, **Then** it refuses and contacts nothing.
+4. **Given** a payload with no `action` that is not an IDP event (for example `{}`), **When** invoked, **Then** it is refused as `EVENT_INVALID` with a message that says to pass `"action": "health"` for the health check, and nothing is contacted.
+5. **Given** the payload `{"action": "health"}`, **When** invoked, **Then** the health check runs exactly as before.
 
 ---
 
@@ -121,6 +126,12 @@ If the document does not exist, has not finished, or the document-processing ser
 - **FR-009**: The log of a run MUST contain the document ID, the event status and the outcome, and the number of fields and of fields below threshold, the reserved numbers and the step outcomes, but not field values, customer names, addresses or part numbers.
 - **FR-010**: A usable copy of the example event (valid JSON) MUST be kept as a test fixture, and the saved `sample_events.json` MUST be either repaired to valid JSON or documented as an illustration only.
 
+- **FR-011**: The direct-invoke Lambda and the event intake MUST be one Lambda in the plant deployment, and its `action` MUST decide what runs: `health`, `add_note`, `get_notes` and the new `document_event`. The separate event-intake function MUST NOT remain; the trigger rule, when `IDP_STATE_MACHINE_ARN` is set, MUST target this Lambda.
+- **FR-012**: When the payload has no `action`, the action MUST be `document_event`. An explicit `action` MUST always win; an unknown `action` MUST be refused as today. The event MUST be accepted as the payload itself or under an `event` key.
+- **FR-013**: A payload with no `action` that is not an IDP processing status change event MUST be refused with `EVENT_INVALID` and a message that names `"action": "health"`; it MUST NOT run a health check or contact anything. A health check MUST always require `"action": "health"` (with its existing `dry_run` and `diagnose` options).
+- **FR-014**: In the stand-alone deployment, which has no document source and no reservation store, the `document_event` action (explicit or by default) MUST be refused with a clear message that it is not available in that deployment, and MUST NOT contact anything.
+- **FR-015**: The one Lambda MUST carry the permissions and settings of both roles (the connectivity actions and the intake) in the plant deployment, and the connectivity actions MUST behave exactly as before when asked for with their `action`.
+
 ### Key Entities
 
 - **Processing Status Change Event**: What the document-processing service's event source sends when a document's processing execution changes state: source, detail type, execution identifier, status, and text fields `input` and `output` that hold JSON of the document as it was at that moment.
@@ -147,6 +158,7 @@ If the document does not exist, has not finished, or the document-processing ser
 - Reserving a number and saving to the ERP are the steps of feature 004, reused as they are; the unconfirmed ERP and IDP names of that feature (see its notes) must be verified before live writes are turned on, and live writes stay off by default.
 - The date of the event stands in for the order and received dates, and the configured defaults for the warehouse and order type, unless the planning phase finds the document carries them.
 - The document-processing service, its settings (stack name, region, output bucket, tracking table) and the way the result is read are those already used by the request-based workflow (feature 004); how to use its SDK for reading the result is confirmed from its documentation (the document reviewer) during planning.
+- Features 001 and 003 said `action` defaults to `health`; for this Lambda the default is now `document_event` (FR-012, FR-013). Documents, tests and scripts that invoke the health check without an `action` must pass `"action": "health"`.
 - The saved `sample_events.json` is illustrative: its quoting is not valid JSON, so a repaired copy is the test fixture (FR-010).
 - Only documents of this service's own execution events are expected; the state machine named in the event is not checked against a configured name.
 - Thresholds and the "meets threshold" decision come from the document-processing service's own assessment, as in feature 004.

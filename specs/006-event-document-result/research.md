@@ -13,6 +13,7 @@
 **Alternatives**: making the parser tolerant of Python-style dumps (rejected: real events are valid JSON; tolerance would hide real faults).
 
 ## R4. Where it runs and how it is started
+**Superseded in part by R11**: the intake is not a separate function; everything below about the function (VPC, policies, timeout, no retries) applies to `DirectFunction`, and the rule and the `IdpStateMachineArn` parameter are unchanged.
 **Decision**: a new `EventIntakeFunction` in `src/template.yaml` (plant, in the host VPC, same security group and subnets as `ReserveFunction`, same ERP/database/IDP environment, plus `WORKER_FUNCTION_NAME`, `SYTELINE_DEFAULT_WHSE`, `SYTELINE_DEFAULT_ORDTYPE`; policies: the jobs table, the secret, IDP read, invoke of the worker). Timeout 60 s. A new optional parameter `IdpStateMachineArn` (pattern `^$|^arn:aws[a-z-]*:states:...:stateMachine:...$`): when given, an `AWS::Events::Rule` matching `source aws.states`, `detail-type` "Step Functions Execution Status Change", `detail.status` `SUCCEEDED` and `detail.stateMachineArn` equal to it targets the function; when empty no rule exists (the function can still be invoked directly with an event). The function's async invoke config has **MaximumRetryAttempts 0** (a replayed run must not be automatic).
 **Rationale**: a deliberate act (supplying the ARN) turns automatic processing on; live writes stay off by default anyway. Same account and region only (EventBridge).
 **Alternatives**: a direct EventBridge rule on all `aws.states` events (rejected: every execution of every state machine in the account); having the IDP stack call the function (rejected: changes the IDP stack).
@@ -43,5 +44,28 @@
 - **request_ref**: `event-<sha256(document_id)[:16]>-<random 12 hex>`, a new one for every attempt (R5/R6 said `event-<document_id>`). A failed reservation that consumed no number must not block a later attempt, and an idempotent `request_ref` would return that failed reservation forever. Once-per-document is enforced by the `DOCRES#` marker (a reservation that is not failed-without-numbers is final) and the `EVTDOC#` claim.
 - **Stale claim**: a claim older than 300 seconds with no reservation (the run died) is taken over once (`eventstore.STALE_AFTER`).
 - **Summary counts**: pages and issues are read from the status object as `num_pages` and `processing_issue_count` (unconfirmed SDK names; `null` when absent).
-- **Database function lists**: `EventIntakeFunction` joins reserve, the worker and the connectivity check as a function that carries the database variables (tests updated).
+- **Database function lists** (superseded by R11, `DirectFunction` already carried them): `EventIntakeFunction` joins reserve, the worker and the connectivity check as a function that carries the database variables (tests updated).
+
+## Revision 2026-10-22: one Lambda, `action` decides (R11 to R16)
+
+## R11. The Lambda that is consolidated
+**Decision**: the intake becomes an action of `lambda_function.lambda_handler`, the handler of the plant `DirectFunction` (which already has the ERP, database and secret settings, the plant VPC and a 60 s timeout) and of the stand-alone function. `EventIntakeFunction` is removed from `src/template.yaml` and `src/Makefile`. `DirectFunction` gains what the intake needs and it lacks: the IDP environment (`IDP_STACK_NAME`, `IDP_REGION`, `IDP_DOCUMENT_CLASS`, `IDP_FIELD_MAP`), `WORKER_FUNCTION_NAME`, `SYTELINE_DEFAULT_WHSE` / `SYTELINE_DEFAULT_ORDTYPE`, the jobs-table CRUD policy, `LambdaInvokePolicy` on the worker, and the IDP read policy (the same conditional statement as `ReserveFunction`); `EventInvokeConfig.MaximumRetryAttempts: 0` (it affects asynchronous invokes only, so EventBridge and `--invocation-type Event` do not retry while ordinary synchronous invokes are unchanged). The rule and permission now target `DirectFunction`. `DirectFunctionName` is the single output (the `EventIntakeFunctionName` output is dropped).
+**Rationale**: spec FR-011 and FR-015; one place to invoke, one set of permissions to review.
+**Consequence**: the direct-invoke role can now read and write the jobs table, start the worker and read the IDP: that is the union of the intake's needs and is stated in docs/EVENT_INTAKE.md. Tests that list the functions carrying the database variables return to the original three.
+
+## R12. Action resolution
+**Decision**: `lambda_handler` resolves the action in this order: (1) an explicit non-empty `action` wins (`health`, `add_note`, `get_notes`, `document_event`; anything else is refused with `UNKNOWN_ACTION` as today); (2) otherwise the action is `document_event`. The payload of `document_event` is the event itself, or the value of an `event` key (object or JSON text); an `action` key next to the event fields is ignored by the parser. `handlers/event_intake.py` exposes `process(payload, context)` (the former `handler` body); the module keeps no Lambda entry point.
+**Alternatives**: an EventBridge input transformer adding `action` (rejected: the clarification made the intake the default, so the raw event works unchanged).
+
+## R13. The strict refusal
+**Decision**: when the action was **defaulted** (no `action`) and the unwrapped payload is not an IDP status change event (`eventdoc.is_status_change`: `source` `aws.states` and the Step Functions detail type), `lambda_handler` returns `failure("document_event", EVENT_INVALID "no action given and the payload is not an IDP processing event; to run the health check pass {"action": "health"}")` and contacts nothing. With an **explicit** `document_event`, a foreign event is `ignored` as before (FR-013 applies to a missing action only). A status-change event with a status other than `SUCCEEDED` is `ignored` either way.
+
+## R14. The stand-alone deployment
+**Decision**: the stand-alone function has no jobs table and no IDP; `document_event` there (explicit, or by default with a real event) returns `failure("document_event", ACTION_UNAVAILABLE "the document_event action is not available in this deployment")`. Availability is `bool(config.jobs_table())` (the plant template sets `JOBS_TABLE` through Globals, the stand-alone template does not): no new setting. A bare `{}` is refused by R13 first, which is the more useful message. Nothing is contacted.
+
+## R15. The response shape and log
+**Decision**: `document_event` returns the outcome object of contracts/event-intake.md plus `"action": "document_event"` and `"ok"`, true for `ignored`, `already_processed`, `reserved` and `save_accepted`, false otherwise (so the shared per-call log line and callers that read `ok` behave like the other actions). The per-call log keeps `record: null` for it; the intake's own log line stays.
+
+## R16. Callers that relied on the default health action
+**Decision**: every caller that omitted `action` for the health check is changed to pass `"action": "health"`: `tests/contract/test_health.py` (3 calls), `tests/unit/test_transport.py` (where the event has no action), `tests/unit/test_standalone_parity.py` (the `call(**kw)` helper), `tests/unit/test_secret_store.py`, the `__main__` local run in `lambda_function.py`, `README.md` ("omit `--payload` for the default `health` action"), and any doc example of a bare `lambda invoke` for the health check. New tests assert the old bare forms now return the strict refusal. `docs/DEPLOYMENT.md`, `docs/STANDALONE.md` and `docs/TESTING.md` are searched for bare health invocations and updated.
 

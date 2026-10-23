@@ -135,6 +135,7 @@ aws lambda invoke --region us-gov-east-1 --function-name <DirectFunctionName> \
 ```
 
 - Dry run: expect stages `load`, `dns`, `tcp`, `wsdl`. Full check (`{"action":"health"}`): `dns`, `tcp`, `wsdl`, `token`.
+- The health check needs `"action": "health"` (a payload without an `action` is not a health check any more: the default action is the IDP event intake, which this deployment does not have and answers `ACTION_UNAVAILABLE`).
 - If a stage fails, add `"diagnose": true` to the payload for a `diagnostics` section with plain-language `findings` (for example: "general name resolution works but the ERP name did not resolve"). It contacts only the ERP host and the regional Secrets Manager endpoint, plus the database host when the function is attached and the database check is on (`auto` or `true`): see [DATABASE.md](DATABASE.md) "Diagnosing the database connection".
 - Console: the function's configuration shows **no VPC** (no-VPC mode) or exactly your subnets and security group (attached mode); the stack output `NetworkMode` says which.
 - Without `lambda:InvokeFunction`, the call is denied.

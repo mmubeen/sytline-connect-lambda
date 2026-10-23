@@ -1,8 +1,23 @@
 # Event intake: reading a finished IDP document and reserving its job numbers
 
-The IDP document-processing service (the accelerator) emits an EventBridge event, "Step Functions Execution Status Change", whenever a document's processing changes state. `EventIntakeFunction` (plant stack) can be started by the `SUCCEEDED` event of that state machine, or invoked directly with the event. It never trusts the event's content: only the **document ID** is taken from it, and the document's current result is read from the IDP service.
+The IDP document-processing service (the accelerator) emits an EventBridge event, "Step Functions Execution Status Change", whenever a document's processing changes state. The plant stack's direct-invoke Lambda (`DirectFunction`) runs it as the **`document_event`** action, which is its **default**: it is started by the `SUCCEEDED` event of that state machine, or invoked directly with the event. There is no separate function. It never trusts the event's content: only the **document ID** is taken from it, and the document's current result is read from the IDP service.
 
 Specification: `specs/006-event-document-result/`. Example event: `sample_events.json` (valid JSON; `tests/tools/make_sample_event.py` repaired it from a Python-style dump).
+
+## Which action runs
+
+One Lambda, and its `action` decides (a non-empty `action` always wins):
+
+| Payload | Runs |
+|---|---|
+| the IDP event, with no `action` | `document_event` (the default) |
+| `{"action": "document_event", "event": <event>}`, or the event with an `action` key added | `document_event` |
+| `{"action": "health", ...}` | the connectivity check (**must** be asked for) |
+| `{"action": "add_note" / "get_notes", ...}` | unchanged |
+| no `action` and not an IDP event (`{}`, `{"dry_run": true}`, a foreign event) | refused `EVENT_INVALID`; the message says to pass `"action": "health"` |
+| an unknown `action` | refused `UNKNOWN_ACTION` |
+
+In the stand-alone deployment `document_event` answers `ACTION_UNAVAILABLE` (no reservation store, no IDP). Because the intake now lives in this Lambda, its role can read and write the jobs table, start the worker and read the IDP in the plant stack, as well as read the credentials secret.
 
 ## What a run does
 
@@ -34,7 +49,7 @@ The response is discarded by EventBridge (asynchronous invoke, **no retries**); 
 ## Switching it on
 
 1. Verify the IDP calls and the unconfirmed ERP/IDP names read-only first ([TESTING.md](TESTING.md) step 5 and the notes of features 004 and 005).
-2. Invoke the function with the example event while live writes are off: `aws lambda invoke --function-name <EventIntakeFunctionName> --payload fileb://sample_events.json out.json` (add `--cli-binary-format raw-in-base64-out` for AWS CLI v2 with `--payload`). Expect `refused`/`DOCUMENT_NEEDS_REVIEW` if a field is below its threshold, or `read_only` otherwise; the summary is in the response.
+2. Invoke the Lambda with the example event while live writes are off: `aws lambda invoke --function-name <DirectFunctionName> --payload fileb://sample_events.json out.json` (use `--payload file://…` with `--cli-binary-format raw-in-base64-out` for AWS CLI v2 text payloads). Expect `refused`/`DOCUMENT_NEEDS_REVIEW` if a field is below its threshold, or `read_only` otherwise; the summary is in the response.
 3. Set `IDP_STATE_MACHINE_ARN` in `deploy.env` (PLANT ONLY block; the state machine must be in the same account and region as this stack) and redeploy. A rule now sends each `SUCCEEDED` execution of that state machine to the function. Empty it and redeploy to stop.
 4. Turn on live writes only in an approved window ([DEPLOYMENT.md](DEPLOYMENT.md)).
 

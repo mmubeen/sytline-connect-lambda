@@ -1,14 +1,24 @@
 # Contract: event intake
 
 ## Invocation
-`EventIntakeFunction` is started by EventBridge (when `IdpStateMachineArn` is set) or invoked directly with the event as payload (an object or JSON text). Asynchronous invocation has **no retries** (R4); the response is discarded by EventBridge and is the direct-invoke result.
+There is one Lambda (`DirectFunction`, `lambda_function.lambda_handler`) and its `action` decides what runs:
+
+| `action` | Runs | Payload |
+|---|---|---|
+| absent | `document_event` (the default) | the IDP status change event, or `{"event": <event>}`; any other payload without an `action` is refused `EVENT_INVALID` (it names `"action": "health"`) |
+| `document_event` | the event intake | the event itself (an `action` key beside its fields is ignored) or under `event`; a foreign event is `ignored` |
+| `health` | the connectivity check, unchanged | `dry_run`, `diagnose` as before; **must be asked for explicitly** |
+| `add_note`, `get_notes` | unchanged | as before |
+| anything else | refused `UNKNOWN_ACTION` | |
+
+In the stand-alone deployment `document_event` answers `ACTION_UNAVAILABLE` (no jobs table, no IDP). The Lambda is started by EventBridge (when `IdpStateMachineArn` is set) or invoked directly. Asynchronous invocation has **no retries** (R4, R11); the response is discarded by EventBridge and is the direct-invoke result. The response of `document_event` also carries `"action": "document_event"` and `"ok"` (R15).
 
 ## Template parameter (plant only)
 | Parameter | Default | Meaning |
 |---|---|---|
 | `IdpStateMachineArn` | `""` | ARN of the IDP document-processing state machine. Empty: no rule, nothing starts automatically. Given: a rule for its `SUCCEEDED` status-change events starts the function. Same account and region as this stack. |
 
-Environment of the function: as `ReserveFunction`, plus `WORKER_FUNCTION_NAME`, `SYTELINE_DEFAULT_WHSE`, `SYTELINE_DEFAULT_ORDTYPE`.
+Environment of `DirectFunction`: its existing ERP, database and secret settings, plus the IDP settings, `WORKER_FUNCTION_NAME`, `SYTELINE_DEFAULT_WHSE` and `SYTELINE_DEFAULT_ORDTYPE`; policies: the secret, the jobs table, invoking the worker, reading the IDP.
 
 ## Response
 ```json

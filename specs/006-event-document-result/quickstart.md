@@ -13,7 +13,7 @@ Run the IDP calls of `docs/TESTING.md` step 5 for `159112.pdf` (status, metadata
 `PYENV_VERSION=3.12 pytest tests/unit/test_eventdoc.py tests/unit/test_event_intake.py tests/unit/test_eventstore.py tests/unit/test_idp_summary.py tests/unit/test_template_event.py`.
 
 ## 4. Direct invoke with the example event (live writes off)
-`aws lambda invoke --function-name <EventIntakeFunction> --payload fileb://sample_events.json out.json`: `outcome` is `refused` with `DOCUMENT_NEEDS_REVIEW` naming `line_items[0].material_code`, the `summary` shows class `purchase_order`, 3 pages and that field below threshold; no reservation exists (check with the status request of feature 004).
+`aws lambda invoke --function-name <DirectFunctionName> --payload fileb://sample_events.json out.json` (no `action`: the intake is the default): `outcome` is `refused` with `DOCUMENT_NEEDS_REVIEW` naming `line_items[0].material_code`, the `summary` shows class `purchase_order`, 3 pages and that field below threshold; no reservation exists (check with the status request of feature 004).
 
 ## 5. Ignored events
 Invoke with the same event with `detail.status` set to `FAILED`, then with `source` changed, then with `input` and `output` document IDs different: `ignored`, `ignored`, `refused EVENT_INVALID`; the function log shows no IDP call.
@@ -23,3 +23,9 @@ With `LIVE_WRITES=true`, the approval reference, the unconfirmed names verified,
 
 ## 7. Automatic start
 Set `IDP_STATE_MACHINE_ARN` in `deploy.env`, redeploy, upload a document to the IDP input bucket: one invocation after the execution succeeds (CloudWatch), same outcomes as step 4 or 6.
+
+## 8. One Lambda, `action` decides (revision)
+- `{"action": "health"}` runs the connectivity check as before; `{}` and `{"dry_run": true}` are refused `EVENT_INVALID` and the message says to pass `"action": "health"`.
+- `{"action": "document_event", "event": <the sample>}` and the raw sample give the same outcome; an unknown action gives `UNKNOWN_ACTION`.
+- Stand-alone function: `{"action": "document_event", ...}` gives `ACTION_UNAVAILABLE`.
+

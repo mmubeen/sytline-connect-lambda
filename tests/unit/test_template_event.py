@@ -1,4 +1,4 @@
-"""The event intake additions to src/template.yaml (specs/006-event-document-result/plan.md, research R4)."""
+"""The event intake additions to src/template.yaml (specs/006-event-document-result/plan.md, research R4 and R11)."""
 
 import re
 
@@ -18,8 +18,9 @@ def test_there_is_no_rule_and_nothing_starts_automatically_without_the_state_mac
     assert e.condition("HasIdpEvents") is False
     for name in ("IdpDocumentEventRule", "IdpDocumentEventPermission"):
         assert template["Resources"][name]["Condition"] == "HasIdpEvents"
-    assert not template["Resources"]["EventIntakeFunction"].get("Condition")  # the function itself can be invoked directly
-    assert "Events" not in props(template, "EventIntakeFunction")  # no always-on trigger
+    assert "EventIntakeFunction" not in template["Resources"]  # one Lambda: the intake is an action of DirectFunction
+    assert not template["Resources"]["DirectFunction"].get("Condition")  # it can always be invoked directly
+    assert "Events" not in props(template, "DirectFunction")  # no always-on trigger
 
 
 def test_the_rule_matches_only_succeeded_events_of_that_state_machine(template):
@@ -28,8 +29,9 @@ def test_the_rule_matches_only_succeeded_events_of_that_state_machine(template):
     assert pattern == {"source": ["aws.states"], "detail-type": ["Step Functions Execution Status Change"],
                        "detail": {"status": ["SUCCEEDED"], "stateMachineArn": [{"Ref": "IdpStateMachineArn"}]}}
     target = props(template, "IdpDocumentEventRule")["Targets"][0]
-    assert target["Arn"] == {"Fn::GetAtt": ["EventIntakeFunction", "Arn"]}
+    assert target["Arn"] == {"Fn::GetAtt": ["DirectFunction", "Arn"]}
     perm = props(template, "IdpDocumentEventPermission")
+    assert perm["FunctionName"] == {"Ref": "DirectFunction"}
     assert perm["Principal"] == "events.amazonaws.com" and perm["SourceArn"] == {"Fn::GetAtt": ["IdpDocumentEventRule", "Arn"]}
 
 
@@ -43,8 +45,8 @@ def test_the_state_machine_arn_parameter_accepts_an_arn_or_nothing(template):
 
 
 def test_the_function_never_retries_and_runs_in_the_plant_network_like_the_worker(template):
-    p = props(template, "EventIntakeFunction")
-    assert p["Handler"] == "handlers.event_intake.handler" and p["Timeout"] == 60
+    p = props(template, "DirectFunction")
+    assert p["Handler"] == "lambda_function.lambda_handler" and p["Timeout"] == 60
     assert p["EventInvokeConfig"]["MaximumRetryAttempts"] == 0
     for mode in (SUPPLY, dict(HostNetworkCidr="10.50.0.0/24", PlantCidr1="10.9.0.0/16", ApiVpcEndpointId="vpce-1")):
         e = Evaluator(template, **mode)
@@ -54,7 +56,7 @@ def test_the_function_never_retries_and_runs_in_the_plant_network_like_the_worke
 
 
 def test_the_function_has_the_same_erp_database_and_idp_settings_as_reserve_plus_the_save_settings(template):
-    event_env = props(template, "EventIntakeFunction")["Environment"]["Variables"]
+    event_env = props(template, "DirectFunction")["Environment"]["Variables"]
     reserve_env = props(template, "ReserveFunction")["Environment"]["Variables"]
     assert set(reserve_env) <= set(event_env)
     assert {"WORKER_FUNCTION_NAME", "SYTELINE_DEFAULT_WHSE", "SYTELINE_DEFAULT_ORDTYPE"} <= set(event_env)
@@ -62,7 +64,7 @@ def test_the_function_has_the_same_erp_database_and_idp_settings_as_reserve_plus
 
 
 def test_the_function_may_use_the_table_the_secret_the_idp_and_start_the_worker(template):
-    pols = props(template, "EventIntakeFunction")["Policies"]
+    pols = props(template, "DirectFunction")["Policies"]
     assert {"DynamoDBCrudPolicy": {"TableName": {"Ref": "JobsTable"}}} in pols
     assert {"LambdaInvokePolicy": {"FunctionName": {"Ref": "WorkerFunction"}}} in pols
     secret = [x for x in pols if "Statement" in x][0]["Statement"][0]
@@ -70,6 +72,13 @@ def test_the_function_may_use_the_table_the_secret_the_idp_and_start_the_worker(
     assert any("Fn::If" in x for x in pols)  # the IDP read permissions, as for the reserve function
 
 
-def test_the_function_is_built_by_the_makefile():
-    text = open(__import__("os").path.join(__import__("os").path.dirname(__file__), "..", "..", "src", "Makefile")).read()
-    assert "EventIntakeFunction" in text
+def test_there_is_one_output_for_the_lambda_and_no_separate_intake_function_to_build():
+    import os
+
+    root = os.path.join(os.path.dirname(__file__), "..", "..", "src")
+    assert "EventIntakeFunction" not in open(os.path.join(root, "Makefile")).read()
+    assert "EventIntakeFunction" not in open(os.path.join(root, "template.yaml")).read()
+
+
+def test_the_outputs_name_the_direct_function_only(template):
+    assert "DirectFunctionName" in template["Outputs"] and "EventIntakeFunctionName" not in template["Outputs"]

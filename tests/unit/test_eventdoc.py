@@ -88,3 +88,20 @@ def test_a_missing_or_bad_time_falls_back_to_today():
     assert eventdoc.parse(event, today=today)["event_date"] == "2026-10-22"
     event["time"] = "yesterday"
     assert eventdoc.parse(event, today=today)["event_date"] == "2026-01-02"
+
+
+# ---- is_status_change / unwrap (specs/006 phase 8) ----------------------------------------------------------------
+def test_is_status_change_is_true_only_for_the_idp_event_whatever_its_status():
+    assert eventdoc.is_status_change(ev()) and eventdoc.is_status_change(ev(status="FAILED"))
+    assert eventdoc.is_status_change(ev(as_text=True))
+    for other in ({}, {"dry_run": True}, ev(source="aws.s3"), ev(detail_type="Other"), "{nope", "[1]", None, 5):
+        assert not eventdoc.is_status_change(other)
+
+
+def test_unwrap_returns_the_event_under_an_event_key_as_object_or_text_else_the_payload():
+    event = ev()
+    assert eventdoc.unwrap({"event": event}) == event
+    assert eventdoc.unwrap({"action": "document_event", "event": json.dumps(event)}) == event
+    assert eventdoc.unwrap(event) is event
+    assert eventdoc.unwrap({"event": "{nope"}) == {"event": "{nope"}
+    assert eventdoc.unwrap({}) == {} and eventdoc.unwrap("text") == "text"

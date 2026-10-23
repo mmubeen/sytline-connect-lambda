@@ -54,6 +54,31 @@ def _event_date(event, today=None):
         return (today or datetime.datetime.now(datetime.timezone.utc).date()).isoformat()
 
 
+def _as_object(value):
+    if isinstance(value, (str, bytes)):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    return value if isinstance(value, dict) else None
+
+
+def unwrap(payload):
+    """The event itself, or the value of an `event` key holding it (an object or JSON text)."""
+    obj = _as_object(payload)
+    if obj is not None and "event" in obj:
+        inner = _as_object(obj["event"])
+        if inner is not None:
+            return inner
+    return payload
+
+
+def is_status_change(event):
+    """True for an IDP state machine processing status change event (any status); False for any other payload."""
+    obj = _as_object(event)
+    return bool(obj) and obj.get("source") == SOURCE and obj.get("detail-type") == DETAIL_TYPE
+
+
 def parse(event, today=None):
     if isinstance(event, (str, bytes)):
         try:

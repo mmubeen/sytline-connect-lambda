@@ -102,7 +102,7 @@ A step-by-step test sequence, from credential-free checks to an approved live-wr
 
 ## Invoke (direct actions)
 `aws lambda invoke --function-name <name> --payload '{"action":"health"}' --cli-binary-format raw-in-base64-out out.json && cat out.json`
-(omit `--payload` for the default `health` action).
+The health check **must** be asked for with `"action":"health"`: a payload without an `action` is treated as an IDP finished-document event (the default action, `document_event`) and a payload that is not such an event is refused with a message that says so ([`docs/EVENT_INTAKE.md`](docs/EVENT_INTAKE.md)).
 
 ## Unconfirmed web-service names
 `src/syteline/idos.py` is the single place for the collection, method and property names, and

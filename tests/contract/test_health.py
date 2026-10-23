@@ -6,10 +6,18 @@ def _clear(monkeypatch):
         monkeypatch.delenv(k, raising=False)
 
 
-def test_default_action_is_health_and_reports_missing_config(monkeypatch):
+def test_health_reports_missing_config(monkeypatch):
+    _clear(monkeypatch)
+    out = lf.lambda_handler({"action": "health"}, None)
+    assert out["ok"] is False and out["stages"] == [] and "missing config" in out["error"]
+
+
+def test_a_bare_payload_is_no_longer_a_health_check(monkeypatch):
+    # the default action is document_event (specs/006): a bare payload is refused and says how to ask for the health check
     _clear(monkeypatch)
     out = lf.lambda_handler({}, None)
-    assert out["ok"] is False and out["stages"] == [] and "missing config" in out["error"]
+    assert out["ok"] is False and out["errors"][0]["code"] == "EVENT_INVALID" and "stages" not in out
+    assert '"action": "health"' in out["errors"][0]["message"]
 
 
 def test_dry_run_needs_only_wsdl_and_stage_order(monkeypatch):
@@ -29,7 +37,7 @@ def test_normal_run_stage_names(monkeypatch):
     monkeypatch.setenv("SYTELINE_WSDL", "http://127.0.0.1:9/x?wsdl")
     monkeypatch.setenv("SYTELINE_USER", "u")
     monkeypatch.setenv("SYTELINE_PASS", "p")
-    out = lf.lambda_handler({}, None)
+    out = lf.lambda_handler({"action": "health"}, None)
     assert [s["stage"] for s in out["stages"]] == ["dns", "tcp"]  # stops at first failure
 
 
@@ -50,5 +58,5 @@ def test_dry_run_never_creates_a_session_and_check_sql_has_no_effect(monkeypatch
     assert [s["stage"] for s in out["stages"]][:3] == ["load", "dns", "tcp"]
     monkeypatch.setenv("SYTELINE_USER", "u")
     monkeypatch.setenv("SYTELINE_PASS", "p")
-    out = lf.lambda_handler({"check_sql": True}, None)
+    out = lf.lambda_handler({"action": "health", "check_sql": True}, None)
     assert [s["stage"] for s in out["stages"]] == ["dns", "tcp"]  # unchanged; no sql stage exists

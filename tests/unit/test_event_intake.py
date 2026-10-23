@@ -34,7 +34,7 @@ class World:
         monkeypatch.setenv("WORKER_FUNCTION_NAME", "worker-fn")
 
     def run(self, event=None):
-        return ei.handler(event if event is not None else ev(), None)
+        return ei.process(event if event is not None else ev(), None)
 
     def untouched(self):
         return (self.idp.calls == [] and self.soap.calls == [] and self.table.items == {} and self.lam.invocations == [])

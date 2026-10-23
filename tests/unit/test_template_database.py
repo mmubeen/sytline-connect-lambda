@@ -22,8 +22,8 @@ def test_the_four_route_parameters_default_to_the_database(template):
         assert p["Type"] == "String" and p["Default"] == "database" and "database" in p["Description"]
 
 
-# the functions that number, resolve or save: reserve, the worker, the connectivity check and (specs/006) the event intake
-DB_FUNCTIONS = ("ReserveFunction", "WorkerFunction", "DirectFunction", "EventIntakeFunction")
+# the functions that number, resolve or save: reserve, the worker and the direct-invoke Lambda (which also runs the event intake)
+DB_FUNCTIONS = ("ReserveFunction", "WorkerFunction", "DirectFunction")
 
 
 def test_the_route_variables_are_on_exactly_the_functions_that_number_resolve_or_save(template):
@@ -112,10 +112,12 @@ def test_the_tuning_parameters_default_to_the_codes_own_defaults_and_are_wired_t
 def test_the_idp_mapping_parameters_are_empty_by_default_and_wired_to_the_functions_that_read_idp(template):
     for name in ("IdpDocumentClass", "IdpFieldMap"):
         assert template["Parameters"][name]["Default"] == ""
-    for fn in ("ReserveFunction", "SaveIntakeFunction", "WorkerFunction"):
+    # reserve, save-intake, the worker and (specs/006) the direct-invoke Lambda, whose document_event action reads IDP
+    for fn in ("ReserveFunction", "SaveIntakeFunction", "WorkerFunction", "DirectFunction"):
         env = env_of(template, fn)
-        assert env["IDP_DOCUMENT_CLASS"] == {"Ref": "IdpDocumentClass"} and env["IDP_FIELD_MAP"] == {"Ref": "IdpFieldMap"}
-    assert "IDP_FIELD_MAP" not in env_of(template, "DirectFunction")
+        assert env["IDP_DOCUMENT_CLASS"] == {"Ref": "IdpDocumentClass"} and env["IDP_FIELD_MAP"] == {"Ref": "IdpFieldMap"}, fn
+    for fn in ("IntakeFunction", "StatusFunction", "SweeperFunction", "ReservationStatusFunction"):
+        assert "IDP_FIELD_MAP" not in env_of(template, fn), fn
 
 
 def test_every_numeric_default_is_a_value_the_code_accepts(template):

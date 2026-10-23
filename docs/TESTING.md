@@ -130,7 +130,7 @@ Expect `db_dns`, `db_tcp`, `db_login` after the web-service stages, and a `warni
 
 ## Step 11c: Start from the IDP's finished-document event (optional)
 
-`aws lambda invoke --function-name <EventIntakeFunctionName> --payload fileb://sample_events.json out.json`: with live writes off the response is `refused` (a field below its threshold) or `read_only`, with the scan result `summary` and nothing reserved. See [EVENT_INTAKE.md](EVENT_INTAKE.md) for the outcomes and for switching on the automatic rule (`IDP_STATE_MACHINE_ARN`).
+`aws lambda invoke --function-name <DirectFunctionName> --payload fileb://sample_events.json out.json` (no `action`: the intake is the default action): with live writes off the response is `refused` (a field below its threshold) or `read_only`, with the scan result `summary` and nothing reserved. See [EVENT_INTAKE.md](EVENT_INTAKE.md) for the outcomes and for switching on the automatic rule (`IDP_STATE_MACHINE_ARN`).
 
 ## Step 12: Check the records and stop
 - **CloudWatch logs:** each function writes one structured line per request, and each database step its own line (type, outcome, duration, counts). Confirm no password or login appears.

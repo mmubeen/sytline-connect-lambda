@@ -2,7 +2,7 @@
 # needed: dependencies are installed as Linux x86_64 / CPython 3.13 wheels via pip's cross-platform flags.
 
 FUNCTIONS = IntakeFunction StatusFunction WorkerFunction SweeperFunction DirectFunction \
-	ReserveFunction SaveIntakeFunction ReservationStatusFunction EventIntakeFunction
+	ReserveFunction SaveIntakeFunction ReservationStatusFunction
 
 .PHONY: build-DepsLayer $(addprefix build-,$(FUNCTIONS))
 

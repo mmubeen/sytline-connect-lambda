@@ -8,6 +8,8 @@
 
 Add a second way to start the job-number workflow (feature 004): a new function in the plant deployment that the document-processing service's "Step Functions Execution Status Change" event starts. It (1) parses the event and takes the document ID from the execution `input`/`output` text, ignoring or refusing events that cannot be used, (2) reads the document's current result once through the IDP SDK (never the event's snapshot), builds the scan result summary, (3) when the result is usable and live writes are on, reserves the CO and job numbers with the existing `run_reserve` and accepts the save and starts the existing worker, exactly once per document, and (4) records the outcome so a repeat delivery returns it. No new ERP behaviour: all safeguards are those of features 004 and 005. The IDP SDK usage is the one already in `src/syteline/idp.py`; the SDK documentation was run through the document reviewer (research.md R1).
 
+**Revision 2026-10-22 (one Lambda, `action` decides):** the separate `EventIntakeFunction` is folded into the existing direct-invoke Lambda (`lambda_function.lambda_handler`, `DirectFunction`); the new action `document_event` is the **default** when no `action` is given, `health` must be asked for explicitly, and a bare payload that is not an IDP event is refused with a message naming `"action": "health"` (research.md R11 to R16, spec FR-011 to FR-015).
+
 ## Technical Context
 
 **Language/Version**: Python 3.13 (Lambda; existing code), SAM/CloudFormation YAML
@@ -51,25 +53,26 @@ specs/006-event-document-result/
 
 ```text
 src/
-├── template.yaml               # + EventIntakeFunction, IdpStateMachineArn parameter, rule (only when the ARN is given), no retries
-├── Makefile                    # + EventIntakeFunction build target
+├── template.yaml               # + IdpStateMachineArn parameter, rule (only when the ARN is given); DirectFunction gains the intake's settings and permissions (no separate function), no retries
+├── Makefile                    # (revision: no separate EventIntakeFunction target)
 ├── deploy.sh                   # + IDP_STATE_MACHINE_ARN (plant branch only, always passed; format check)
 ├── deploy.env.example          # + IDP_STATE_MACHINE_ARN in the PLANT ONLY block
+├── lambda_function.py          # revision: action dispatch; default `document_event`; strict refusal of a bare non-event payload; `ok` and log for the new action
 ├── handlers/
-│   └── event_intake.py         # NEW: parse -> read once -> summary -> reserve -> accept save -> outcome
+│   └── event_intake.py         # NEW: `process(payload, context)` = parse -> read once -> summary -> reserve -> accept save -> outcome
 └── syteline/
-    ├── eventdoc.py             # NEW: event parsing (document ID, status, execution, event date), refusals
+    ├── eventdoc.py             # NEW: event parsing (document ID, status, execution, event date), refusals; `is_status_change()`; `unwrap()` of an `event` key
     ├── idp.py                  # + read_document(), scan_summary(), po_details(document_id, read=None)
     ├── eventstore.py           # NEW: the once-per-document guard and outcome record (EVTDOC#), DOCRES# marker lookup
     ├── savestart.py            # NEW: accept_save + start the worker, extracted from handlers/save_intake.py
     ├── reservations.py         # + writes the DOCRES#<document_id> marker when a reservation is created
     ├── config.py               # + event_defaults(): order/received date, warehouse, order type, or the missing names
-    └── errors.py               # + EVENT_IGNORED, EVENT_INVALID, DEFAULTS_NOT_CONFIGURED
+    └── errors.py               # + EVENT_IGNORED, EVENT_INVALID, DEFAULTS_NOT_CONFIGURED, ACTION_UNAVAILABLE
 tests/
 ├── fixtures/sample_event.json  # NEW: the example event as valid JSON
 ├── tools/make_sample_event.py  # NEW: repairs sample_events.json into valid JSON
 ├── fakes.py                    # + event builder helper
-└── unit/ test_eventdoc.py, test_event_intake.py, test_eventstore.py, test_idp_summary.py, test_template_event.py
+└── unit/ test_lambda_actions.py (NEW: default action, strict refusal, stand-alone refusal), test_eventdoc.py, test_event_intake.py, test_eventstore.py, test_idp_summary.py, test_template_event.py
 docs/EVENT_INTAKE.md            # NEW: set-up, outcomes, what the sample document does and why
 ```
 

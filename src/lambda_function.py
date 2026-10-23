@@ -1,8 +1,9 @@
 """
 SyteLine integration Lambda: direct-invoke actions.
 
-Event: {"action": "health" | "add_note" | "get_notes", ...}; `action` defaults to "health" (the
-original connectivity check, including the dry run). Order upload is NOT here: it is the private API
+Event: {"action": "health" | "add_note" | "get_notes" | "document_event", ...}; `action` defaults to
+"document_event" (the IDP processing-complete event, specs/006); the connectivity check, including the dry run,
+needs {"action": "health"}. Order upload is NOT here: it is the private API
 (handlers/intake.py, status.py) plus the worker. See
 specs/001-syteline-erp-integration/contracts/lambda-actions.md and contracts/api.md.
 
@@ -24,6 +25,8 @@ log = logging.getLogger()
 log.setLevel(logging.INFO)
 
 ACTIONS = ("health", "add_note", "get_notes")
+DEFAULT_ACTION = "document_event"  # the IDP processing-complete event carries no `action`: it is what a bare payload means
+OK_OUTCOMES = ("ignored", "already_processed", "reserved", "save_accepted")
 
 # Overridable factory (tests inject a fake web-service client).
 _client_factory = None
@@ -64,13 +67,37 @@ def _note_action(action, event):
         return failure(action, errors.error(errors.ERP_REJECTED, str(exc)))
 
 
+def _document_event(raw, defaulted, context):
+    """The event intake (specs/006). `raw` is the IDP event, or an object holding it under `event`."""
+    from syteline import eventdoc
+
+    payload = eventdoc.unwrap(raw)
+    if defaulted and not eventdoc.is_status_change(payload):
+        return failure("document_event", errors.error(
+            errors.EVENT_INVALID, 'no action was given and the payload is not an IDP processing event; to run the '
+            'health check pass {"action": "health"}'))
+    if not cfgmod.jobs_table():  # the stand-alone deployment has no reservation store and no document source
+        return failure("document_event", errors.error(
+            errors.ACTION_UNAVAILABLE, "the document_event action is not available in this deployment"))
+    from handlers import event_intake
+
+    out = event_intake.process(payload, context)
+    out["action"] = "document_event"
+    out["ok"] = out.get("outcome") in OK_OUTCOMES
+    return out
+
+
 def lambda_handler(event, context):
+    raw = event
     event = event if isinstance(event, dict) else {}
-    action = event.get("action") or "health"
+    explicit = event.get("action")
+    action = explicit or DEFAULT_ACTION
     start = time.monotonic()
     try:
         if action == "health":
             result = run_health(event, context)
+        elif action == "document_event":
+            result = _document_event(raw, not explicit, context)
         elif action in ACTIONS:
             result = _note_action(action, event)
         else:
@@ -87,4 +114,4 @@ def lambda_handler(event, context):
 
 
 if __name__ == "__main__":  # local run: SYTELINE_* env vars required (dry run: SYTELINE_DRY_RUN=true)
-    print(json.dumps(lambda_handler({}, None), indent=2))
+    print(json.dumps(lambda_handler({"action": "health"}, None), indent=2))
