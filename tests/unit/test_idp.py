@@ -187,3 +187,28 @@ def test_the_summary_has_no_bulk_content(fake):
     out = idp.scan_summary(idp.read_document(DOC))
     assert set(out) == {"document_id", "state", "class", "pages", "issues", "fields", "below_threshold"}
     assert all(set(f) == {"path", "value", "confidence", "meets_threshold"} for f in out["fields"])
+
+
+# ---- a failed client creation names its cause, never its message (specs/006 follow-up) -----------------------------------
+@pytest.mark.parametrize("exc,hint", [
+    (ModuleNotFoundError("No module named 'idp_sdk'"), "IDP_REPO"), (KeyError("IDP_STACK_NAME"), "IDP_STACK_NAME"),
+    (type("EndpointConnectionError", (Exception,), {})("secret-host.example"), "network path"),
+    (RuntimeError("boom"), "IDP client could not be created")])
+def test_a_client_that_cannot_be_created_reports_the_exception_type_and_a_hint_but_not_its_message(monkeypatch, exc, hint):
+    def factory():
+        raise exc
+
+    monkeypatch.setattr(idp, "_client_factory", factory)
+    with pytest.raises(IntegrationError) as ei:
+        idp.read_document(DOC)
+    assert ei.value.err["code"] == errors.IDP_UNAVAILABLE and ei.value.extra["cause"] == type(exc).__name__
+    assert hint in ei.value.extra["hint"]
+    assert str(exc) not in repr(ei.value.extra) and "secret-host" not in repr(ei.value.extra)
+
+
+def test_a_failed_read_reports_the_exception_type_only(fake):
+    fake.add(DOC, po_fields())
+    fake.raise_for[DOC] = ConnectionError("10.1.2.3 refused")
+    with pytest.raises(IntegrationError) as ei:
+        idp.read_document(DOC)
+    assert ei.value.err["code"] == errors.IDP_UNAVAILABLE and ei.value.extra == {"cause": "ConnectionError"}

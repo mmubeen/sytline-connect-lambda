@@ -57,6 +57,20 @@ The response is discarded by EventBridge (asynchronous invoke, **no retries**); 
 
 `159112.pdf` (class `purchase_order`, 3 pages) has `line_items[0].material_code` at 0.55 against a 0.8 threshold, and its review status is "Review Skipped". Under the rule of the request workflow a person must review a low-confidence field in IDP, so an event for it ends **refused: needs review**, writes nothing, and returns the summary. After the field is reviewed in IDP, invoke the same event again (the refusal consumed nothing, so the document is not blocked).
 
+## When the IDP cannot be reached (`IDP_UNAVAILABLE`)
+
+The response then carries `cause` (the exception type only, never its message) and a `hint`:
+
+| `cause` | Usually means |
+|---|---|
+| `ModuleNotFoundError` / `ImportError` | the IDP SDK is not in the deployed package: run the build with `IDP_REPO=/path/to/accelerator checkout` and redeploy |
+| `KeyError` | `IDP_STACK_NAME` (and the other IDP settings) are not set on the function: fill the IDP block of `deploy.env` and redeploy |
+| `NoRegionError` | set `IDP_REGION` |
+| `ClientError` | AWS refused the call (the role's IDP read permissions, only created when `IDP_STACK_NAME`, `IDP_OUTPUT_BUCKET` and `IDP_TRACKING_TABLE` are all set) |
+| `EndpointConnectionError`, `ConnectTimeoutError` | the subnets have no private path to CloudFormation, S3 and DynamoDB (VPC endpoints or a NAT route) |
+
+`./invoke.sh --log <payload>` prints the log tail, which has the line `IDP client could not be created: <type>`.
+
 ## Known limits
 
 - A reservation made **before** this feature has no document marker, so an event for that document is not recognised as already handled. An event and a request that start for the same document at the very same moment can both reserve (the request path has no claim).

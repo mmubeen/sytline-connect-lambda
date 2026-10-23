@@ -33,6 +33,18 @@ def _client():
     return IDPClient(stack_name=os.environ["IDP_STACK_NAME"], region=os.environ.get("IDP_REGION") or None)
 
 
+# what the exception type of a failed client creation usually means (the type name is all that is ever reported)
+_HINTS = {
+    "ModuleNotFoundError": "the IDP SDK is not in the deployed package: build with IDP_REPO set to the accelerator checkout",
+    "ImportError": "the IDP SDK is not in the deployed package: build with IDP_REPO set to the accelerator checkout",
+    "KeyError": "IDP_STACK_NAME is not set on the function: set the IDP settings in deploy.env and redeploy",
+    "NoRegionError": "no region: set IDP_REGION (or the stack's region)",
+    "ClientError": "AWS refused the call (permissions) or the service could not be reached from the subnets",
+    "EndpointConnectionError": "no network path from the subnets to the IDP's AWS services (CloudFormation, S3, DynamoDB)",
+    "ConnectTimeoutError": "no network path from the subnets to the IDP's AWS services (CloudFormation, S3, DynamoDB)",
+}
+
+
 def _refuse(code, message, **extra):
     return IntegrationError(code, message, step="document", **extra)
 
@@ -69,7 +81,7 @@ def _idp_errors(document_id):
         if type(exc).__name__ == "IDPResourceNotFoundError":
             raise _refuse(errors.DOCUMENT_NOT_FOUND, f"no such document in IDP: {document_id}") from None
         log.warning("IDP read failed: %s", type(exc).__name__)
-        raise _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be read") from None
+        raise _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be read", cause=type(exc).__name__) from None
 
 
 class DocumentRead:
@@ -99,7 +111,8 @@ def read_document(document_id):
         raise
     except Exception as exc:
         log.warning("IDP client could not be created: %s", type(exc).__name__)
-        raise _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be reached") from None
+        raise _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be reached", cause=type(exc).__name__,
+                      hint=_HINTS.get(type(exc).__name__, "see the function log line 'IDP client could not be created'")) from None
     with _idp_errors(document_id):
         status = client.document.get_status(document_id=document_id)
         state = _state(status)
