@@ -11,6 +11,8 @@ prerequisites are listed in section 2 and come from
 
 > **Two-stage job-number workflow** (reserve the CO and job numbers, then save with them) is part of this stack: see [RESERVATIONS.md](RESERVATIONS.md).
 
+> **Testing a deployment step by step:** [TESTING.md](TESTING.md).
+
 > **The SyteLine database calls** (numbers, customer search, defaults) and the route settings are described in [DATABASE.md](DATABASE.md).
 
 > **No network available, and the ERP is reachable from the internet?** See the stand-alone version without any VPC: [STANDALONE.md](STANDALONE.md).
