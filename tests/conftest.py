@@ -16,6 +16,16 @@ def _live_writes_off(monkeypatch):
         monkeypatch.delenv(k, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _erp_lock(monkeypatch):
+    """Background work takes the ERP-write lock (specs/007): every test gets a fresh in-memory one, never a real table."""
+    from fakes import FakeJobsTable
+    from handlers import worker
+    from syteline.erplock import ErpLock
+
+    monkeypatch.setattr(worker, "_lock_factory", lambda lock=ErpLock(FakeJobsTable()): lock)
+
+
 @pytest.fixture
 def live_writes(monkeypatch):
     monkeypatch.setenv("SYTELINE_LIVE_WRITES", "true")
@@ -26,12 +36,3 @@ def template():
     from cfn_template import load_template
 
     return load_template()
-
-
-@pytest.fixture(scope="module")
-def standalone_template():
-    import os
-
-    from cfn_template import load_template
-
-    return load_template(os.path.join(os.path.dirname(__file__), "..", "src", "template-standalone.yaml"))

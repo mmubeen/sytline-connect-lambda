@@ -99,27 +99,6 @@ def test_the_ca_certificate_is_required_only_while_encrypted(monkeypatch):
 
 
 # ---- stand-alone database check (feature 005, revision 2026-10-22) -----------------------------------------
-@pytest.mark.parametrize("value,expected", [(None, "auto"), ("", "auto"), ("auto", "auto"), ("AUTO", "auto"), ("maybe", "auto"),
-                                            ("1", "auto"), ("yes", "auto"), ("true", "true"), (" TRUE ", "true"),
-                                            ("false", "false"), (" False ", "false")])
-def test_the_database_check_mode_is_true_false_or_auto_and_defaults_to_auto(monkeypatch, value, expected):
-    if value is None:
-        monkeypatch.delenv("SYTELINE_DB_CHECK", raising=False)
-    else:
-        monkeypatch.setenv("SYTELINE_DB_CHECK", value)
-    assert config.db_check_mode() == expected
-
-
-@pytest.mark.parametrize("value,expected", [(None, False), ("", False), ("false", False), ("1", False), ("truee", False),
-                                            ("true", True), (" TRUE ", True), ("True", True)])
-def test_attached_is_on_only_for_the_exact_value_true(monkeypatch, value, expected):
-    if value is None:
-        monkeypatch.delenv("SYTELINE_ATTACHED", raising=False)
-    else:
-        monkeypatch.setenv("SYTELINE_ATTACHED", value)
-    assert config.attached() is expected
-
-
 def test_event_defaults_use_the_event_date_and_the_configured_warehouse_and_order_type(monkeypatch):
     monkeypatch.setenv("SYTELINE_DEFAULT_WHSE", "MAIN")
     monkeypatch.setenv("SYTELINE_DEFAULT_ORDTYPE", "R")
@@ -131,3 +110,13 @@ def test_event_defaults_name_what_is_not_configured(monkeypatch):
     monkeypatch.delenv("SYTELINE_DEFAULT_WHSE", raising=False)
     monkeypatch.setenv("SYTELINE_DEFAULT_ORDTYPE", "  ")
     assert config.event_defaults("2026-10-22")["missing"] == ["SYTELINE_DEFAULT_WHSE", "SYTELINE_DEFAULT_ORDTYPE"]
+
+
+def test_the_background_work_runs_on_this_same_function_unless_another_is_named(monkeypatch):
+    monkeypatch.delenv("WORKER_FUNCTION_NAME", raising=False)
+    monkeypatch.delenv("AWS_LAMBDA_FUNCTION_NAME", raising=False)
+    assert config.worker_function_name() == ""
+    monkeypatch.setenv("AWS_LAMBDA_FUNCTION_NAME", "stack-fn")
+    assert config.worker_function_name() == "stack-fn"
+    monkeypatch.setenv("WORKER_FUNCTION_NAME", "other-fn")
+    assert config.worker_function_name() == "other-fn"

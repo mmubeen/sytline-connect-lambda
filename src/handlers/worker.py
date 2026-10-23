@@ -1,10 +1,12 @@
 """Runs the upload pipeline for one accepted job. Never replays: only `accepted` jobs are claimed."""
 
 import time
+import uuid
 
 from syteline import config, errors, idp, pipeline, savewf
 from syteline.errors import IntegrationError
 from syteline.client import SoapIdoClient
+from syteline.erplock import ErpLock
 from syteline.jobs import JobStore
 from syteline.reservations import ReservationStore
 
@@ -14,6 +16,34 @@ from ._common import log_event
 _store_factory = None
 _reservation_store_factory = None
 _clients_factory = None  # () -> (soap, cfg)
+_lock_factory = None
+MIN_SAVE_SECONDS = 60  # time kept for the work itself when waiting for the ERP-write lock
+
+
+def _lock():
+    return _lock_factory() if _lock_factory else ErpLock.from_env()
+
+
+def _serialized(action, context, kind, key, run):
+    """Run `run()` while holding the ERP-write lock (specs/007, research R6); never claim a job without it.
+
+    Not acquired within the wait budget (the time left minus MIN_SAVE_SECONDS): nothing is claimed or written and the
+    job stays `accepted` / `save_accepted`, so the sweeper re-drives it.
+    """
+    started = time.monotonic()
+    lock = _lock()
+    holder = getattr(context, "aws_request_id", None) or uuid.uuid4().hex
+    wait = max(0, _remaining(context)() / 1000 - MIN_SAVE_SECONDS)
+    if not lock.acquire(holder, action, wait) or not lock.still_holder(holder):
+        log_event(kind, started, **{key: None}, outcome="deferred", reason="erp_write_lock_busy")
+        return {"deferred": True}
+    try:
+        return run()
+    finally:
+        try:
+            lock.release(holder)
+        except Exception:
+            pass  # the lease expires on its own
 
 
 def _store():
@@ -109,11 +139,20 @@ def save_handler(reservation_id, context, started):
     return {"state": state}
 
 
-def handler(event, context):
+def work_save(payload, context):
+    """The `work_save` action: run the accepted save of one reservation (payload `reservation_id`)."""
+    return _serialized("work_save", context, "save", "reservation_id",
+                       lambda: save_handler((payload or {}).get("reservation_id"), context, time.monotonic()))
+
+
+def work_upload(payload, context):
+    """The `work_upload` action: run the accepted upload of one job (payload `upload_id`)."""
+    return _serialized("work_upload", context, "upload", "upload_id", lambda: _run_upload(payload, context))
+
+
+def _run_upload(payload, context):
     started = time.monotonic()
-    if (event or {}).get("reservation_id"):
-        return save_handler(event["reservation_id"], context, started)
-    upload_id = (event or {}).get("upload_id")
+    upload_id = (payload or {}).get("upload_id")
     store = _store()
     if not upload_id or not store.claim(upload_id):
         log_event("upload", started, upload_id=upload_id, outcome="skipped")

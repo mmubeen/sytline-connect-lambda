@@ -33,7 +33,7 @@ def test_twenty_concurrent_requests_get_distinct_numbers(monkeypatch, live_write
         ids = list(pool.map(submit, range(20)))
     assert len(set(ids)) == 20 and len(lam.invocations) == 20
     for uid in ids:  # the worker runs with reserved concurrency 1: serially
-        assert worker.handler({"upload_id": uid}, None) == {"state": "succeeded"}
+        assert worker.work_upload({"upload_id": uid}, None) == {"state": "succeeded"}
     done = [store.get_upload(u) if hasattr(store, "get_upload") else store.get_job(u) for u in ids]
     assert len({d["erp_records"]["co_num"] for d in done}) == 20
     jobs = [l["job"] for d in done for l in d["erp_records"]["lines"]]

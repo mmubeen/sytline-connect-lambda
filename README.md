@@ -6,13 +6,17 @@ design: [`specs/001-syteline-erp-integration/`](specs/001-syteline-erp-integrati
 
 ## Pieces
 
-| Piece | Purpose |
-|---|---|
-| `POST /confirmed-orders` (`src/handlers/intake.py`) | Validates an operator-confirmed order, durably records it, returns an upload ID (HTTP 202) |
-| `GET /upload-jobs/{id}` (`src/handlers/status.py`) | State: `accepted`, `running`, `succeeded`, `failed`, `needs_reconciliation` |
-| Worker (`src/handlers/worker.py`, VPC) | Runs the upload through the web service only: look up the customer (read) -> `NextCoSp` (method call) -> `SLCos` / `CCT_Coitems` / `CCTJobs` (inserts) -> read-back |
-| Sweeper (`src/handlers/sweeper.py`) | Every 5 min: re-drives `accepted` jobs; parks stale `running` jobs as `needs_reconciliation` |
-| Direct invoke (`src/lambda_function.py`) | `health` (connectivity check), `add_note`, `get_notes` |
+**One Lambda function** (`src/lambda_function.py`, in an existing VPC) does everything; the request decides what runs.
+
+| What | How it is reached | Purpose |
+|---|---|---|
+| Order intake (`src/handlers/intake.py`) | `POST /confirmed-orders` | Validates an operator-confirmed order, durably records it, returns an upload ID (HTTP 202) |
+| Upload status (`src/handlers/status.py`) | `GET /upload-jobs/{id}` | State: `accepted`, `running`, `succeeded`, `failed`, `needs_reconciliation` |
+| Job-number reservation and save (`reserve.py`, `save_intake.py`, `reservation_status.py`) | `POST /job-reservations`, `POST /job-reservations/{id}/save`, `GET /job-reservations/{id}` | See [`docs/RESERVATIONS.md`](docs/RESERVATIONS.md) |
+| Background work (`src/handlers/worker.py`) | `{"action": "work_upload"}` / `work_save` (the function starts these on itself) | Runs the upload or the save through the web service only, one at a time under an ERP-write lock |
+| Cleanup (`src/handlers/sweeper.py`) | `{"action": "sweep"}` every 5 min | Re-drives `accepted` jobs; parks stale `running` jobs as `needs_reconciliation` |
+| Direct actions | `{"action": "health" / "add_note" / "get_notes"}` | Connectivity check, notes |
+| IDP event intake (`src/handlers/event_intake.py`) | `{"action": "document_event"}`, the **default** when no `action` is given | See [`docs/EVENT_INTAKE.md`](docs/EVENT_INTAKE.md) |
 
 API shapes: [`contracts/api.md`](specs/001-syteline-erp-integration/contracts/api.md) and
 [`contracts/lambda-actions.md`](specs/001-syteline-erp-integration/contracts/lambda-actions.md).
@@ -37,7 +41,7 @@ API: private REST API, `AWS_IAM` auth, reachable only through the approved `exec
 | `SYTELINE_SECRET_ARN` | optional Secrets Manager JSON overriding env vars, e.g. `SYTELINE_PASS` |
 | `SYTELINE_LIVE_WRITES` | default `false` |
 | `SYTELINE_DEFAULT_WHSE`, `SYTELINE_DEFAULT_ORDTYPE` | used when an order omits `warehouse` / `order_type` |
-| `JOBS_TABLE`, `WORKER_FUNCTION_NAME` | DynamoDB table; worker invoked by intake and sweeper |
+| `JOBS_TABLE` | DynamoDB table (set by the template); the function starts its own background work (`WORKER_FUNCTION_NAME` defaults to its own name) |
 | `SYTELINE_VERIFY_TLS` | default `false` (SOAP is HTTP today) |
 | `SYTELINE_TIMEOUT` | default `10` s |
 | `SYTELINE_DRY_RUN` | default `false`; or send event `{"dry_run": true}` |
@@ -68,30 +72,19 @@ the default credential chain).
 
 - **Build:** `src/Makefile` (selected by `Metadata: BuildMethod: makefile`) installs the dependencies as
   Linux x86_64 / CPython 3.13 wheels into the `sytline-connect-deps` layer and copies the code into each function.
-- **Host network:** supply an existing one (all four of VPC, subnets, security groups, route tables), or leave all four empty and
-  set `HOST_NETWORK_CIDR` and `PLANT_CIDR_1` to have the stack create a private one (two subnets, no route out, security groups,
-  endpoints; optionally the API-caller endpoint). The plant connection (VPN, routes) is never created: the network team adds it
-  from the stack outputs. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) section 3a.
-- **Parameters:** site-specific values (web-service WSDL and user, secret ARN, the `execute-api` VPC endpoint,
-  worker VPC / subnets / security groups / route tables) come from `deploy.env`; `deploy.sh` refuses to run if any is missing.
-  The worker needs a route to the plant over the VPN and outbound HTTP port 80 to the web service. The template
-  also creates DynamoDB and Secrets Manager VPC endpoints (`CREATE_VPC_ENDPOINTS=false` if the VPC already reaches them).
+- **Network:** the deployment creates **no** network resource. Give it an existing VPC, subnets (two Availability Zones recommended) and
+  security group(s) plus an existing `execute-api` endpoint (`WORKER_VPC_ID`, `WORKER_SUBNET_IDS`, `WORKER_SG_IDS`, `API_VPCE_ID`, all required). The
+  network must provide a route to the ERP and the database and a private path to Secrets Manager, DynamoDB and the IDP; see
+  [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) section 3a. Coming from an earlier shape: [`docs/MIGRATION.md`](docs/MIGRATION.md).
+- **Parameters:** site-specific values (web-service WSDL and user, secret ARN, the four network values) come from `deploy.env`; `deploy.sh` refuses to run if any is missing or malformed.
 - **Secret:** create the Secrets Manager secret (JSON with `SYTELINE_PASS`) in us-gov-east-1 first and put its ARN in `deploy.env`.
 - **Live writes stay off.** `LIVE_WRITES=false` is the default. `deploy.sh` will not deploy with `LIVE_WRITES=true` unless
   `LIVE_APPROVAL_REF` (the ERP owner's written approval) is also set; redeploy with it off afterwards.
-- **Outputs:** API id, worker and direct-invoke function names, job table name. The API is private: call it from the
+- **Outputs:** API id, the function name and ARN, job table name, the attached VPC. The API is private: call it from the
   approved VPC endpoint with IAM (SigV4) credentials.
 - Full step-by-step guide (prerequisites, verification, enabling live writes, troubleshooting, teardown): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
-- Console deployment of only the direct-invoke function: [`DEPLOY_PORTAL.md`](DEPLOY_PORTAL.md).
 
-## Stand-alone version (no VPC)
-`./deploy.sh --standalone` (same `src/deploy.env` as the plant stack: shared settings plus its `STAND-ALONE ONLY` block) deploys only the connectivity check and the notes operations as a separate stack that **creates no network
-resources**, callable only with IAM-permitted cloud credentials (no API gateway, no public address). By default it runs **outside any VPC**
-(the ERP must then be reachable from the internet); with the three `ATTACH_*` settings it runs **inside an existing VPC, subnets and security
-group** instead. It requires **HTTPS** to the ERP in both modes (plain HTTP only with an explicit override that sends credentials unencrypted), and cannot use ERP source-address
-allow-listing. When attached, its health check also tests the plant database automatically (`DATABASE_CHECK=auto`, or `false` to turn it off; the actions never use the database). See [`docs/STANDALONE.md`](docs/STANDALONE.md).
-
-## Job-number reservations (VPC version)
+## Job-number reservations
 A two-stage alternative to the one-step order upload: `POST /job-reservations` reserves the CO and job numbers from SyteLine (writes no
 order, line or job), then `POST /job-reservations/{id}/save` saves the order information using those numbers, following the PO OCR
 demo's flow. `GET /job-reservations/{id}` explains what happened. See [`docs/RESERVATIONS.md`](docs/RESERVATIONS.md).

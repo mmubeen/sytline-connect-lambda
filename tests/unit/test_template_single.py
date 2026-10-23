@@ -1,0 +1,204 @@
+"""The single-function deployment shape of src/template.yaml (specs/007-single-function-existing-vpc, SC-001, SC-002)."""
+
+import os
+import re
+
+import pytest
+
+from cfn_eval import Evaluator
+
+SRC = os.path.join(os.path.dirname(__file__), "..", "..", "src")
+NET = dict(WorkerVpcId="vpc-0abc", WorkerSubnetIds="subnet-a,subnet-b", WorkerSecurityGroupIds="sg-1",
+           ApiVpcEndpointId="vpce-1")
+ARN = "arn:aws-us-gov:states:us-gov-east-1:108375521309:stateMachine:idp-DocumentProcessingWorkflow"
+ROUTE_VARS = {"SYTELINE_NEXT_CO_IDO": "NextCoIdo", "SYTELINE_NEXT_JOB_IDO": "NextJobIdo",
+              "SYTELINE_CUSTOMER_IDO": "CustomerIdo", "SYTELINE_DEFAULTS_IDO": "DefaultsIdo"}
+TUNING_VARS = {"SYTELINE_SITE_ID": "SiteId", "SYTELINE_MATCH_MIN_SCORE": "MatchMinScore",
+               "SYTELINE_MATCH_MARGIN": "MatchMargin", "SYTELINE_MATCH_CAP": "MatchCap",
+               "SYTELINE_SQL_VERIFY_HOSTNAME": "SqlVerifyHostname", "SYTELINE_SQL_LOGIN_TIMEOUT": "SqlLoginTimeout",
+               "SYTELINE_SQL_TIMEOUT": "SqlTimeout"}
+CODE_DEFAULTS = {"SiteId": "10", "MatchMinScore": "70", "MatchMargin": "3", "MatchCap": "1000",
+                 "SqlVerifyHostname": "true", "SqlLoginTimeout": "5", "SqlTimeout": "10"}
+REMOVED_PARAMETERS = ("WorkerRouteTableIds", "HostNetworkCidr", "PlantCidr1", "PlantCidr2", "PlantCidr3",
+                      "DynamoDbPrefixListId", "CreateVpcEndpoints", "CreateApiEndpoint", "SytelineWsdlHttps",
+                      "SytelineWsdlHttp", "AllowPlainHttp", "VerifyTls", "AttachVpcId", "AttachSubnetIds",
+                      "AttachSecurityGroupIds", "DatabaseCheck")
+
+
+def fn(template):
+    return template["Resources"]["DirectFunction"]["Properties"]
+
+
+def env(template):
+    return fn(template)["Environment"]["Variables"]
+
+
+def of_type(template, prefix):
+    return {n: r for n, r in template["Resources"].items() if r["Type"].startswith(prefix)}
+
+
+# ---- US1: one function, nothing network-shaped is created -------------------------------------------------------------
+def test_the_stack_creates_exactly_one_function_and_no_network_resource(template):
+    assert list(of_type(template, "AWS::Serverless::Function")) == ["DirectFunction"]
+    assert of_type(template, "AWS::Lambda::Function") == {}
+    assert of_type(template, "AWS::EC2::") == {}  # no VPC, subnet, route table, gateway, endpoint, group or rule
+    types = {r["Type"] for r in template["Resources"].values()}
+    assert types == {"AWS::Serverless::LayerVersion", "AWS::DynamoDB::Table", "AWS::Serverless::Api",
+                     "AWS::Serverless::Function", "AWS::Events::Rule", "AWS::Lambda::Permission"}
+
+
+def test_the_network_is_supplied_not_created_and_is_required(template):
+    params = template["Parameters"]
+    for name, good, bad in (("WorkerVpcId", "vpc-0abc123", "subnet-1"),
+                            ("WorkerSubnetIds", "subnet-a1,subnet-b2", "subnet-a1, subnet-b2"),
+                            ("WorkerSecurityGroupIds", "sg-1,sg-2", "sg-1;rm"),
+                            ("ApiVpcEndpointId", "vpce-0abc", "vpc-1")):
+        assert "Default" not in params[name], f"{name} must be required (no default)"
+        pattern = re.compile(params[name]["AllowedPattern"])
+        assert pattern.match(good) and not pattern.match(bad) and not pattern.match("")
+
+
+def test_the_function_is_attached_to_the_supplied_subnets_and_groups(template):
+    e = Evaluator(template, **NET)
+    vpc = fn(template)["VpcConfig"]
+    assert e.resolve(vpc["SubnetIds"]) == ["subnet-a", "subnet-b"] and e.resolve(vpc["SecurityGroupIds"]) == ["sg-1"]
+    assert template["Outputs"]["AttachedVpcId"]["Value"] == {"Ref": "WorkerVpcId"}
+
+
+def test_the_settings_of_the_old_shapes_are_gone(template):
+    for name in REMOVED_PARAMETERS:
+        assert name not in template["Parameters"], name
+    assert set(template.get("Rules", {})) == {"IdpAllOrNothing"}
+    assert set(template["Conditions"]) == {"HasIdp", "IdpRegionGiven", "HasIdpEvents"}
+
+
+# ---- US2: the one function carries every entry point ---------------------------------------------------------------------
+def test_the_five_api_routes_and_the_cleanup_schedule_are_on_the_one_function(template):
+    events = fn(template)["Events"]
+    routes = {(e["Properties"]["Path"], e["Properties"]["Method"]) for e in events.values() if e["Type"] == "Api"}
+    assert routes == {("/confirmed-orders", "post"), ("/upload-jobs/{id}", "get"), ("/job-reservations", "post"),
+                      ("/job-reservations/{id}/save", "post"), ("/job-reservations/{id}", "get")}
+    assert all(e["Properties"]["RestApiId"] == {"Ref": "OrderApi"} for e in events.values() if e["Type"] == "Api")
+    schedule = [e for e in events.values() if e["Type"] == "Schedule"]
+    assert len(schedule) == 1 and schedule[0]["Properties"]["Schedule"] == "rate(5 minutes)"
+    assert schedule[0]["Properties"]["Input"] == '{"action":"sweep"}'
+
+
+def test_the_private_api_uses_the_existing_endpoint_and_iam_auth(template):
+    api = template["Resources"]["OrderApi"]["Properties"]
+    assert api["EndpointConfiguration"] == {"Type": "PRIVATE", "VPCEndpointIds": [{"Ref": "ApiVpcEndpointId"}]}
+    assert api["Auth"]["DefaultAuthorizer"] == "AWS_IAM"
+    assert api["Auth"]["ResourcePolicy"]["IntrinsicVpcWhitelist"] == [{"Ref": "ApiVpcEndpointId"}]
+
+
+def test_the_function_can_start_itself_by_a_name_that_needs_no_reference_to_it(template):
+    assert fn(template)["FunctionName"] == {"Fn::Sub": "${AWS::StackName}-fn"}
+    statements = [s for p in fn(template)["Policies"] if isinstance(p, dict) and "Statement" in p for s in p["Statement"]]
+    invoke = [s for s in statements if s["Action"] == "lambda:InvokeFunction"]
+    assert len(invoke) == 1
+    resource = invoke[0]["Resource"]["Fn::Sub"]
+    assert resource.endswith(":function:${AWS::StackName}-fn") and "DirectFunction" not in resource
+    assert "WORKER_FUNCTION_NAME" not in env(template)  # the runtime's own name is used (config.worker_function_name)
+
+
+# ---- US3: serialization and responsiveness -------------------------------------------------------------------------------
+def test_no_reserved_concurrency_and_a_timeout_for_the_longest_save_and_no_async_retries(template):
+    p = fn(template)
+    assert "ReservedConcurrentExecutions" not in p  # it would throttle the API and the health check (FR-008)
+    assert p["Timeout"] == 300 and p["EventInvokeConfig"]["MaximumRetryAttempts"] == 0
+    assert env(template)["WORKER_TIMEOUT_SECONDS"] == "300"
+
+
+def test_the_jobs_table_can_never_be_deleted_or_replaced_by_the_stack(template):
+    table = template["Resources"]["JobsTable"]
+    assert table["DeletionPolicy"] == "Retain" and table["UpdateReplacePolicy"] == "Retain"
+    p = table["Properties"]
+    assert p["KeySchema"] == [{"AttributeName": "pk", "KeyType": "HASH"}]
+    assert p["AttributeDefinitions"] == [{"AttributeName": "pk", "AttributeType": "S"}]
+    assert p["TimeToLiveSpecification"] == {"AttributeName": "ttl", "Enabled": True}
+    assert p["PointInTimeRecoverySpecification"] == {"PointInTimeRecoveryEnabled": True}
+    assert template["Outputs"]["JobsTableName"]["Value"] == {"Ref": "JobsTable"}
+
+
+def test_the_one_role_has_the_union_of_what_the_old_functions_needed(template):
+    pols = fn(template)["Policies"]
+    assert {"DynamoDBCrudPolicy": {"TableName": {"Ref": "JobsTable"}}} in pols
+    secret = [s for p in pols if isinstance(p, dict) and "Statement" in p for s in p["Statement"]
+              if s["Action"] == "secretsmanager:GetSecretValue"]
+    assert secret and secret[0]["Resource"] == {"Ref": "SytelineSecretArn"}
+    assert any("Fn::If" in p for p in pols)  # the IDP read permissions, only when the IDP is configured
+    assert not any("LambdaInvokePolicy" in p for p in pols if isinstance(p, dict))  # only itself, by name
+
+
+# ---- the optional document event rule --------------------------------------------------------------------------------------
+def test_there_is_no_rule_unless_the_state_machine_arn_is_given_and_it_targets_the_function(template):
+    assert Evaluator(template, **NET).condition("HasIdpEvents") is False
+    assert Evaluator(template, IdpStateMachineArn=ARN, **NET).condition("HasIdpEvents") is True
+    for name in ("IdpDocumentEventRule", "IdpDocumentEventPermission"):
+        assert template["Resources"][name]["Condition"] == "HasIdpEvents"
+    rule = template["Resources"]["IdpDocumentEventRule"]["Properties"]
+    assert rule["EventPattern"] == {"source": ["aws.states"], "detail-type": ["Step Functions Execution Status Change"],
+                                    "detail": {"status": ["SUCCEEDED"], "stateMachineArn": [{"Ref": "IdpStateMachineArn"}]}}
+    assert rule["Targets"][0]["Arn"] == {"Fn::GetAtt": ["DirectFunction", "Arn"]}
+    perm = template["Resources"]["IdpDocumentEventPermission"]["Properties"]
+    assert perm["FunctionName"] == {"Ref": "DirectFunction"} and perm["Principal"] == "events.amazonaws.com"
+    pattern = re.compile(template["Parameters"]["IdpStateMachineArn"]["AllowedPattern"])
+    assert pattern.match("") and pattern.match(ARN) and not pattern.match("not-an-arn")
+
+
+# ---- the settings the function carries (ported from the earlier per-function checks) -----------------------------------------
+def test_the_route_tuning_and_encryption_settings_are_wired_to_the_function_with_the_codes_defaults(template):
+    for name in ROUTE_VARS.values():
+        p = template["Parameters"][name]
+        assert p["Type"] == "String" and p["Default"] == "database" and "database" in p["Description"]
+    assert {k: env(template)[k] for k in ROUTE_VARS} == {k: {"Ref": v} for k, v in ROUTE_VARS.items()}
+    for name, default in CODE_DEFAULTS.items():
+        assert template["Parameters"][name]["Default"] == default, name
+    assert {k: env(template)[k] for k in TUNING_VARS} == {k: {"Ref": v} for k, v in TUNING_VARS.items()}
+    enc = template["Parameters"]["SqlEncrypt"]
+    assert enc["Default"] == "true" and enc["AllowedValues"] == ["true", "false"]
+    assert "UNENCRYPTED" in enc["Description"] and "Force Encryption" in enc["Description"]
+    assert env(template)["SYTELINE_SQL_ENCRYPT"] == {"Ref": "SqlEncrypt"}
+    assert "SYTELINE_DB_CHECK" not in env(template) and "SYTELINE_ATTACHED" not in env(template)
+
+
+def test_the_idp_and_save_settings_are_wired_and_the_idp_parameters_are_all_or_nothing(template):
+    for k, v in (("IDP_STACK_NAME", "IdpStackName"), ("IDP_REGION", "IdpRegion"), ("IDP_DOCUMENT_CLASS", "IdpDocumentClass"),
+                 ("IDP_FIELD_MAP", "IdpFieldMap"), ("SYTELINE_DEFAULT_WHSE", "DefaultWhse"),
+                 ("SYTELINE_DEFAULT_ORDTYPE", "DefaultOrdType")):
+        assert env(template)[k] == {"Ref": v}, k
+    for name in ("IdpStackName", "IdpRegion", "IdpOutputBucketName", "IdpTrackingTableName", "IdpDocumentClass", "IdpFieldMap"):
+        assert template["Parameters"][name]["Default"] == ""
+    assert "Supply all three" in template["Rules"]["IdpAllOrNothing"]["Assertions"][0]["AssertDescription"]
+    assert Evaluator(template, **NET).condition("HasIdp") is False
+    assert Evaluator(template, IdpStackName="idp", **NET).condition("HasIdp") is True
+
+
+def test_the_erp_secret_and_live_writes_settings_are_unchanged(template):
+    assert {"SYTELINE_WSDL", "SYTELINE_USER", "SYTELINE_CONFIG", "SYTELINE_SECRET_ARN", "SYTELINE_LIVE_WRITES"} <= set(env(template))
+    assert template["Parameters"]["LiveWrites"]["Default"] == "false"
+    assert template["Parameters"]["UseFipsEndpoints"]["Default"] == "true"
+
+
+def test_the_outputs_name_the_one_function_the_api_and_the_table(template):
+    assert set(template["Outputs"]) == {"DirectFunctionName", "FunctionArn", "ApiId", "JobsTableName", "AttachedVpcId"}
+
+
+def test_the_stand_alone_template_and_its_build_configuration_are_gone():
+    assert not os.path.exists(os.path.join(SRC, "template-standalone.yaml"))
+    assert "standalone" not in open(os.path.join(SRC, "samconfig.toml")).read().lower()
+
+
+def test_the_function_has_a_makefile_build_target_and_the_idp_sdk_is_packaged_from_a_checkout(template):
+    makefile = open(os.path.join(SRC, "Makefile")).read()
+    listed = set(re.search(r"^FUNCTIONS\s*=((?:.*\\\n)*.*)$", makefile, re.M).group(1).replace("\\", " ").split())
+    assert listed == {"DirectFunction"} and "IDP_REPO" in makefile and "idp_sdk" in makefile and "idp_common" in makefile
+    for f in ("requirements.txt", "requirements-idp.txt"):  # the squatted PyPI names must never be requested
+        lines = [l.split("#")[0].strip().lower() for l in open(os.path.join(SRC, f))]
+        assert not [l for l in lines if l.replace("_", "-").startswith(("idp-common", "idp-sdk"))]
+
+
+def test_every_numeric_default_is_a_value_the_code_accepts():
+    from syteline import config
+
+    assert config.match_settings() == (70.0, 3.0, 1000) and config.sql_timeouts() == (5.0, 10.0) and config.site_id() == 10

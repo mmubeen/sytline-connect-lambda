@@ -27,7 +27,6 @@ from urllib.parse import urlparse
 
 from . import config as cfgmod
 from . import diagnostics, errors, routes
-from .client import config_service_address
 
 
 def _stage(name, fn, results):
@@ -41,8 +40,6 @@ def _stage(name, fn, results):
             "stage": name, "ok": False, "ms": int((time.monotonic() - start) * 1000),
             "error": f"{type(exc).__name__}: {exc}",
         }
-        if isinstance(exc, errors.InsecureTransport):
-            entry["code"] = errors.INSECURE_TRANSPORT
         results.append(entry)
         return False
 
@@ -108,7 +105,7 @@ SECRET_DB_SKIP = "the credentials secret could not be read"
 
 def _database_rule():
     """Would the health check test the database? (Ignoring a dry run.) Also decides whether diagnostics probe it."""
-    return routes.uses_database() or (cfgmod.db_check_mode() != "false" and cfgmod.attached())
+    return routes.uses_database()
 
 
 def run_health(event, context=None):
@@ -138,16 +135,7 @@ def run_health(event, context=None):
                 diagnostics.run_diagnostics(cfg, timeout)
         return out
 
-    # Stand-alone deployment: HTTPS required unless explicitly overridden. Checked after the configuration
-    # is resolved (the secret may supply the address) and before ANY traffic to the ERP, dry run included.
-    problem = cfgmod.transport_problem(cfg["SYTELINE_WSDL"])
-    if problem:
-        out = {"ok": False, "dry_run": dry_run, "error": problem,
-               "errors": [errors.error(errors.INSECURE_TRANSPORT, problem)], "stages": []}
-        if diagnose:  # nothing is sent to the ERP when the HTTPS rule refuses its address
-            out["diagnostics"] = {"skipped": "the HTTPS rule refused the ERP address; the ERP was not contacted"}
-        return out
-    warnings = [cfgmod.PLAIN_HTTP_WARNING] if cfgmod.plain_http_in_use(cfg["SYTELINE_WSDL"]) else []
+    warnings = []
 
     parsed = urlparse(cfg["SYTELINE_WSDL"])
     host = parsed.hostname
@@ -186,17 +174,10 @@ def run_health(event, context=None):
         transport = Transport(session=session, cache=None, timeout=timeout, operation_timeout=timeout)
         return Client(cfg["SYTELINE_WSDL"], transport=transport)
 
-    def _check_declared_address(client):
-        """The SOAP calls go to the address declared in the WSDL, not necessarily the WSDL's own address."""
-        problem = cfgmod.transport_problem(config_service_address(client), must_have_value=True)
-        if problem:
-            raise errors.InsecureTransport(problem)
-
     def wsdl():
         session = _session()
         if not dry_run:
             client = _zeep_client(session)
-            _check_declared_address(client)  # before the token stage sends the password
             state["client"] = client
             return "WSDL loaded"
         resp = session.get(cfg["SYTELINE_WSDL"], timeout=timeout)
@@ -222,26 +203,14 @@ def run_health(event, context=None):
             break  # later stages depend on earlier ones
 
     ok = len(results) == len(plan) and all(r["ok"] for r in results)
-    standalone_skip = False
-    # the database is checked on its own: a web-service failure must not hide it. The plant version checks it when an
-    # operation's route uses it. The stand-alone version (no route variable) follows SYTELINE_DB_CHECK: `auto` runs it when
-    # attached to a VPC, `true` forces it (noting a skip when not attached), `false` never runs it.
-    mode = cfgmod.db_check_mode()
-    if not dry_run:
-        if routes.uses_database() or (mode != "false" and cfgmod.attached()):
-            db_ok = _database_stages(cfg, timeout, results)
-            ok = ok and db_ok
-            if not cfgmod.sql_encrypt():  # the explicit option is in use: say so, loudly
-                warnings.append(UNENCRYPTED_WARNING)
-        elif mode == "true":
-            standalone_skip = True
+    # the database is checked on its own: a web-service failure must not hide it. It runs when an operation's route uses it.
+    if not dry_run and routes.uses_database():
+        db_ok = _database_stages(cfg, timeout, results)
+        ok = ok and db_ok
+        if not cfgmod.sql_encrypt():  # the explicit option is in use: say so, loudly
+            warnings.append(UNENCRYPTED_WARNING)
     out = {"ok": ok, "dry_run": dry_run, "host": host, "config": cfg["SYTELINE_CONFIG"], "stages": results,
            "routes": routes.describe()}
-    if standalone_skip:
-        out["database_check"] = "skipped: the function is not attached to a VPC"
-    insecure = [r for r in results if r.get("code") == errors.INSECURE_TRANSPORT]
-    if insecure:
-        out["errors"] = [errors.error(errors.INSECURE_TRANSPORT, cfgmod.INSECURE_MESSAGE)]
     if warnings:
         out["warnings"] = warnings
     if diagnose:

@@ -216,155 +216,6 @@ def test_no_warning_and_no_database_stage_when_no_operation_uses_the_database(en
 
 
 # ---- the stand-alone database check (revision 2026-10-22) -------------------------------------------------------
-def standalone(monkeypatch, check="auto", attached=True):
-    """Stand-alone shape: no route variable set (nothing routes to the database), database check by its own setting.
-    check: "auto" (the default), "true", "false" or None (variable absent)."""
-    for v in OPS.values():
-        monkeypatch.delenv(v, raising=False)
-    if check is None:
-        monkeypatch.delenv("SYTELINE_DB_CHECK", raising=False)
-    else:
-        monkeypatch.setenv("SYTELINE_DB_CHECK", str(check).lower())
-    monkeypatch.setenv("SYTELINE_ATTACHED", "true" if attached else "false")
-
-
-def test_standalone_false_never_checks_the_database_even_when_attached(env):
-    standalone(env, check="false", attached=True)
-    f = FakeSqlServer().install(env)
-    out = health.run_health({"action": "health"})
-    assert db_stages(out) == [] and "database_check" not in out and f.connect_kwargs == []
-    assert set(out) == {"ok", "dry_run", "host", "config", "stages", "routes"}
-
-
-def test_standalone_check_true_and_attached_runs_the_three_stages(env):
-    standalone(env, check="true")
-    with_db_settings(env)
-    fake_network(env)
-    f = FakeSqlServer().install(env)
-    out = health.run_health({"action": "health"})
-    assert [s["stage"] for s in db_stages(out)] == ["db_dns", "db_tcp", "db_login"]
-    assert [s["ok"] for s in db_stages(out)] == [True, True, True] and "database_check" not in out
-    login = [s for s in out["stages"] if s["stage"] == "db_login"][0]
-    assert login["detail"].startswith("encrypted connection") and [s for s, _ in f.statements] == ["SELECT 1"]
-    assert out["routes"]["next_co"].startswith("webservice")  # the stand-alone actions still do not use the database
-
-
-def test_standalone_unencrypted_option_warns_and_needs_no_ca(env):
-    standalone(env)
-    with_db_settings(env, SQL_CA_PEM="")
-    env.setenv("SYTELINE_SQL_ENCRYPT", "false")
-    fake_network(env)
-    f = FakeSqlServer().install(env)
-    out = health.run_health({"action": "health"})
-    login = [s for s in out["stages"] if s["stage"] == "db_login"][0]
-    assert login["ok"] and login["detail"].startswith("UNENCRYPTED") and UNENC_WARNING in out["warnings"]
-    assert "cafile" not in f.connect_kwargs[0]
-
-
-def test_standalone_check_on_but_not_attached_skips_and_makes_no_connection(env):
-    standalone(env, check="true", attached=False)
-    with_db_settings(env)
-    f = FakeSqlServer().install(env)
-    out = health.run_health({"action": "health"})
-    assert db_stages(out) == [] and out["database_check"] == "skipped: the function is not attached to a VPC"
-    assert f.connect_kwargs == [] and f.statements == []
-
-
-def test_standalone_dry_run_never_checks_the_database(env):
-    standalone(env)
-    with_db_settings(env)
-    f = FakeSqlServer().install(env)
-    out = health.run_health({"action": "health", "dry_run": True})
-    assert db_stages(out) == [] and "database_check" not in out and f.connect_kwargs == []
-
-
-def test_standalone_failures_name_the_stage_and_hide_credentials(env):
-    standalone(env)
-    with_db_settings(env)
-    fake_network(env)
-    FakeSqlServer(connect_error="login_fail").install(env)
-    out = health.run_health({"action": "health"})
-    login = [s for s in out["stages"] if s["stage"] == "db_login"][0]
-    assert login["ok"] is False and "login refused" in login["error"] and out["ok"] is False
-    assert DB_CFG["SQL_PASS"] not in repr(out) and DB_CFG["SQL_USER"] not in repr(out)
-
-
-def test_the_plant_version_is_unchanged_routes_still_trigger_the_stages_even_if_attached_is_unset(env):
-    database_everywhere(env)
-    env.delenv("SYTELINE_ATTACHED", raising=False)
-    env.delenv("SYTELINE_DB_CHECK", raising=False)
-    with_db_settings(env)
-    fake_network(env)
-    FakeSqlServer().install(env)
-    assert [s["stage"] for s in db_stages(health.run_health({"action": "health"}))] == ["db_dns", "db_tcp", "db_login"]
-
-
-# ---- automatic stand-alone check: DatabaseCheck = auto | true | false (revision 2026-10-22, research.md R16) -------------
-def test_the_default_mode_is_auto_so_an_attached_standalone_function_checks_the_database_with_no_switch(env):
-    standalone(env, check=None, attached=True)  # SYTELINE_DB_CHECK absent
-    with_db_settings(env)
-    fake_network(env)
-    FakeSqlServer().install(env)
-    out = health.run_health({"action": "health"})
-    assert [s["stage"] for s in db_stages(out)] == ["db_dns", "db_tcp", "db_login"] and "database_check" not in out
-
-
-def test_auto_and_not_attached_is_exactly_the_earlier_result_with_no_note_and_no_connection(env):
-    standalone(env, check="auto", attached=False)
-    with_db_settings(env)
-    f = FakeSqlServer().install(env)
-    out = health.run_health({"action": "health"})
-    assert db_stages(out) == [] and "database_check" not in out and f.connect_kwargs == []
-    assert set(out) == {"ok", "dry_run", "host", "config", "stages", "routes"}
-
-
-def test_auto_and_attached_with_missing_database_keys_shows_them_and_is_not_ok(env):
-    standalone(env, check="auto", attached=True)
-    with_db_settings(env, SQL_SERVER="", SQL_USER="")
-    fake_network(env)
-    f = FakeSqlServer().install(env)
-    out = health.run_health({"action": "health"})
-    first = db_stages(out)[0]  # the name lookup cannot even start without a server
-    assert first["stage"] == "db_dns" and first["ok"] is False and "SQL_SERVER" in first["error"]
-    assert out["ok"] is False and f.connect_kwargs == []
-    with_db_settings(env, SQL_USER="")
-    out = health.run_health({"action": "health"})
-    login = [s for s in out["stages"] if s["stage"] == "db_login"][0]
-    assert login["ok"] is False and "database not configured" in login["error"] and "SQL_USER" in login["error"]
-    assert DB_CFG["SQL_PASS"] not in repr(out)
-
-
-@pytest.mark.parametrize("mode,attached,runs,note", [("auto", True, True, False), ("auto", False, False, False),
-                                                      ("true", True, True, False), ("true", False, False, True),
-                                                      ("false", True, False, False), ("false", False, False, False)])
-def test_the_decision_table_for_the_standalone_check(env, mode, attached, runs, note):
-    standalone(env, check=mode, attached=attached)
-    with_db_settings(env)
-    fake_network(env)
-    FakeSqlServer().install(env)
-    out = health.run_health({"action": "health"})
-    assert bool(db_stages(out)) is runs and ("database_check" in out) is note
-
-
-def test_a_dry_run_never_checks_the_database_in_any_mode(env):
-    for mode in ("auto", "true", "false"):
-        standalone(env, check=mode, attached=True)
-        with_db_settings(env)
-        f = FakeSqlServer().install(env)
-        out = health.run_health({"action": "health", "dry_run": True})
-        assert db_stages(out) == [] and "database_check" not in out and f.connect_kwargs == []
-
-
-def test_the_plant_routes_still_decide_whatever_the_stand_alone_setting_says(env):
-    database_everywhere(env)
-    env.setenv("SYTELINE_DB_CHECK", "false")
-    env.delenv("SYTELINE_ATTACHED", raising=False)
-    with_db_settings(env)
-    fake_network(env)
-    FakeSqlServer().install(env)
-    assert [s["stage"] for s in db_stages(health.run_health({"action": "health"}))] == ["db_dns", "db_tcp", "db_login"]
-
-
 # ---- the database probe of the diagnostics runs exactly when the stages would (spec FR-019) -----------------------------
 def stub_probes(monkeypatch):
     """Record which hosts the diagnostics probe, without any real lookup or connection."""
@@ -385,7 +236,10 @@ def stub_probes(monkeypatch):
 
 
 def without_diagnostics(out):
-    return {k: v for k, v in out.items() if k != "diagnostics"}
+    """The result without the diagnostics section and without the timings (they differ from run to run)."""
+    body = {k: v for k, v in out.items() if k != "diagnostics"}
+    body["stages"] = [{k: v for k, v in st.items() if k != "ms"} for st in body.get("stages", [])]
+    return body
 
 
 def probed(env, **event):
@@ -403,27 +257,10 @@ def test_plant_with_a_database_route_probes_the_database_and_leaves_the_stages_a
     out, seen = probed(env, diagnose=True)
     assert DB_CFG["SQL_SERVER"] in seen and out["diagnostics"]["database"]["host"] == DB_CFG["SQL_SERVER"]
     assert any("database host and port are reachable" in f for f in out["diagnostics"]["findings"])
-    assert without_diagnostics(out) == plain  # stages, ok and warnings are the same without diagnose
+    assert without_diagnostics(out) == without_diagnostics(plain)  # stages, ok and warnings are the same without diagnose
 
 
 def test_plant_with_every_route_on_the_web_service_does_not_probe_the_database(env):
-    with_db_settings(env)
-    out, seen = probed(env, diagnose=True)
-    assert DB_CFG["SQL_SERVER"] not in seen
-    assert "database" not in out["diagnostics"] and "database_skipped" not in out["diagnostics"]
-
-
-@pytest.mark.parametrize("check", ["auto", "true"])
-def test_standalone_attached_probes_the_database(env, check):
-    standalone(env, check=check, attached=True)
-    with_db_settings(env)
-    out, seen = probed(env, diagnose=True)
-    assert DB_CFG["SQL_SERVER"] in seen and out["diagnostics"]["database"]["connected"]
-
-
-@pytest.mark.parametrize("check,attached", [("false", True), ("auto", False)])
-def test_standalone_not_asked_or_not_attached_adds_no_database_key(env, check, attached):
-    standalone(env, check=check, attached=attached)
     with_db_settings(env)
     out, seen = probed(env, diagnose=True)
     assert DB_CFG["SQL_SERVER"] not in seen
@@ -436,9 +273,6 @@ def test_a_dry_run_says_why_the_database_was_not_probed(env):
     out, seen = probed(env, diagnose=True, dry_run=True)
     assert DB_CFG["SQL_SERVER"] not in seen and "database" not in out["diagnostics"]
     assert out["diagnostics"]["database_skipped"] == health.DRY_RUN_DB_SKIP
-    standalone(env)
-    out, seen = probed(env, diagnose=True, dry_run=True)
-    assert out["diagnostics"]["database_skipped"] == health.DRY_RUN_DB_SKIP and DB_CFG["SQL_SERVER"] not in seen
 
 
 def test_an_unreadable_secret_says_why_the_database_was_not_probed(env):

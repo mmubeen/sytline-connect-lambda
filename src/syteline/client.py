@@ -17,7 +17,7 @@ import logging
 from xml.sax.saxutils import escape
 
 from . import config
-from .errors import (ErpError, ErpRejected, ErpUncertain, ErpUnreachable, InsecureTransport,  # noqa: F401
+from .errors import (ErpError, ErpRejected, ErpUncertain, ErpUnreachable,  # noqa: F401
                      LiveWritesDisabled)
 
 log = logging.getLogger(__name__)
@@ -54,9 +54,6 @@ class SoapIdoClient:
     # -- session -------------------------------------------------------------------------
     def _service(self):
         if self._zeep is None:
-            problem = config.transport_problem(self._cfg.get("SYTELINE_WSDL"))
-            if problem:  # before any network traffic
-                raise InsecureTransport(problem)
             import urllib3
             from requests import Session
             from zeep import Client
@@ -68,13 +65,7 @@ class SoapIdoClient:
             session.verify = self._verify
             transport = Transport(session=session, cache=None, timeout=self._timeout,
                                   operation_timeout=self._timeout)
-            client = Client(self._cfg["SYTELINE_WSDL"], transport=transport)
-            # SOAP calls (including the password) go to the address DECLARED IN THE WSDL, which can be
-            # http:// even when the WSDL itself was fetched over https://. Check it before any call.
-            problem = config.transport_problem(config_service_address(client), must_have_value=True)
-            if problem:
-                raise InsecureTransport(problem)
-            self._zeep = client
+            self._zeep = Client(self._cfg["SYTELINE_WSDL"], transport=transport)
         return self._zeep.service
 
     def connect(self):
@@ -82,8 +73,6 @@ class SoapIdoClient:
             tok = self._service().CreateSessionToken(
                 self._cfg["SYTELINE_USER"], self._cfg["SYTELINE_PASS"], self._cfg["SYTELINE_CONFIG"]
             )
-        except InsecureTransport:
-            raise
         except Exception as exc:
             raise ErpUnreachable(f"{type(exc).__name__}: {exc}") from None
         if not tok:
@@ -100,8 +89,6 @@ class SoapIdoClient:
         for attempt in (0, 1):
             try:
                 return getattr(self._service(), OPS[op])(self._token, *args)
-            except InsecureTransport:
-                raise
             except Exception as exc:
                 if attempt == 0 and _looks_expired(exc):
                     log.info("session expired; re-authenticating once")
@@ -159,14 +146,6 @@ class SoapIdoClient:
         raw = self._call("call", ido, method, [str(p) for p in params], write=True)
         return [str(v) for v in (raw or [])]
 
-
-
-def config_service_address(zeep_client):
-    """The SOAP endpoint address zeep will call, as declared in the WSDL ("" if it cannot be read)."""
-    try:
-        return zeep_client.service._binding_options.get("address", "") or ""
-    except Exception:
-        return ""
 
 
 # -- XML helpers (shape assumed, see module docstring) -----------------------------------

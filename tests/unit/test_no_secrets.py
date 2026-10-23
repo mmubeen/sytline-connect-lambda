@@ -40,15 +40,15 @@ def test_no_password_in_any_response_or_log(monkeypatch, caplog, live_writes):
             "lines": [{"item": "A", "quantity": 1, "uom": "EA"}]}
     r = intake.handler({"body": json.dumps(body), "requestContext": {"identity": {"userArn": "arn"}}}, None)
     jid = json.loads(r["body"])["upload_id"]
-    outs += [r, worker.handler({"upload_id": jid}, None), status.handler({"pathParameters": {"id": jid}}, None),
-             sweeper.handler({}, None)]
+    outs += [r, worker.work_upload({"upload_id": jid}, None), status.handler({"pathParameters": {"id": jid}}, None),
+             sweeper.sweep({}, None)]
     ident = {"requestContext": {"identity": {"userArn": "arn"}}}
     rb = {"request_ref": "rr", "confirmed": True, "uploaded_by": "u", "document_id": "batch-1/PO-1.pdf"}
     rr = reserve.handler(dict({"body": json.dumps(rb)}, **ident), None)
     rid = json.loads(rr["body"])["reservation_id"]
     sb = {"confirmed": True, "uploaded_by": "u", "document_id": "batch-1/PO-1.pdf"}
     outs += [rr, save_intake.handler(dict({"body": json.dumps(sb), "pathParameters": {"id": rid}}, **ident), None),
-             worker.handler({"reservation_id": rid}, None)]
+             worker.work_save({"reservation_id": rid}, None)]
     text = json.dumps(outs, default=str) + caplog.text
     for secret in SECRETS:
         assert secret not in text

@@ -17,7 +17,7 @@ One Lambda, and its `action` decides (a non-empty `action` always wins):
 | no `action` and not an IDP event (`{}`, `{"dry_run": true}`, a foreign event) | refused `EVENT_INVALID`; the message says to pass `"action": "health"` |
 | an unknown `action` | refused `UNKNOWN_ACTION` |
 
-In the stand-alone deployment `document_event` answers `ACTION_UNAVAILABLE` (no reservation store, no IDP). Because the intake now lives in this Lambda, its role can read and write the jobs table, start the worker and read the IDP in the plant stack, as well as read the credentials secret.
+Because the intake lives in the one Lambda, its role can read and write the jobs table, start its own background work and read the IDP, as well as read the credentials secret. An API Gateway request (it has `httpMethod` and `resource`) is never handed to the intake: it goes to its route.
 
 ## What a run does
 

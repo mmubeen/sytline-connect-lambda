@@ -1,11 +1,13 @@
 """
-SyteLine integration Lambda: direct-invoke actions.
+SyteLine integration Lambda: the ONE function of the deployment (specs/007). What runs is decided by the request:
 
-Event: {"action": "health" | "add_note" | "get_notes" | "document_event", ...}; `action` defaults to
-"document_event" (the IDP processing-complete event, specs/006); the connectivity check, including the dry run,
-needs {"action": "health"}. Order upload is NOT here: it is the private API
-(handlers/intake.py, status.py) plus the worker. See
-specs/001-syteline-erp-integration/contracts/lambda-actions.md and contracts/api.md.
+  * an explicit `action`: health | add_note | get_notes | document_event, and the internal work_upload | work_save | sweep
+    (started by this function itself or by the schedule);
+  * otherwise an API Gateway request: its route picks the handler (handlers/routing.py), e.g. POST /confirmed-orders;
+  * otherwise the default action, `document_event`: the IDP processing-complete event (specs/006). A payload that is not
+    such an event is refused; the connectivity check needs {"action": "health"}.
+
+See specs/007-single-function-existing-vpc/contracts/dispatch.md and specs/001-syteline-erp-integration/contracts/.
 
 Credentials come from Secrets Manager (SYTELINE_SECRET_ARN) or environment variables and are never
 logged or returned. Writes (add_note) require SYTELINE_LIVE_WRITES.
@@ -17,7 +19,7 @@ import time
 
 from syteline import config as cfgmod
 from syteline import errors
-from syteline.errors import (ErpError, ErpUnreachable, InsecureTransport, IntegrationError, SecretStoreUnavailable,
+from syteline.errors import (ErpError, ErpUnreachable, IntegrationError, SecretStoreUnavailable,
                               failure)
 from syteline.health import run_health
 
@@ -27,6 +29,9 @@ log.setLevel(logging.INFO)
 ACTIONS = ("health", "add_note", "get_notes")
 DEFAULT_ACTION = "document_event"  # the IDP processing-complete event carries no `action`: it is what a bare payload means
 OK_OUTCOMES = ("ignored", "already_processed", "reserved", "save_accepted")
+# the background actions the function starts on itself (async) or the schedule starts: action -> (handlers module, entry)
+WORK_ACTIONS = {"work_upload": ("worker", "work_upload"), "work_save": ("worker", "work_save"),
+                "sweep": ("sweeper", "sweep")}
 
 # Overridable factory (tests inject a fake web-service client).
 _client_factory = None
@@ -47,10 +52,6 @@ def _note_action(action, event):
     if problems:
         return failure(action, *problems)
     try:
-        if cfgmod.require_https():  # stand-alone deployment: check the (possibly secret-supplied) address first
-            problem = cfgmod.transport_problem(cfgmod.load_config()["SYTELINE_WSDL"])
-            if problem:
-                return failure(action, errors.error(errors.INSECURE_TRANSPORT, problem))
         soap = _make_client()
     except SecretStoreUnavailable as exc:  # unreachable or unreadable credentials store (FR-013)
         return failure(action, errors.error(errors.SECRET_STORE_UNREACHABLE, str(exc)))
@@ -59,8 +60,6 @@ def _note_action(action, event):
             return notes.add_note(soap, event["record_type"], event["record_key"], event["text"],
                                   bool(event.get("internal", True)))
         return notes.get_notes(soap, event["record_type"], event["record_key"], event.get("since"))
-    except InsecureTransport as exc:  # e.g. the WSDL declares an http:// service address
-        return failure(action, errors.error(errors.INSECURE_TRANSPORT, str(exc)))
     except ErpUnreachable as exc:
         return failure(action, errors.error(errors.ERP_UNREACHABLE, str(exc)))
     except ErpError as exc:
@@ -76,9 +75,6 @@ def _document_event(raw, defaulted, context):
         return failure("document_event", errors.error(
             errors.EVENT_INVALID, 'no action was given and the payload is not an IDP processing event; to run the '
             'health check pass {"action": "health"}'))
-    if not cfgmod.jobs_table():  # the stand-alone deployment has no reservation store and no document source
-        return failure("document_event", errors.error(
-            errors.ACTION_UNAVAILABLE, "the document_event action is not available in this deployment"))
     from handlers import event_intake
 
     out = event_intake.process(payload, context)
@@ -87,17 +83,42 @@ def _document_event(raw, defaulted, context):
     return out
 
 
+def _api(event, context):
+    """An API Gateway request (specs/007): the route picks the handler, which keeps its own request and response."""
+    from handlers import routing
+
+    module = routing.find_route(event)
+    if module is None:
+        return {"statusCode": 404, "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"errors": [errors.error(errors.NOT_FOUND, "no such route")]})}
+    return routing.load(module).handler(event, routing.Budget(context, routing.BUDGETS[module]))
+
+
+def _background(action, payload, context):
+    from handlers import routing
+
+    module, entry = WORK_ACTIONS[action]
+    return getattr(routing.load(module), entry)(payload, context)  # the real remaining time: no budget
+
+
 def lambda_handler(event, context):
+    from handlers import routing
+
     raw = event
     event = event if isinstance(event, dict) else {}
     explicit = event.get("action")
+    if not explicit and routing.is_api_event(event):
+        return _api(event, context)
     action = explicit or DEFAULT_ACTION
+    ctx = routing.Budget(context, routing.BUDGETS[action]) if action in routing.BUDGETS else context
     start = time.monotonic()
     try:
         if action == "health":
-            result = run_health(event, context)
+            result = run_health(event, ctx)
         elif action == "document_event":
-            result = _document_event(raw, not explicit, context)
+            result = _document_event(raw, not explicit, ctx)
+        elif action in WORK_ACTIONS:
+            result = _background(action, event, ctx)
         elif action in ACTIONS:
             result = _note_action(action, event)
         else:
@@ -106,7 +127,7 @@ def lambda_handler(event, context):
         result = failure(action, exc.err, **exc.extra)
     log.info(json.dumps({
         "type": action, "ok": result.get("ok"),
-        "record": [event.get("record_type"), event.get("record_key")] if action != "health" else None,
+        "record": [event.get("record_type"), event.get("record_key")] if action in ("add_note", "get_notes") else None,
         "errors": [e.get("code") for e in result.get("errors", [])],
         "ms": int((time.monotonic() - start) * 1000),
     }, default=str))

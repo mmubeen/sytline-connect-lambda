@@ -54,9 +54,9 @@ def env(monkeypatch, caplog, live_writes):
 def test_each_handler_logs_type_identifiers_outcome_and_duration(env, caplog):
     r = intake.handler({"body": json.dumps(BODY), "requestContext": {"identity": {"userArn": "arn:x"}}}, None)
     uid = json.loads(r["body"])["upload_id"]
-    worker.handler({"upload_id": uid}, None)
+    worker.work_upload({"upload_id": uid}, None)
     status.handler({"pathParameters": {"id": uid}}, None)
-    sweeper.handler({}, None)
+    sweeper.sweep({}, None)
     lf.lambda_handler({"action": "get_notes", "record_type": "co", "record_key": "900"}, None)
     by_type = {l["type"]: l for l in lines(caplog)}
     assert {"create_order", "upload", "get_status", "sweep", "get_notes"} <= set(by_type)
@@ -83,7 +83,7 @@ def test_the_reservation_handlers_log_type_identifiers_outcome_and_duration(env,
     rid = json.loads(r["body"])["reservation_id"]
     sb = {"confirmed": True, "uploaded_by": "jdoe", "document_id": "batch-1/PO-1.pdf"}
     save_intake.handler(dict({"body": json.dumps(sb), "pathParameters": {"id": rid}}, **ident), None)
-    worker.handler({"reservation_id": rid}, None)
+    worker.work_save({"reservation_id": rid}, None)
     by_type = {l["type"]: l for l in lines(caplog)}
     assert {"reserve", "save_intake", "save"} <= set(by_type)
     assert by_type["reserve"]["outcome"] == "201" and by_type["reserve"]["reservation_id"] == rid

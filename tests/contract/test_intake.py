@@ -37,7 +37,7 @@ def test_202_records_job_and_invokes_worker_async(env):
     assert job["uploaded_by"] == "jdoe" and job["caller_identity"] == "arn:aws:iam::1:user/app"
     assert job["request"]["customer"] == {"name": "ACME"}
     fn, mode, payload = lam.invocations[0]
-    assert (fn, mode) == ("worker-fn", "Event") and json.loads(payload) == {"upload_id": out["upload_id"]}
+    assert (fn, mode) == ("worker-fn", "Event") and json.loads(payload) == {"action": "work_upload", "upload_id": out["upload_id"]}
 
 
 def test_200_duplicate_same_body_does_not_reinvoke(env):

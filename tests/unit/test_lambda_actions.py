@@ -88,20 +88,6 @@ def test_an_unknown_action_is_refused_as_before(plant):
     assert out["ok"] is False and out["errors"][0]["code"] == errors.UNKNOWN_ACTION and untouched(*plant)
 
 
-def test_without_a_jobs_table_document_event_is_not_available(plant, monkeypatch):
-    monkeypatch.delenv("JOBS_TABLE")  # the stand-alone deployment
-    for payload in (SAMPLE, {"action": "document_event", "event": SAMPLE}):
-        out = lf.lambda_handler(payload, None)
-        assert out["ok"] is False and out["errors"][0]["code"] == errors.ACTION_UNAVAILABLE
-    assert untouched(*plant)
-
-
-def test_without_a_jobs_table_a_bare_payload_still_gets_the_health_hint(plant, monkeypatch):
-    monkeypatch.delenv("JOBS_TABLE")
-    out = lf.lambda_handler({}, None)
-    assert out["errors"][0]["code"] == errors.EVENT_INVALID and '"action": "health"' in out["errors"][0]["message"]
-
-
 def test_the_result_carries_ok_true_for_a_saved_order_and_false_for_a_refusal(plant, live_writes):
     saved = lf.lambda_handler(SAMPLE, None)
     assert saved["outcome"] == "save_accepted" and saved["ok"] is True

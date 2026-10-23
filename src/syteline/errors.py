@@ -15,7 +15,6 @@ UNCERTAIN_OUTCOME = "UNCERTAIN_OUTCOME"
 STALE_RUNNING = "STALE_RUNNING"
 TIME_BUDGET_EXHAUSTED = "TIME_BUDGET_EXHAUSTED"
 STORE_UNAVAILABLE = "STORE_UNAVAILABLE"
-INSECURE_TRANSPORT = "INSECURE_TRANSPORT"
 SECRET_STORE_UNREACHABLE = "SECRET_STORE_UNREACHABLE"
 # job reservation workflow (feature 004)
 TOO_MANY_LINES = "TOO_MANY_LINES"
@@ -34,7 +33,6 @@ IDP_UNAVAILABLE = "IDP_UNAVAILABLE"
 EVENT_IGNORED = "EVENT_IGNORED"
 EVENT_INVALID = "EVENT_INVALID"
 DEFAULTS_NOT_CONFIGURED = "DEFAULTS_NOT_CONFIGURED"
-ACTION_UNAVAILABLE = "ACTION_UNAVAILABLE"
 # database calls (feature 005)
 DATABASE_NOT_CONFIGURED = "DATABASE_NOT_CONFIGURED"
 CUSTOMER_LOW_CONFIDENCE = "CUSTOMER_LOW_CONFIDENCE"
@@ -54,10 +52,6 @@ class ErpUncertain(ErpError):
 
 class ErpUnreachable(ErpError):
     """The ERP could not be reached (nothing was sent that could have been written)."""
-
-
-class InsecureTransport(Exception):
-    """The ERP address (or the service address declared in its WSDL) is plain http:// while HTTPS is required."""
 
 
 class SecretStoreUnavailable(Exception):

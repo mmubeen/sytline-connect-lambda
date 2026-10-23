@@ -11,7 +11,7 @@ python -m pytest tests -q
 cfn-lint src/template.yaml
 (cd src && sam validate --lint -t template.yaml)
 ```
-Expect only the failures that already exist: 12 failures and 2 errors in `tests/unit/test_transport.py`, `tests/contract/test_health.py` and `tests/unit/test_standalone_parity.py`. Nothing else should fail.
+Expect only the failures that already exist: 2 in `tests/contract/test_health.py` (they import `zeep`, which the local test environment may not have). Nothing else may fail.
 
 ## Step 1: Gather what the deployment needs
 - **ERP secret** (Secrets Manager, JSON): `SYTELINE_PASS` and the database keys `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, `SQL_CA_PEM` (optional `SQL_PORT`); you can put them in `deploy.env` and let `./deploy.sh` merge them into the secret (step 2). `SQL_CA_PEM` is needed in the default (encrypted) mode; if the plant server has no verifiable certificate, deploy with `SQL_ENCRYPT=false` instead (no CA needed, the connection is unencrypted, warnings appear: see [DATABASE.md](DATABASE.md)). See [DATABASE.md](DATABASE.md).
@@ -26,13 +26,13 @@ Copy `src/deploy.env.example` to `src/deploy.env` and fill in the ERP settings, 
 cd src
 IDP_REPO=/path/to/accelerated-intelligent-document-processing-on-aws ./deploy.sh
 ```
-Find the function names (the stack outputs list only some of them):
+Find the function name (it is the stack's only function, `<stack>-fn`):
 ```
 aws cloudformation describe-stacks --stack-name sytline-connect --query 'Stacks[0].Outputs'
 aws cloudformation list-stack-resources --stack-name sytline-connect \
   --query "StackResourceSummaries[?ResourceType=='AWS::Lambda::Function'].[LogicalResourceId,PhysicalResourceId]" --output table
 ```
-You need `DirectFunction`, `ReserveFunction`, `SaveIntakeFunction`, `ReservationStatusFunction` and `WorkerFunction`.
+You need `DirectFunction` (output `DirectFunctionName`): every call below goes to it. The API routes are simulated by an API-shaped payload (`httpMethod`, `resource`, ...); the function routes it exactly as API Gateway's request would be.
 
 ## Step 3: Credential-free health check
 ```
@@ -69,14 +69,15 @@ aws lambda invoke --function-name <DirectFunction> --cli-binary-format raw-in-ba
 ```
 
 ## Step 7: Reserve with live writes still off
-Invoke the reserve function directly (no API Gateway needed). Use one fixed caller ARN throughout: a save is only accepted from the caller that reserved.
+Invoke the function with an API-shaped reserve request (no API Gateway needed). Use one fixed caller ARN throughout: a save is only accepted from the caller that reserved.
 ```
 ARN=arn:aws-us-gov:iam::<account>:role/TestCaller
 cat > ev.json <<E2
-{"body": "{\"request_ref\":\"test-1\",\"confirmed\":true,\"uploaded_by\":\"tester\",\"document_id\":\"<batch/doc.pdf>\"}",
+{"httpMethod": "POST", "resource": "/job-reservations",
+ "body": "{\"request_ref\":\"test-1\",\"confirmed\":true,\"uploaded_by\":\"tester\",\"document_id\":\"<batch/doc.pdf>\"}",
  "requestContext": {"identity": {"userArn": "$ARN"}}}
 E2
-aws lambda invoke --function-name <ReserveFunction> --cli-binary-format raw-in-base64-out --payload file://ev.json out.json && cat out.json
+aws lambda invoke --function-name <DirectFunction> --cli-binary-format raw-in-base64-out --payload file://ev.json out.json && cat out.json
 ```
 Expect `422 LIVE_WRITES_DISABLED`: the IDP document was read and the customer matched, and no number was reserved. Any other error tells you what to fix:
 
@@ -92,16 +93,16 @@ Redeploy with `LIVE_WRITES=true` and `LIVE_APPROVAL_REF=<the ERP owner's referen
 ## Step 9: Save, then check the result
 ```
 cat > save.json <<E2
-{"pathParameters": {"id": "<reservation_id>"},
+{"httpMethod": "POST", "resource": "/job-reservations/{id}/save", "pathParameters": {"id": "<reservation_id>"},
  "body": "{\"confirmed\":true,\"uploaded_by\":\"tester\",\"document_id\":\"<batch/doc.pdf>\"}",
  "requestContext": {"identity": {"userArn": "$ARN"}}}
 E2
-aws lambda invoke --function-name <SaveIntakeFunction> --cli-binary-format raw-in-base64-out --payload file://save.json out.json && cat out.json
+aws lambda invoke --function-name <DirectFunction> --cli-binary-format raw-in-base64-out --payload file://save.json out.json && cat out.json
 ```
 Expect `202 save_accepted`. The worker then writes in the background; poll:
 ```
-aws lambda invoke --function-name <ReservationStatusFunction> --cli-binary-format raw-in-base64-out \
-  --payload '{"pathParameters":{"id":"<reservation_id>"}}' out.json && cat out.json
+aws lambda invoke --function-name <DirectFunction> --cli-binary-format raw-in-base64-out \
+  --payload '{"httpMethod":"GET","resource":"/job-reservations/{id}","pathParameters":{"id":"<reservation_id>"}}' out.json && cat out.json
 ```
 Wait for `saved` (or investigate `partly_saved`, `failed`, `needs_reconciliation`: see [SAVE_WORKFLOW.md](SAVE_WORKFLOW.md)). Read any `warnings` (for example that the customer's defaults were not available). In SyteLine verify: the order header (with the customer's terms and ship-via), the lines each referencing their job number, the jobs linked back to their lines, and the teardown dates.
 
@@ -120,15 +121,7 @@ Wait for `saved` (or investigate `partly_saved`, `failed`, `needs_reconciliation
 ## Step 11: Through the real API (optional)
 The API is private: call it from inside the VPC or through the execute-api endpoint with an IAM-signed request (for example `awscurl --service execute-api`). Routes: `POST /job-reservations`, `POST /job-reservations/{id}/save`, `GET /job-reservations/{id}` (and `POST /confirmed-orders` for the one-step upload). The API ID is the `ApiId` stack output. The caller identity is then the signing principal.
 
-## Step 11b: Stand-alone version, database check (optional)
-Deploy `./deploy.sh --standalone` (same `deploy.env`, stand-alone block) with the three `ATTACH_*` settings (the database check is automatic when attached; `DATABASE_CHECK=auto` is the default), the database keys in the secret and TCP 1433 allowed from the function's security group, then:
-```
-aws lambda invoke --function-name <StandaloneDirectFunction> --cli-binary-format raw-in-base64-out \
-  --payload '{"action":"health"}' out.json && cat out.json
-```
-Expect `db_dns`, `db_tcp`, `db_login` after the web-service stages, and a `warnings` entry if `SQL_ENCRYPT=false`. Until the database keys are in the secret `db_login` fails naming them and `ok` is false. Without the VPC attachment there is no database stage (and the script refuses `DATABASE_CHECK=true`). With `DATABASE_CHECK=false` the health result has no database stage. Failure meanings are the same as in step 4.
-
-## Step 11c: Start from the IDP's finished-document event (optional)
+## Step 11b: Start from the IDP's finished-document event (optional)
 
 `aws lambda invoke --function-name <DirectFunctionName> --payload fileb://sample_events.json out.json` (no `action`: the intake is the default action): with live writes off the response is `refused` (a field below its threshold) or `read_only`, with the scan result `summary` and nothing reserved. See [EVENT_INTAKE.md](EVENT_INTAKE.md) for the outcomes and for switching on the automatic rule (`IDP_STATE_MACHINE_ARN`).
 

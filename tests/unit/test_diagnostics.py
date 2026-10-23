@@ -252,15 +252,6 @@ def test_no_secret_is_read_and_no_credentials_are_used_for_the_diagnostics(net, 
     assert out["diagnostics"]["erp"]["connected"] is True
 
 
-def test_the_https_rule_still_wins_and_nothing_is_probed(net, cfg_env, monkeypatch):
-    n = net({ERP: ["10.9.1.5"], AWS: ["10.0.0.9"]})
-    monkeypatch.setenv("SYTELINE_REQUIRE_HTTPS", "true")
-    out = health.run_health({"diagnose": True})
-    assert out["errors"][0]["code"] == "INSECURE_TRANSPORT" and out["stages"] == []
-    assert "HTTPS rule refused" in out["diagnostics"]["skipped"]
-    assert n.lookups == [] and n.connections == []
-
-
 def test_missing_erp_address_is_skipped_with_a_reason(net, monkeypatch):
     net({})
     out = health.run_health({"diagnose": True, "dry_run": True})

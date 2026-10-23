@@ -1,6 +1,6 @@
 # Job-number reservations (two-stage save)
 
-An alternative to the one-step `POST /confirmed-orders` upload, available in the **VPC deployment only** (the stand-alone version has no job table). You first **reserve** the CO and job numbers from SyteLine, see them, and then **save** the order information using exactly those numbers. It follows the PO OCR demo's flow: the job number is never looked up, SyteLine's own numbering routine reserves the next free one, and that number links the CO line to the job.
+An alternative to the one-step `POST /confirmed-orders` upload, reached through the same private API and the same single function. You first **reserve** the CO and job numbers from SyteLine, see them, and then **save** the order information using exactly those numbers. It follows the PO OCR demo's flow: the job number is never looked up, SyteLine's own numbering routine reserves the next free one, and that number links the CO line to the job.
 
 How the save to SyteLine works step by step: [SAVE_WORKFLOW.md](SAVE_WORKFLOW.md).
 

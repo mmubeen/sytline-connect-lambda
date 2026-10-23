@@ -1,5 +1,7 @@
 # Deploying the direct-invoke function via the AWS Console (no SAM)
 
+> **Superseded.** The deployment is now ONE function that does everything (API routes, the background work, the cleanup, the IDP event intake) and is deployed with SAM into an existing VPC: see `README.md` and `docs/DEPLOYMENT.md`. A console-built function with only the code below supports the direct actions at most and has no jobs table, no worker and no API. Keep this page only as a record of the manual steps.
+
 > This covers only the direct-invoke function (`health`, `add_note`, `get_notes`). The private order API, worker, sweeper and job table are defined in `src/template.yaml` (deploy with SAM); see README.md. The function runs in the private subnets that route to the plant (outbound HTTP port 80 to the web service only; no database access) and keeps `SYTELINE_LIVE_WRITES=false` unless an approved test window.
 
 ## 1. What gets deployed

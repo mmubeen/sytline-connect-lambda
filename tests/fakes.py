@@ -176,6 +176,11 @@ class FakeClientError(Exception):
         self.response = {"Error": {"Code": code}}
 
 
+import threading as _threading_mod  # noqa: E402
+
+_FAKE_TABLE_LOCK = _threading_mod.Lock()
+
+
 class FakeJobsTable:
     """Implements the surface JobStore needs (see syteline.jobs.DynamoTable)."""
 
@@ -209,6 +214,32 @@ class FakeJobsTable:
 
     def delete_item(self, Key):
         self.items.pop(Key["pk"], None)
+
+    # conditional put / delete of the ERP-write lock (specs/007): the two conditions the code uses, evaluated atomically
+
+    def put_if(self, item, condition, values):
+        with self._guard():
+            current = self.items.get(item["pk"])
+            if condition == "attribute_not_exists(pk) OR expires_at <= :now":
+                ok = current is None or int(current["expires_at"]) <= int(values[":now"])
+            else:
+                raise AssertionError(f"unsupported condition {condition}")
+            if not ok:
+                raise FakeClientError("ConditionalCheckFailedException")
+            self.items[item["pk"]] = dict(item)
+
+    def delete_if(self, Key, condition, values):
+        with self._guard():
+            current = self.items.get(Key["pk"])
+            if condition != "holder = :h":
+                raise AssertionError(f"unsupported condition {condition}")
+            if current is None or current.get("holder") != values[":h"]:
+                raise FakeClientError("ConditionalCheckFailedException")
+            del self.items[Key["pk"]]
+
+    @staticmethod
+    def _guard():
+        return _FAKE_TABLE_LOCK
 
     def scan_all(self):
         return [dict(i) for i in self.items.values()]

@@ -258,7 +258,7 @@ def test_202_accepts_the_save_and_invokes_the_worker_once_async(env, live_writes
     assert "requested_at" in item["save"] and "confirmed" not in item["save"] and "lines" not in item["save"]
     assert len(lam.invocations) == 1
     fn, mode, payload = lam.invocations[0]
-    assert (fn, mode) == ("worker-fn", "Event") and json.loads(payload) == {"reservation_id": rid}
+    assert (fn, mode) == ("worker-fn", "Event") and json.loads(payload) == {"action": "work_save", "reservation_id": rid}
     assert len(soap.writes()) == writes  # accepting writes nothing to the ERP
 
 
@@ -419,7 +419,7 @@ def test_status_saved_shows_used_numbers_and_per_line_results(full, live_writes)
     env_, worker = full
     rid = reserved(env_)
     call(save_intake.handler, sevent(rid, sbody()))
-    assert worker.handler({"reservation_id": rid}, None) == {"state": "saved"}
+    assert worker.work_save({"reservation_id": rid}, None) == {"state": "saved"}
     status, out = get(rid)
     assert status == 200 and out["state"] == "saved"
     assert [j["usage"] for j in out["jobs"]] == ["used", "used"]
@@ -441,7 +441,7 @@ def test_status_needs_reconciliation_and_partly_saved(full, live_writes):
     soap.scenarios[("insert", "CCT_Coitems", 2)] = "reject"
     rid = reserved((store, soap, None))
     call(save_intake.handler, sevent(rid, sbody()))
-    worker.handler({"reservation_id": rid}, None)
+    worker.work_save({"reservation_id": rid}, None)
     status, out = get(rid)  # the second line was rejected after the first saved: its rows are proven absent
     assert out["state"] == "partly_saved" and out["failure"]["step"] == "create_line_2"
     assert [j["usage"] for j in out["jobs"]] == ["used", "consumed_unused"] and "possibly_written" not in out
@@ -450,7 +450,7 @@ def test_status_needs_reconciliation_and_partly_saved(full, live_writes):
     soap.scenarios[("insert", "CCTJobs", 2)] = "timeout_after"  # the 2nd job insert overall (1st run made one)
     _, o2 = call(reserve.handler, event(rbody(request_ref="ocr-2")))
     call(save_intake.handler, sevent(o2["reservation_id"], sbody()))
-    worker.handler({"reservation_id": o2["reservation_id"]}, None)
+    worker.work_save({"reservation_id": o2["reservation_id"]}, None)
     status, out = get(o2["reservation_id"])
     assert out["state"] == "needs_reconciliation" and out["failure"]["code"] == "UNCERTAIN_OUTCOME"
     assert {"kind": "co", "key": o2["co_num"]} in out["possibly_written"]
@@ -471,7 +471,7 @@ def test_status_shows_the_order_level_warnings_of_the_save(monkeypatch, full, li
     monkeypatch.setenv(idos.DEFAULTS_SETTING, "database")  # the worker has no database settings: warning only
     rid = reserved((store, None, None))
     call(save_intake.handler, sevent(rid, sbody()))
-    worker.handler({"reservation_id": rid}, None)
+    worker.work_save({"reservation_id": rid}, None)
     status, out = get(rid)
     assert out["state"] == "saved" and len(out["warnings"]) == 1
     assert out["warnings"][0].startswith("customer defaults not available:")
@@ -481,7 +481,7 @@ def test_no_po_detail_is_stored_anywhere_after_a_full_reserve_and_save(full, liv
     (store, _, _), worker = full
     rid = reserved((store, None, None))
     call(save_intake.handler, sevent(rid, sbody(warehouse="W9")))
-    worker.handler({"reservation_id": rid}, None)
+    worker.work_save({"reservation_id": rid}, None)
     assert store.get(rid)["state"] == "saved"
     text = repr(store._t.items)
     for detail in ("ACME", "'PO-1'", "po_number", "quantity", "part_number", "'lines'", "EA"):
@@ -494,7 +494,7 @@ def test_status_404_and_no_internal_fields_leak(full, live_writes):
     assert get("nope")[0] == 404 and call(reservation_status.handler, {})[0] == 404
     rid = reserved(env_)
     call(save_intake.handler, sevent(rid, sbody()))
-    worker.handler({"reservation_id": rid}, None)
+    worker.work_save({"reservation_id": rid}, None)
     text = json.dumps(get(rid)[1])
     for hidden in ("payload_hash", "fingerprint", "caller_identity", ARN, "save", '"customer"', "ACME", "attempts"):
         assert hidden not in text.replace('"saved"', "").replace("save_accepted", ""), hidden

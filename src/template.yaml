@@ -1,6 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: SyteLine ERP integration (web service only) - private order-upload API, worker, status, sweeper, health/notes
+Description: >-
+  SyteLine ERP integration: ONE Lambda function (the `action` of the request decides what runs) attached to an existing
+  VPC, subnets and security groups, behind a private API. The stack creates no network resource.
 
 Parameters:
   SytelineWsdl:
@@ -25,73 +27,29 @@ Parameters:
     Default: "false"
     AllowedValues: ["false", "true"]
     Description: Leave "false" except for an ERP-owner-approved test window (FR-016)
-  ApiVpcEndpointId:
-    Type: String
-    Default: ""
-    Description: >-
-      execute-api interface VPC endpoint (vpce-...) through which approved clients call the API.
-      Required unless CreateApiEndpoint=true while the host network is created.
-  CreateApiEndpoint:
-    Type: String
-    Default: "false"
-    AllowedValues: ["false", "true"]
-    Description: >-
-      "true" creates the execute-api endpoint inside the NEW host network (only when the host network is
-      created, and not together with ApiVpcEndpointId).
-  # --- Host network: supply ALL FOUR identifiers to use an existing network, or leave all four empty to
-  # --- have this stack create one (then HostNetworkCidr and PlantCidr1 are required).
+  # --- The existing network. The deployment creates NO network resource: it only attaches the function to these. ---
   WorkerVpcId:
     Type: String
-    Default: ""
-    Description: Existing VPC of the worker subnets. Empty (with the other three) = create the host network.
+    AllowedPattern: '^vpc-[0-9a-f]+$'
+    Description: Existing VPC the function runs in. Required.
   WorkerSubnetIds:
     Type: String
-    Default: ""
-    Description: Existing private subnets with a route to the plant, comma-separated.
+    AllowedPattern: '^subnet-[0-9a-f]+(,subnet-[0-9a-f]+)*$'
+    Description: >-
+      Existing subnets of that VPC, comma-separated, with a route to the ERP and the database and a private path to
+      Secrets Manager, DynamoDB and the IDP. One subnet is allowed but is not highly available. Required.
   WorkerSecurityGroupIds:
     Type: String
-    Default: ""
-    Description: Existing security groups (outbound to the web service on HTTP port 80), comma-separated.
-  WorkerRouteTableIds:
-    Type: String
-    Default: ""
-    Description: Route tables of the existing worker subnets (DynamoDB gateway endpoint), comma-separated.
-  HostNetworkCidr:
-    Type: String
-    Default: ""
-    AllowedPattern: '^$|^([0-9]{1,3}\.){3}[0-9]{1,3}/(1[6-9]|2[0-5])$'
+    AllowedPattern: '^sg-[0-9a-f]+(,sg-[0-9a-f]+)*$'
     Description: >-
-      Address range of the NEW host network (IPv4, /16 to /25). No default: it must not overlap the plant
-      network or any network you connect to it. Only used when the host network is created.
-  PlantCidr1:
+      Existing security groups, comma-separated: outbound to the ERP (HTTP 80), the database (1433 when used) and HTTPS to the
+      AWS services. This stack adds no rule to them. Required.
+  ApiVpcEndpointId:
     Type: String
-    Default: ""
-    AllowedPattern: '^$|^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$'
-    Description: Plant address range the functions may reach on HTTP port 80 (required when creating the network).
-  PlantCidr2:
-    Type: String
-    Default: ""
-    AllowedPattern: '^$|^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$'
-    Description: Optional second plant address range.
-  PlantCidr3:
-    Type: String
-    Default: ""
-    AllowedPattern: '^$|^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$'
-    Description: Optional third plant address range.
-  DynamoDbPrefixListId:
-    Type: String
-    Default: ""
-    AllowedPattern: '^$|^pl-[0-9a-f]+$'
+    AllowedPattern: '^vpce-[0-9a-f]+$'
     Description: >-
-      Optional. The AWS-managed DynamoDB prefix list (pl-...). When given, HTTPS egress to DynamoDB is limited to it
-      instead of 0.0.0.0/0 (which has no internet route behind it).
-  CreateVpcEndpoints:
-    Type: String
-    Default: "true"
-    AllowedValues: ["false", "true"]
-    Description: >-
-      Existing-network mode only: set "false" if the VPC already reaches DynamoDB and Secrets Manager
-      (endpoints or NAT). Ignored when the host network is created (the endpoints are always created then).
+      Existing execute-api interface VPC endpoint (vpce-...) through which approved clients call the private API.
+      The stack never creates one. Required.
   UseFipsEndpoints:
     Type: String
     Default: "true"
@@ -217,47 +175,6 @@ Metadata:
 
 # Rules are evaluated before any resource is created, so a bad combination is refused with a message.
 Rules:
-  NetworkAllOrNothing:
-    RuleCondition: !Or
-      - !Not [!Equals [!Ref WorkerVpcId, ""]]
-      - !Not [!Equals [!Ref WorkerSubnetIds, ""]]
-      - !Not [!Equals [!Ref WorkerSecurityGroupIds, ""]]
-      - !Not [!Equals [!Ref WorkerRouteTableIds, ""]]
-    Assertions:
-      - Assert: !And
-          - !Not [!Equals [!Ref WorkerVpcId, ""]]
-          - !Not [!Equals [!Ref WorkerSubnetIds, ""]]
-          - !Not [!Equals [!Ref WorkerSecurityGroupIds, ""]]
-          - !Not [!Equals [!Ref WorkerRouteTableIds, ""]]
-        AssertDescription: Supply all four of WorkerVpcId, WorkerSubnetIds, WorkerSecurityGroupIds and WorkerRouteTableIds, or none of them to create the host network.
-  CidrRequiredWhenCreating:
-    RuleCondition: !And
-      - !Equals [!Ref WorkerVpcId, ""]
-      - !Equals [!Ref WorkerSubnetIds, ""]
-      - !Equals [!Ref WorkerSecurityGroupIds, ""]
-      - !Equals [!Ref WorkerRouteTableIds, ""]
-    Assertions:
-      - Assert: !And
-          - !Not [!Equals [!Ref HostNetworkCidr, ""]]
-          - !Not [!Equals [!Ref PlantCidr1, ""]]
-        AssertDescription: HostNetworkCidr and PlantCidr1 are required when the host network is created.
-  ApiEndpointRequired:
-    Assertions:
-      - Assert: !Or
-          - !Not [!Equals [!Ref ApiVpcEndpointId, ""]]
-          - !And
-            - !Equals [!Ref CreateApiEndpoint, "true"]
-            - !Equals [!Ref WorkerVpcId, ""]
-            - !Equals [!Ref WorkerSubnetIds, ""]
-            - !Equals [!Ref WorkerSecurityGroupIds, ""]
-            - !Equals [!Ref WorkerRouteTableIds, ""]
-        AssertDescription: Provide ApiVpcEndpointId, or set CreateApiEndpoint=true while creating the host network.
-  ApiEndpointNotContradictory:
-    RuleCondition: !Equals [!Ref CreateApiEndpoint, "true"]
-    Assertions:
-      - Assert: !Equals [!Ref ApiVpcEndpointId, ""]
-        AssertDescription: CreateApiEndpoint=true cannot be combined with an existing ApiVpcEndpointId.
-
   IdpAllOrNothing:
     RuleCondition: !Or
       - !Not [!Equals [!Ref IdpStackName, ""]]
@@ -275,32 +192,6 @@ Conditions:
   HasIdp: !Not [!Equals [!Ref IdpStackName, ""]]
   IdpRegionGiven: !Not [!Equals [!Ref IdpRegion, ""]]
   HasIdpEvents: !Not [!Equals [!Ref IdpStateMachineArn, ""]]
-  # true only when none of the four network identifiers is supplied
-  CreateNetwork: !And
-    - !Equals [!Ref WorkerVpcId, ""]
-    - !Equals [!Ref WorkerSubnetIds, ""]
-    - !Equals [!Ref WorkerSecurityGroupIds, ""]
-    - !Equals [!Ref WorkerRouteTableIds, ""]
-  # every optional network resource's condition includes CreateNetwork, so a stray setting in
-  # existing-network mode can neither create nor reference anything
-  MakeApiEndpoint: !And
-    - !Condition CreateNetwork
-    - !Equals [!Ref CreateApiEndpoint, "true"]
-  HasPlantCidr2: !And
-    - !Condition CreateNetwork
-    - !Not [!Equals [!Ref PlantCidr2, ""]]
-  HasPlantCidr3: !And
-    - !Condition CreateNetwork
-    - !Not [!Equals [!Ref PlantCidr3, ""]]
-  HasDdbPrefixList: !And
-    - !Condition CreateNetwork
-    - !Not [!Equals [!Ref DynamoDbPrefixListId, ""]]
-  NoDdbPrefixList: !And
-    - !Condition CreateNetwork
-    - !Equals [!Ref DynamoDbPrefixListId, ""]
-  MakeEndpoints: !Or
-    - !Condition CreateNetwork
-    - !Equals [!Ref CreateVpcEndpoints, "true"]
 
 Globals:
   Function:
@@ -316,212 +207,6 @@ Globals:
         AWS_USE_FIPS_ENDPOINT: !Ref UseFipsEndpoints
 
 Resources:
-  # ------------------------------------------------------------------------------------------
-  # Host network, created only when none of the four network identifiers is supplied.
-  # Private only: no internet gateway, NAT gateway, elastic IP, default route, VPN gateway or plant
-  # route is defined anywhere. The network team connects the network to the plant using the outputs.
-  # ------------------------------------------------------------------------------------------
-  HostVpc:
-    Type: AWS::EC2::VPC
-    Condition: CreateNetwork
-    Properties:
-      CidrBlock: !Ref HostNetworkCidr
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-host
-
-  HostSubnetA:
-    Type: AWS::EC2::Subnet
-    Condition: CreateNetwork
-    Properties:
-      VpcId: !Ref HostVpc
-      CidrBlock: !Select [0, !Cidr [!Ref HostNetworkCidr, 2, 6]]
-      AvailabilityZone: !Select [0, !GetAZs ""]
-      MapPublicIpOnLaunch: false
-
-  HostSubnetB:
-    Type: AWS::EC2::Subnet
-    Condition: CreateNetwork
-    Properties:
-      VpcId: !Ref HostVpc
-      CidrBlock: !Select [1, !Cidr [!Ref HostNetworkCidr, 2, 6]]
-      AvailabilityZone: !Select [1, !GetAZs ""]   # refused if the region has fewer than two zones
-      MapPublicIpOnLaunch: false
-
-  # Local route only. The network team adds the route to the plant range here (see docs/DEPLOYMENT.md).
-  HostRouteTable:
-    Type: AWS::EC2::RouteTable
-    Condition: CreateNetwork
-    Properties:
-      VpcId: !Ref HostVpc
-
-  RtAssocA:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Condition: CreateNetwork
-    Properties:
-      SubnetId: !Ref HostSubnetA
-      RouteTableId: !Ref HostRouteTable
-
-  RtAssocB:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Condition: CreateNetwork
-    Properties:
-      SubnetId: !Ref HostSubnetB
-      RouteTableId: !Ref HostRouteTable
-
-  FunctionSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Condition: CreateNetwork
-    Properties:
-      GroupDescription: Integration functions - no inbound; outbound to the plant web service and AWS endpoints only
-      VpcId: !Ref HostVpc
-      SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: !Ref PlantCidr1
-          Description: SyteLine web service (HTTP)
-
-  EgressPlant2:
-    Type: AWS::EC2::SecurityGroupEgress
-    Condition: HasPlantCidr2
-    Properties:
-      GroupId: !GetAtt FunctionSecurityGroup.GroupId
-      IpProtocol: tcp
-      FromPort: 80
-      ToPort: 80
-      CidrIp: !Ref PlantCidr2
-      Description: SyteLine web service (HTTP), second plant range
-
-  EgressPlant3:
-    Type: AWS::EC2::SecurityGroupEgress
-    Condition: HasPlantCidr3
-    Properties:
-      GroupId: !GetAtt FunctionSecurityGroup.GroupId
-      IpProtocol: tcp
-      FromPort: 80
-      ToPort: 80
-      CidrIp: !Ref PlantCidr3
-      Description: SyteLine web service (HTTP), third plant range
-
-  # TCP 1433 to the plant range(s) for the database calls (only used by operations whose route is `database`)
-  EgressPlantSql1:
-    Type: AWS::EC2::SecurityGroupEgress
-    Condition: CreateNetwork
-    Properties:
-      GroupId: !GetAtt FunctionSecurityGroup.GroupId
-      IpProtocol: tcp
-      FromPort: 1433
-      ToPort: 1433
-      CidrIp: !Ref PlantCidr1
-      Description: SyteLine database (SQL Server)
-
-  EgressPlantSql2:
-    Type: AWS::EC2::SecurityGroupEgress
-    Condition: HasPlantCidr2
-    Properties:
-      GroupId: !GetAtt FunctionSecurityGroup.GroupId
-      IpProtocol: tcp
-      FromPort: 1433
-      ToPort: 1433
-      CidrIp: !Ref PlantCidr2
-      Description: SyteLine database (SQL Server), second plant range
-
-  EgressPlantSql3:
-    Type: AWS::EC2::SecurityGroupEgress
-    Condition: HasPlantCidr3
-    Properties:
-      GroupId: !GetAtt FunctionSecurityGroup.GroupId
-      IpProtocol: tcp
-      FromPort: 1433
-      ToPort: 1433
-      CidrIp: !Ref PlantCidr3
-      Description: SyteLine database (SQL Server), third plant range
-
-  EgressHostRange:
-    Type: AWS::EC2::SecurityGroupEgress
-    Condition: CreateNetwork
-    Properties:
-      GroupId: !GetAtt FunctionSecurityGroup.GroupId
-      IpProtocol: tcp
-      FromPort: 443
-      ToPort: 443
-      CidrIp: !Ref HostNetworkCidr
-      Description: HTTPS to the interface endpoints in this network
-
-  EgressDdbPrefix:
-    Type: AWS::EC2::SecurityGroupEgress
-    Condition: HasDdbPrefixList
-    Properties:
-      GroupId: !GetAtt FunctionSecurityGroup.GroupId
-      IpProtocol: tcp
-      FromPort: 443
-      ToPort: 443
-      DestinationPrefixListId: !Ref DynamoDbPrefixListId
-      Description: HTTPS to DynamoDB through the gateway endpoint
-
-  # The DynamoDB gateway endpoint reaches AWS-managed address ranges that CloudFormation cannot reference.
-  # There is no internet route in this network, so this rule cannot leave it. Give DynamoDbPrefixListId
-  # to replace it with exactly the managed prefix list.
-  EgressDdbAny:
-    Type: AWS::EC2::SecurityGroupEgress
-    Condition: NoDdbPrefixList
-    Properties:
-      GroupId: !GetAtt FunctionSecurityGroup.GroupId
-      IpProtocol: tcp
-      FromPort: 443
-      ToPort: 443
-      CidrIp: 0.0.0.0/0
-      Description: HTTPS to DynamoDB through the gateway endpoint (no internet route exists)
-
-  EndpointSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Condition: CreateNetwork
-    Properties:
-      GroupDescription: Interface endpoints - HTTPS from inside the host network only
-      VpcId: !Ref HostVpc
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: !Ref HostNetworkCidr
-          Description: HTTPS from the host network
-
-  # Optional: the entry point approved API callers use, inside the NEW network (CreateApiEndpoint=true).
-  ApiEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: MakeApiEndpoint
-    Properties:
-      VpcId: !Ref HostVpc
-      VpcEndpointType: Interface
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.execute-api
-      SubnetIds: [!Ref HostSubnetA, !Ref HostSubnetB]
-      SecurityGroupIds: [!Ref EndpointSecurityGroup]
-      PrivateDnsEnabled: true
-
-  DynamoDbEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: MakeEndpoints
-    Properties:
-      VpcId: !If [CreateNetwork, !Ref HostVpc, !Ref WorkerVpcId]
-      VpcEndpointType: Gateway
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.dynamodb
-      RouteTableIds: !If [CreateNetwork, [!Ref HostRouteTable], !Split [",", !Ref WorkerRouteTableIds]]
-
-  SecretsManagerEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: MakeEndpoints
-    Properties:
-      VpcId: !If [CreateNetwork, !Ref HostVpc, !Ref WorkerVpcId]
-      VpcEndpointType: Interface
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
-      SubnetIds: !If [CreateNetwork, [!Ref HostSubnetA, !Ref HostSubnetB], !Split [",", !Ref WorkerSubnetIds]]
-      SecurityGroupIds: !If [CreateNetwork, [!Ref EndpointSecurityGroup], !Split [",", !Ref WorkerSecurityGroupIds]]
-      PrivateDnsEnabled: true
-
-  # Dependencies (zeep, lxml, requests, urllib3) built for Linux x86_64 / Python 3.13 by the Makefile
   DepsLayer:
     Type: AWS::Serverless::LayerVersion
     Metadata:
@@ -532,8 +217,12 @@ Resources:
       CompatibleRuntimes: [python3.13]
       CompatibleArchitectures: [x86_64]
 
+  # Upload jobs, job-number reservations, document-event claims and the ERP-write lock. Retained: the stack can never delete
+  # or replace it (specs/007 FR-009).
   JobsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
@@ -555,66 +244,29 @@ Resources:
       EndpointConfiguration:
         Type: PRIVATE
         VPCEndpointIds:
-          - !If [MakeApiEndpoint, !Ref ApiEndpoint, !Ref ApiVpcEndpointId]
+          - !Ref ApiVpcEndpointId
       Auth:
         DefaultAuthorizer: AWS_IAM
         ResourcePolicy:
           IntrinsicVpcWhitelist:
-            - !If [MakeApiEndpoint, !Ref ApiEndpoint, !Ref ApiVpcEndpointId]
+            - !Ref ApiVpcEndpointId
 
-  IntakeFunction:
+  # THE function. The request decides what runs: an API route, an `action` (health, notes, document_event, the background
+  # work_upload / work_save / sweep), or by default the IDP finished-document event. It is attached to the existing network and
+  # starts its own background work, so its name is fixed (the role can name it without a circular reference).
+  DirectFunction:
     Type: AWS::Serverless::Function
     Metadata:
       BuildMethod: makefile
     Properties:
-      Handler: handlers.intake.handler
-      Timeout: 15
-      Environment:
-        Variables:
-          WORKER_FUNCTION_NAME: !Ref WorkerFunction
-      Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref JobsTable
-        - LambdaInvokePolicy:
-            FunctionName: !Ref WorkerFunction
-      Events:
-        Post:
-          Type: Api
-          Properties:
-            RestApiId: !Ref OrderApi
-            Path: /confirmed-orders
-            Method: post
-
-  StatusFunction:
-    Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: makefile
-    Properties:
-      Handler: handlers.status.handler
-      Timeout: 10
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref JobsTable
-      Events:
-        Get:
-          Type: Api
-          Properties:
-            RestApiId: !Ref OrderApi
-            Path: /upload-jobs/{id}
-            Method: get
-
-  # Job-number workflow (feature 004). Reserve runs in the plant-routed network (it calls the ERP and reads the
-  # secret) and answers synchronously, so it must finish inside API Gateway's 29 s limit.
-  ReserveFunction:
-    Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: makefile
-    Properties:
-      Handler: handlers.reserve.handler
-      Timeout: 28
+      FunctionName: !Sub "${AWS::StackName}-fn"
+      Handler: lambda_function.lambda_handler
+      Timeout: 300
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0          # never replay a reservation or a save automatically (asynchronous invokes only)
       VpcConfig:
-        SecurityGroupIds: !If [CreateNetwork, [!Ref FunctionSecurityGroup], !Split [",", !Ref WorkerSecurityGroupIds]]
-        SubnetIds: !If [CreateNetwork, [!Ref HostSubnetA, !Ref HostSubnetB], !Split [",", !Ref WorkerSubnetIds]]
+        SecurityGroupIds: !Split [",", !Ref WorkerSecurityGroupIds]
+        SubnetIds: !Split [",", !Ref WorkerSubnetIds]
       Environment:
         Variables:
           SYTELINE_WSDL: !Ref SytelineWsdl
@@ -634,17 +286,25 @@ Resources:
           SYTELINE_SQL_VERIFY_HOSTNAME: !Ref SqlVerifyHostname
           SYTELINE_SQL_LOGIN_TIMEOUT: !Ref SqlLoginTimeout
           SYTELINE_SQL_TIMEOUT: !Ref SqlTimeout
+          SYTELINE_DEFAULT_WHSE: !Ref DefaultWhse
+          SYTELINE_DEFAULT_ORDTYPE: !Ref DefaultOrdType
           IDP_STACK_NAME: !Ref IdpStackName
           IDP_REGION: !Ref IdpRegion
           IDP_DOCUMENT_CLASS: !Ref IdpDocumentClass
           IDP_FIELD_MAP: !Ref IdpFieldMap
+          WORKER_TIMEOUT_SECONDS: "300"
+          SWEEPER_REDRIVE_AFTER_SECONDS: "120"
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref JobsTable
         - Statement:
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
               Resource: !Ref SytelineSecretArn
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-fn
         - !If
           - HasIdp
           - Statement:
@@ -670,12 +330,41 @@ Resources:
                   - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
           - !Ref AWS::NoValue
       Events:
-        Post:
+        CreateOrder:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OrderApi
+            Path: /confirmed-orders
+            Method: post
+        GetUploadJob:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OrderApi
+            Path: /upload-jobs/{id}
+            Method: get
+        Reserve:
           Type: Api
           Properties:
             RestApiId: !Ref OrderApi
             Path: /job-reservations
             Method: post
+        SaveReservation:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OrderApi
+            Path: /job-reservations/{id}/save
+            Method: post
+        GetReservation:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OrderApi
+            Path: /job-reservations/{id}
+            Method: get
+        Sweep:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Input: '{"action":"sweep"}'
 
   # Starts DirectFunction (action `document_event`, the default) from the IDP state machine's SUCCEEDED events; exists only
   # when IdpStateMachineArn is given
@@ -703,283 +392,16 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt IdpDocumentEventRule.Arn
 
-  SaveIntakeFunction:
-    Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: makefile
-    Properties:
-      Handler: handlers.save_intake.handler
-      Timeout: 15
-      VpcConfig:
-        SecurityGroupIds: !If [CreateNetwork, [!Ref FunctionSecurityGroup], !Split [",", !Ref WorkerSecurityGroupIds]]
-        SubnetIds: !If [CreateNetwork, [!Ref HostSubnetA, !Ref HostSubnetB], !Split [",", !Ref WorkerSubnetIds]]
-      Environment:
-        Variables:
-          WORKER_FUNCTION_NAME: !Ref WorkerFunction
-          IDP_STACK_NAME: !Ref IdpStackName
-          IDP_REGION: !Ref IdpRegion
-          IDP_DOCUMENT_CLASS: !Ref IdpDocumentClass
-          IDP_FIELD_MAP: !Ref IdpFieldMap
-      Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref JobsTable
-        - LambdaInvokePolicy:
-            FunctionName: !Ref WorkerFunction
-        - !If
-          - HasIdp
-          - Statement:
-              - Effect: Allow
-                Action:
-                  - cloudformation:DescribeStacks
-                  - cloudformation:DescribeStackResource
-                  - cloudformation:DescribeStackResources
-                  - cloudformation:ListStackResources
-                Resource: !Sub
-                  - arn:${AWS::Partition}:cloudformation:${IdpRegionName}:${AWS::AccountId}:stack/${IdpStackName}*/*
-                  - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
-              - Effect: Allow
-                Action: s3:GetObject
-                Resource: !Sub arn:${AWS::Partition}:s3:::${IdpOutputBucketName}/*
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:Query
-                  - dynamodb:BatchGetItem
-                Resource: !Sub
-                  - arn:${AWS::Partition}:dynamodb:${IdpRegionName}:${AWS::AccountId}:table/${IdpTrackingTableName}
-                  - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
-          - !Ref AWS::NoValue
-      Events:
-        Post:
-          Type: Api
-          Properties:
-            RestApiId: !Ref OrderApi
-            Path: /job-reservations/{id}/save
-            Method: post
-
-  ReservationStatusFunction:
-    Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: makefile
-    Properties:
-      Handler: handlers.reservation_status.handler
-      Timeout: 10
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref JobsTable
-      Events:
-        Get:
-          Type: Api
-          Properties:
-            RestApiId: !Ref OrderApi
-            Path: /job-reservations/{id}
-            Method: get
-
-  WorkerFunction:
-    Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: makefile
-    Properties:
-      Handler: handlers.worker.handler
-      Timeout: 300
-      ReservedConcurrentExecutions: 1   # serializes ERP writes
-      EventInvokeConfig:
-        MaximumRetryAttempts: 0          # never replay an upload automatically
-      VpcConfig:
-        SecurityGroupIds: !If [CreateNetwork, [!Ref FunctionSecurityGroup], !Split [",", !Ref WorkerSecurityGroupIds]]
-        SubnetIds: !If [CreateNetwork, [!Ref HostSubnetA, !Ref HostSubnetB], !Split [",", !Ref WorkerSubnetIds]]
-      Environment:
-        Variables:
-          SYTELINE_WSDL: !Ref SytelineWsdl
-          SYTELINE_USER: !Ref SytelineUser
-          SYTELINE_CONFIG: !Ref SytelineConfig
-          SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
-          SYTELINE_DEFAULT_WHSE: !Ref DefaultWhse
-          SYTELINE_DEFAULT_ORDTYPE: !Ref DefaultOrdType
-          SYTELINE_LIVE_WRITES: !Ref LiveWrites
-          SYTELINE_NEXT_CO_IDO: !Ref NextCoIdo
-          SYTELINE_NEXT_JOB_IDO: !Ref NextJobIdo
-          SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo
-          SYTELINE_DEFAULTS_IDO: !Ref DefaultsIdo
-          SYTELINE_SQL_ENCRYPT: !Ref SqlEncrypt
-          SYTELINE_SITE_ID: !Ref SiteId
-          SYTELINE_MATCH_MIN_SCORE: !Ref MatchMinScore
-          SYTELINE_MATCH_MARGIN: !Ref MatchMargin
-          SYTELINE_MATCH_CAP: !Ref MatchCap
-          SYTELINE_SQL_VERIFY_HOSTNAME: !Ref SqlVerifyHostname
-          SYTELINE_SQL_LOGIN_TIMEOUT: !Ref SqlLoginTimeout
-          SYTELINE_SQL_TIMEOUT: !Ref SqlTimeout
-          IDP_STACK_NAME: !Ref IdpStackName
-          IDP_REGION: !Ref IdpRegion
-          IDP_DOCUMENT_CLASS: !Ref IdpDocumentClass
-          IDP_FIELD_MAP: !Ref IdpFieldMap
-      Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref JobsTable
-        - Statement:
-            - Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref SytelineSecretArn
-        - !If
-          - HasIdp
-          - Statement:
-              - Effect: Allow
-                Action:
-                  - cloudformation:DescribeStacks
-                  - cloudformation:DescribeStackResource
-                  - cloudformation:DescribeStackResources
-                  - cloudformation:ListStackResources
-                Resource: !Sub
-                  - arn:${AWS::Partition}:cloudformation:${IdpRegionName}:${AWS::AccountId}:stack/${IdpStackName}*/*
-                  - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
-              - Effect: Allow
-                Action: s3:GetObject
-                Resource: !Sub arn:${AWS::Partition}:s3:::${IdpOutputBucketName}/*
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:Query
-                  - dynamodb:BatchGetItem
-                Resource: !Sub
-                  - arn:${AWS::Partition}:dynamodb:${IdpRegionName}:${AWS::AccountId}:table/${IdpTrackingTableName}
-                  - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
-          - !Ref AWS::NoValue
-
-  SweeperFunction:
-    Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: makefile
-    Properties:
-      Handler: handlers.sweeper.handler
-      Timeout: 60
-      Environment:
-        Variables:
-          WORKER_FUNCTION_NAME: !Ref WorkerFunction
-          WORKER_TIMEOUT_SECONDS: "300"
-          SWEEPER_REDRIVE_AFTER_SECONDS: "120"
-      Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref JobsTable
-        - LambdaInvokePolicy:
-            FunctionName: !Ref WorkerFunction
-      Events:
-        Schedule:
-          Type: Schedule
-          Properties:
-            Schedule: rate(5 minutes)
-
-  # Direct-invoke actions: health (connectivity), add_note, get_notes
-  DirectFunction:
-    Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: makefile
-    Properties:
-      Handler: lambda_function.lambda_handler
-      Timeout: 60
-      EventInvokeConfig:
-        MaximumRetryAttempts: 0          # never replay a reservation automatically (asynchronous invokes only)
-      VpcConfig:
-        SecurityGroupIds: !If [CreateNetwork, [!Ref FunctionSecurityGroup], !Split [",", !Ref WorkerSecurityGroupIds]]
-        SubnetIds: !If [CreateNetwork, [!Ref HostSubnetA, !Ref HostSubnetB], !Split [",", !Ref WorkerSubnetIds]]
-      Environment:
-        Variables:
-          SYTELINE_WSDL: !Ref SytelineWsdl
-          SYTELINE_USER: !Ref SytelineUser
-          SYTELINE_CONFIG: !Ref SytelineConfig
-          SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
-          SYTELINE_LIVE_WRITES: !Ref LiveWrites
-          SYTELINE_NEXT_CO_IDO: !Ref NextCoIdo
-          SYTELINE_NEXT_JOB_IDO: !Ref NextJobIdo
-          SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo
-          SYTELINE_DEFAULTS_IDO: !Ref DefaultsIdo
-          SYTELINE_SQL_ENCRYPT: !Ref SqlEncrypt
-          SYTELINE_SITE_ID: !Ref SiteId
-          SYTELINE_MATCH_MIN_SCORE: !Ref MatchMinScore
-          SYTELINE_MATCH_MARGIN: !Ref MatchMargin
-          SYTELINE_MATCH_CAP: !Ref MatchCap
-          SYTELINE_SQL_VERIFY_HOSTNAME: !Ref SqlVerifyHostname
-          SYTELINE_SQL_LOGIN_TIMEOUT: !Ref SqlLoginTimeout
-          SYTELINE_SQL_TIMEOUT: !Ref SqlTimeout
-          SYTELINE_DEFAULT_WHSE: !Ref DefaultWhse
-          SYTELINE_DEFAULT_ORDTYPE: !Ref DefaultOrdType
-          WORKER_FUNCTION_NAME: !Ref WorkerFunction
-          IDP_STACK_NAME: !Ref IdpStackName
-          IDP_REGION: !Ref IdpRegion
-          IDP_DOCUMENT_CLASS: !Ref IdpDocumentClass
-          IDP_FIELD_MAP: !Ref IdpFieldMap
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref SytelineSecretArn
-        - DynamoDBCrudPolicy:
-            TableName: !Ref JobsTable
-        - LambdaInvokePolicy:
-            FunctionName: !Ref WorkerFunction
-        - !If
-          - HasIdp
-          - Statement:
-              - Effect: Allow
-                Action:
-                  - cloudformation:DescribeStacks
-                  - cloudformation:DescribeStackResource
-                  - cloudformation:DescribeStackResources
-                  - cloudformation:ListStackResources
-                Resource: !Sub
-                  - arn:${AWS::Partition}:cloudformation:${IdpRegionName}:${AWS::AccountId}:stack/${IdpStackName}*/*
-                  - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
-              - Effect: Allow
-                Action: s3:GetObject
-                Resource: !Sub arn:${AWS::Partition}:s3:::${IdpOutputBucketName}/*
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:Query
-                  - dynamodb:BatchGetItem
-                Resource: !Sub
-                  - arn:${AWS::Partition}:dynamodb:${IdpRegionName}:${AWS::AccountId}:table/${IdpTrackingTableName}
-                  - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
-          - !Ref AWS::NoValue
-
 Outputs:
-  # --- handover to the network team (only when this stack created the host network) ---
-  HostVpcId:
-    Condition: CreateNetwork
-    Description: Attach a gateway or transit attachment to this VPC to reach the plant
-    Value: !Ref HostVpc
-  HostSubnetIds:
-    Condition: CreateNetwork
-    Value: !Join [",", [!Ref HostSubnetA, !Ref HostSubnetB]]
-  HostRouteTableId:
-    Condition: CreateNetwork
-    Description: Add the route to the plant range in this route table
-    Value: !Ref HostRouteTable
-  FunctionSecurityGroupId:
-    Condition: CreateNetwork
-    Value: !Ref FunctionSecurityGroup
-  HostNetworkCidr:
-    Condition: CreateNetwork
-    Description: Must not overlap the plant range or any network connected to it
-    Value: !Ref HostNetworkCidr
-  PlantCidrs:
-    Condition: CreateNetwork
-    Description: Plant ranges the functions may reach on HTTP port 80
-    Value: !Join
-      - ","
-      - - !Ref PlantCidr1
-        - !If [HasPlantCidr2, !Ref PlantCidr2, !Ref "AWS::NoValue"]
-        - !If [HasPlantCidr3, !Ref PlantCidr3, !Ref "AWS::NoValue"]
-  ApiEndpointId:
-    Condition: MakeApiEndpoint
-    Description: execute-api endpoint created in the host network (CreateApiEndpoint=true)
-    Value: !Ref ApiEndpoint
+  DirectFunctionName:
+    Description: >-
+      The one Lambda function. Send it an action, an IDP finished-document event, or an API request.
+    Value: !Ref DirectFunction
+  FunctionArn:
+    Value: !GetAtt DirectFunction.Arn
   ApiId:
     Value: !Ref OrderApi
-  WorkerFunctionName:
-    Value: !Ref WorkerFunction
-  DirectFunctionName:
-    Value: !Ref DirectFunction
   JobsTableName:
     Value: !Ref JobsTable
-  ReserveFunctionName:
-    Value: !Ref ReserveFunction
+  AttachedVpcId:
+    Value: !Ref WorkerVpcId

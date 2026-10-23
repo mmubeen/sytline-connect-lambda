@@ -39,6 +39,13 @@ class DynamoTable:
     def delete_item(self, Key):
         return self._table.delete_item(Key=Key)
 
+    def put_if(self, item, condition, values):
+        """One conditional put; raises the table's ConditionalCheckFailedException when the condition is false."""
+        return self._table.put_item(Item=item, ConditionExpression=condition, ExpressionAttributeValues=values)
+
+    def delete_if(self, Key, condition, values):
+        return self._table.delete_item(Key=Key, ConditionExpression=condition, ExpressionAttributeValues=values)
+
     def transact_put(self, puts):
         """All-or-nothing puts: list of (item, condition_expression_or_None)."""
         items = []

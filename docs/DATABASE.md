@@ -16,7 +16,7 @@ Each setting is either an **endpoint (IDO) name**, which keeps that operation on
 
 - The stack parameters default to `database` (`deploy.env`: `NEXT_CO_IDO`, `NEXT_JOB_IDO`, `CUSTOMER_IDO`, `DEFAULTS_IDO`).
 - **Updating an existing VPC stack therefore switches its numbering, customer search and defaults to the database.** Without database settings in the secret they fail clearly (`DATABASE_NOT_CONFIGURED`) before anything is reserved or written. Setting a parameter to the old endpoint name keeps that operation on the web service.
-- A function whose route variable is absent (the stand-alone version, local runs) behaves as before: the web service for numbers and the customer search, and no defaults read.
+- A function whose route variable is absent (local runs) behaves as before: the web service for numbers and the customer search, and no defaults read.
 
 ## Settings (in the existing ERP credentials secret)
 
@@ -75,7 +75,7 @@ The functions run in the plant-routed network. They need a route to the database
 
 ## Diagnosing the database connection
 
-`{"action": "health", "diagnose": true}` adds a database probe to the `diagnostics` section **only when the health check itself tests the database** (a plant operation uses the database route, or the stand-alone function is attached and `DatabaseCheck` is `auto` or `true`). It uses the server name and port the health check read from the credentials secret and does a name lookup (every attempt), a direct question to the function's nameserver, and a TCP connection test to each address (`diagnostics.database`, `diagnostics.dns_raw.database`), then adds database lines to `diagnostics.findings`:
+`{"action": "health", "diagnose": true}` adds a database probe to the `diagnostics` section **only when the health check itself tests the database** (an operation uses the database route). It uses the server name and port the health check read from the credentials secret and does a name lookup (every attempt), a direct question to the function's nameserver, and a TCP connection test to each address (`diagnostics.database`, `diagnostics.dns_raw.database`), then adds database lines to `diagnostics.findings`:
 
 | Finding | Meaning |
 |---|---|
@@ -84,19 +84,6 @@ The functions run in the plant-routed network. They need a route to the database
 | the database host and port are reachable | the cause is the login, the certificate or the encryption setting: read the `db_login` stage's error |
 
 It never logs in and sends no credential, query or data, and `stages`, `ok` and `warnings` are the same as without `diagnose`. When it cannot run it says so in `diagnostics.database_skipped`: a dry run does not read the secret, the secret could not be read, the secret holds no `SQL_SERVER`, or `SQL_PORT` is not a number. When the health check would not test the database, the probe and the key are absent.
-
-## Stand-alone version
-
-The stand-alone Lambda has no actions that reserve numbers, search customers or save orders, so it never uses the database for them. When it is **attached to an existing VPC** it can run the same connectivity stages (`db_dns`, `db_tcp`, `db_login`, with the encryption detail and the unencrypted warning) in its health check:
-
-| `deploy.env` (stand-alone block) | Stack parameter | Default | Meaning |
-|---|---|---|---|
-| `DATABASE_CHECK` | `DatabaseCheck` | `auto` | `auto`: the database stages run whenever the function is attached to a VPC (not attached: unchanged). `true`: always (refused unless all three `ATTACH_*` settings are given). `false`: never |
-| `SQL_ENCRYPT` | `SqlEncrypt` | `true` | as above (`false` = unencrypted, warned, no CA needed) |
-| `SQL_VERIFY_HOSTNAME` | `SqlVerifyHostname` | `true` | as above |
-| `SQL_LOGIN_TIMEOUT` | `SqlLoginTimeout` | `5` | seconds |
-
-The database keys go in the secret, and the security group must allow TCP 1433. With `auto` an attached function shows the stages on every health call; a database key missing from the secret appears as a failing `db_login` stage naming the key, and the overall `ok` is false (set `DATABASE_CHECK=false` to keep the earlier result). An unattached function is unchanged. Only a forced `true` that reaches an unattached function (the template and script refuse it) reports `database_check: skipped: the function is not attached to a VPC`. See [STANDALONE.md](STANDALONE.md).
 
 ## Checking it (before the first PO)
 

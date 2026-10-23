@@ -36,7 +36,7 @@ def _lambda():
     return boto3.client("lambda")
 
 
-def handler(event, context):
+def sweep(payload, context):
     started = time.monotonic()
     redrive_after = int(os.environ.get("SWEEPER_REDRIVE_AFTER_SECONDS", "120"))
     stale_after = int(os.environ.get("WORKER_TIMEOUT_SECONDS", "300")) + 30
@@ -45,7 +45,7 @@ def handler(event, context):
     for job in store.list_accepted_older_than(redrive_after):
         try:
             lam.invoke(FunctionName=worker_function_name(), InvocationType="Event",
-                       Payload=json.dumps({"upload_id": job["upload_id"]}).encode("utf-8"))
+                       Payload=json.dumps({"action": "work_upload", "upload_id": job["upload_id"]}).encode("utf-8"))
             redriven.append(job["upload_id"])
         except Exception:
             pass  # still accepted; the next sweep tries again
@@ -60,7 +60,7 @@ def handler(event, context):
     for res in rstore.list_save_accepted_older_than(redrive_after):
         try:
             lam.invoke(FunctionName=worker_function_name(), InvocationType="Event",
-                       Payload=json.dumps({"reservation_id": res["reservation_id"]}).encode("utf-8"))
+                       Payload=json.dumps({"action": "work_save", "reservation_id": res["reservation_id"]}).encode("utf-8"))
             redriven.append(res["reservation_id"])
         except Exception:
             pass  # still save_accepted; the next sweep tries again

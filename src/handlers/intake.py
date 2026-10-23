@@ -63,7 +63,7 @@ def handler(event, context):
 
     try:  # async, no retries: a failure here leaves the job `accepted` and the sweeper re-drives it
         _lambda().invoke(FunctionName=worker_function_name(), InvocationType="Event",
-                         Payload=json.dumps({"upload_id": job["upload_id"]}).encode("utf-8"))
+                         Payload=json.dumps({"action": "work_upload", "upload_id": job["upload_id"]}).encode("utf-8"))
     except Exception:
         pass
     log_event("create_order", started, outcome="202", upload_id=job["upload_id"], request_ref=body["request_ref"],

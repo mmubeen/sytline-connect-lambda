@@ -15,7 +15,7 @@ def accept_and_start(store, lambda_client, reservation_id, params):
         return False
     try:
         lambda_client.invoke(FunctionName=worker_function_name(), InvocationType="Event",
-                             Payload=json.dumps({"reservation_id": reservation_id}).encode("utf-8"))
+                             Payload=json.dumps({"action": "work_save", "reservation_id": reservation_id}).encode("utf-8"))
     except Exception:
         pass
     return True
