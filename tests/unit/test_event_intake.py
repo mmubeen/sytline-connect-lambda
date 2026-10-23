@@ -278,3 +278,29 @@ def test_no_field_value_appears_outside_the_summary_in_any_response_or_stored_it
         assert "ACME" not in text and "PO-1" not in text, out["outcome"]
     stored = json.dumps(live.table.items, default=str)
     assert "ACME" not in stored and "PO-1" not in stored
+
+
+# ---- "debug": true asks for the underlying message of an IDP failure (never otherwise) ----------------------------------------
+def _failing_idp(world, message):
+    class IDPProcessingError(Exception):
+        pass
+
+    world.idp.raise_for[DOC] = IDPProcessingError(message)
+
+
+def test_an_idp_failure_shows_its_message_only_when_debug_is_asked_for(world):
+    _failing_idp(world, "Failed to get metadata:\n  AccessDenied kms:Decrypt on arn:aws-us-gov:kms:r:1:key/abc")
+    plain = world.run()
+    assert plain["errors"][0]["code"] == errors.IDP_UNAVAILABLE and plain["cause"] == "IDPProcessingError"
+    assert "detail" not in plain and "kms:Decrypt" not in json.dumps(plain)
+    asked = ei.process(ev(), None, debug=True)
+    assert asked["detail"] == "Failed to get metadata: AccessDenied kms:Decrypt on arn:aws-us-gov:kms:r:1:key/abc"
+    assert asked["errors"] == plain["errors"] and asked["cause"] == plain["cause"]
+
+
+def test_the_debug_detail_is_shortened_and_exists_only_for_idp_failures(world):
+    _failing_idp(world, "x" * 900)
+    assert len(ei.process(ev(), None, debug=True)["detail"]) == 300
+    world.idp.raise_for.clear()
+    world.idp.update(DOC, low={"cust_po"})  # a normal refusal has no underlying message to show
+    assert "detail" not in ei.process(ev(), None, debug=True)

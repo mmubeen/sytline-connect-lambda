@@ -82,8 +82,11 @@ def _idp_errors(document_id):
             raise _refuse(errors.DOCUMENT_NOT_FOUND, f"no such document in IDP: {document_id}") from None
         # the function's own log (not the response) gets the SDK's message, shortened: it is how a denied permission or a
         # missing record is told apart; it carries no credentials
-        log.warning("IDP read failed: %s: %s", type(exc).__name__, " ".join(str(exc).split())[:300])
-        raise _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be read", cause=type(exc).__name__) from None
+        detail = " ".join(str(exc).split())[:300]
+        log.warning("IDP read failed: %s: %s", type(exc).__name__, detail)
+        refusal = _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be read", cause=type(exc).__name__)
+        refusal.debug_detail = detail
+        raise refusal from None
 
 
 class DocumentRead:
@@ -116,9 +119,11 @@ def read_document(document_id):
         module = getattr(exc, "name", None) if isinstance(exc, ImportError) and isinstance(getattr(exc, "name", None), str) else None
         log.warning("IDP client could not be created: %s%s", type(exc).__name__, f" (module {module})" if module else "")
         extra = {"module": module} if module else {}
-        raise _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be reached", cause=type(exc).__name__,
-                      hint=_HINTS.get(type(exc).__name__, "see the function log line 'IDP client could not be created'"),
-                      **extra) from None
+        refusal = _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be reached", cause=type(exc).__name__,
+                          hint=_HINTS.get(type(exc).__name__, "see the function log line 'IDP client could not be created'"),
+                          **extra)
+        refusal.debug_detail = " ".join(str(exc).split())[:300]
+        raise refusal from None
     with _idp_errors(document_id):
         status = client.document.get_status(document_id=document_id)
         state = _state(status)

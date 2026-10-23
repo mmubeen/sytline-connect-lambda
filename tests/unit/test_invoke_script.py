@@ -159,3 +159,14 @@ def test_a_response_that_is_not_json_is_printed_as_it_is(invoke):
 def test_help_prints_the_usage_without_a_file(invoke):
     p, calls = invoke("--help")
     assert p.returncode == 0 and "PAYLOAD_FILE" in p.stdout and calls == ""
+
+
+def test_debug_sends_a_copy_of_the_payload_with_debug_true_and_leaves_the_file_alone(invoke, tmp_path):
+    p, calls = invoke("--debug", "PAYLOAD", payload={"action": "document_event", "x": 1})
+    assert p.returncode == 0, p.stderr
+    sent = invoke_line(calls).split("--payload fileb://")[1].split()[0]
+    assert "payload.json" not in sent  # a temporary copy, not the original
+    assert json.loads((tmp_path / "payload.json").read_text()) == {"action": "document_event", "x": 1}
+    p, calls = invoke("PAYLOAD", payload={"action": "health"})
+    assert "payload.json" in invoke_line(calls)  # without --debug the original file is sent as it is
+

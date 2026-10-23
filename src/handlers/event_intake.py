@@ -66,8 +66,12 @@ def _out(outcome, document_id=None, summary=None, **extra):
     return body
 
 
-def _refused(exc, document_id=None, summary=None):
-    return _out("refused", document_id, summary, errors=[exc.err], **exc.extra)
+def _refused(exc, document_id=None, summary=None, debug=False):
+    """The refusal; with `debug` (the caller asked for it) it also carries the underlying message, shortened."""
+    extra = dict(exc.extra)
+    if debug and exc.debug_detail:
+        extra["detail"] = exc.debug_detail
+    return _out("refused", document_id, summary, errors=[exc.err], **extra)
 
 
 def _numbers(item):
@@ -94,7 +98,7 @@ def _log(started, outcome, parsed=None, summary=None, **fields):
               **counts, **fields)
 
 
-def process(payload, context):
+def process(payload, context, debug=False):
     """Run the intake for one event (the payload of the `document_event` action); returns the outcome object."""
     started = time.monotonic()
     try:
@@ -113,13 +117,13 @@ def process(payload, context):
         summary = idp.scan_summary(read)
     except IntegrationError as exc:
         _log(started, "refused", parsed, code=exc.err["code"])
-        return _refused(exc, document_id)
+        return _refused(exc, document_id, debug=debug)
 
     try:
         doc = idp.po_details(document_id, read=read)
     except IntegrationError as exc:  # not usable (unreviewed low field, missing field, ...): nothing is reserved
         _log(started, "refused", parsed, summary, code=exc.err["code"])
-        return _refused(exc, document_id, summary)
+        return _refused(exc, document_id, summary, debug)
 
     if not config.live_writes_enabled():  # reserving a number is itself a write
         _log(started, "read_only", parsed, summary, code=errors.LIVE_WRITES_DISABLED)

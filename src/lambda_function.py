@@ -77,7 +77,9 @@ def _document_event(raw, defaulted, context):
             'health check pass {"action": "health"}'))
     from handlers import event_intake
 
-    out = event_intake.process(payload, context)
+    # `"debug": true` next to the event (or beside `event`) asks for the underlying message of an IDP failure in the response
+    debug = isinstance(raw, dict) and raw.get("debug") is True
+    out = event_intake.process(payload, context, debug=debug)
     out["action"] = "document_event"
     out["ok"] = out.get("outcome") in OK_OUTCOMES
     return out

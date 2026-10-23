@@ -95,7 +95,19 @@ def test_the_document_event_and_notes_actions_get_a_budgeted_context(monkeypatch
     seen = []
     from handlers import event_intake as ei
 
-    monkeypatch.setattr(ei, "process", lambda payload, ctx: seen.append(ctx) or {"outcome": "ignored"})
+    monkeypatch.setattr(ei, "process", lambda payload, ctx, debug=False: seen.append(ctx) or {"outcome": "ignored"})
     out = lf.lambda_handler({"action": "document_event", **SAMPLE}, Ctx())
     assert out["ok"] is True and isinstance(seen[0], routing.Budget)
     assert seen[0].get_remaining_time_in_millis() <= 55_000
+
+
+@pytest.mark.parametrize("payload,expected", [
+    (lambda e: {**e, "debug": True}, True), (lambda e: {"action": "document_event", "debug": True, "event": e}, True),
+    (lambda e: e, False), (lambda e: {**e, "debug": "yes"}, False), (lambda e: {**e, "debug": False}, False)])
+def test_debug_true_beside_the_event_is_passed_to_the_intake(monkeypatch, payload, expected):
+    from handlers import event_intake as ei
+
+    seen = []
+    monkeypatch.setattr(ei, "process", lambda p, ctx, debug=False: seen.append(debug) or {"outcome": "ignored"})
+    lf.lambda_handler(payload(SAMPLE), Ctx())
+    assert seen == [expected]

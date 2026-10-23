@@ -7,18 +7,20 @@
 #   ./invoke.sh --region R PAYLOAD_FILE           another region (default: the region in samconfig.toml)
 #   ./invoke.sh --async PAYLOAD_FILE              Event invocation: returns at once, no response body
 #   ./invoke.sh --log PAYLOAD_FILE                also print the tail of the function's log
+#   ./invoke.sh --debug PAYLOAD_FILE              add "debug": true to the payload: an IDP failure then shows the SDK's message
 # Examples:  ./invoke.sh ../sample_events.json      (the IDP finished-document event; no "action" needed)
 #            echo '{"action":"health","dry_run":true}' > /tmp/health.json && ./invoke.sh /tmp/health.json
 # Exit status: 0 = invoked and the function did not fail, 1 = the function failed or the invoke failed, 2 = bad usage or payload.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-profile="" region="" function="" check="false" async="false" want_log="false" file=""
+profile="" region="" function="" check="false" async="false" want_log="false" debug="false" file=""
 while (( $# )); do
   case "$1" in
     --check) check="true" ;;
     --async) async="true" ;;
     --log) want_log="true" ;;
+    --debug) debug="true" ;;
     --profile) [[ $# -ge 2 && "${2:0:2}" != "--" ]] || { echo "ERROR: --profile needs a profile name" >&2; exit 2; }; profile="$2"; shift ;;
     --region) [[ $# -ge 2 && "${2:0:2}" != "--" ]] || { echo "ERROR: --region needs a region" >&2; exit 2; }; region="$2"; shift ;;
     --function) [[ $# -ge 2 && "${2:0:2}" != "--" ]] || { echo "ERROR: --function needs a function name" >&2; exit 2; }; function="$2"; shift ;;
@@ -73,11 +75,22 @@ binary_args=(); [[ "$(aws --version 2>&1)" == aws-cli/2* ]] && binary_args=(--cl
 type_args=(); [[ "$async" == "true" ]] && type_args=(--invocation-type Event)
 log_args=(); [[ "$want_log" == "true" && "$async" != "true" ]] && log_args=(--log-type Tail)
 
-out="$(mktemp)"; meta="$(mktemp)"; trap 'rm -f "$out" "$meta"' EXIT
+out="$(mktemp)"; meta="$(mktemp)"; sent="$file"; trap 'rm -f "$out" "$meta" "$sent_tmp"' EXIT
+sent_tmp=""
+if [[ "$debug" == "true" ]]; then  # a temporary copy of the payload with "debug": true; the file itself is not changed
+  sent_tmp="$(mktemp)"
+  python3 - "$file" "$sent_tmp" <<'PY'
+import json, sys
+payload = json.load(open(sys.argv[1]))
+payload["debug"] = True
+json.dump(payload, open(sys.argv[2], "w"))
+PY
+  sent="$sent_tmp"
+fi
 echo "invoking $function in $region${profile:+ (profile $profile)}"
 if ! aws lambda invoke ${profile_args[@]+"${profile_args[@]}"} --region "$region" --function-name "$function" \
        ${binary_args[@]+"${binary_args[@]}"} ${type_args[@]+"${type_args[@]}"} ${log_args[@]+"${log_args[@]}"} \
-       --payload "fileb://$file" "$out" >"$meta"; then
+       --payload "fileb://$sent" "$out" >"$meta"; then
   echo "ERROR: the invoke call failed (function name, region, profile or permissions?)" >&2
   exit 1
 fi

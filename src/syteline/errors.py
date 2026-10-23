@@ -84,3 +84,4 @@ class IntegrationError(Exception):
         super().__init__(message)
         self.err = error(code, message, step=step)
         self.extra = extra
+        self.debug_detail = None  # a shortened underlying message; shown only to a caller that asked for it (debug)
