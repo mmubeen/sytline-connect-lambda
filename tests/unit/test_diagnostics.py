@@ -461,3 +461,84 @@ def test_no_answer_from_any_nameserver_points_at_port_53():
 def test_raw_findings_are_only_added_when_the_erp_lookup_failed():
     d = with_raw(diag(True, True, True, True), [raw("NXDOMAIN")])
     assert not any("NXDOMAIN" in f for f in dg.findings(d))
+
+
+# ---- the database probe (spec FR-019; research.md R27 to R29) ---------------------------------------------------------
+DB = "sql.plant.example"
+
+
+def probe_cfg(**extra):
+    return {"SYTELINE_WSDL": f"http://{ERP}/x?wsdl", "SQL_SERVER": DB, "SQL_PORT": "1433", **extra}
+
+
+def ns_answer(name, rcode_name=None, answers=()):
+    ok = rcode_name is not None
+    return [{"nameserver": "10.0.0.2", "name": name, "ok": ok, **({"rcode": 0 if rcode_name == "NOERROR" else 3,
+             "rcode_name": rcode_name, "answers": list(answers)} if ok else {"error": "no answer"})}]
+
+
+@pytest.fixture
+def fake_dns(monkeypatch):
+    monkeypatch.setattr(dg, "read_resolv", lambda *a, **k: {"nameservers": ["10.0.0.2"], "search": []})
+    answers = {}
+    monkeypatch.setattr(dg, "raw_probe", lambda name, ns: answers.get(name, ns_answer(name, "NOERROR", ["10.1.2.3"])))
+    return answers
+
+
+def test_the_database_is_not_probed_unless_asked_and_the_output_is_unchanged(net, fake_dns):
+    n = net({ERP: ["10.9.1.5"], AWS: ["10.0.0.9"]}, {("10.9.1.5", 80): True, ("10.0.0.9", 443): True})
+    d = dg.run_diagnostics(probe_cfg(), 5)
+    assert "database" not in d and "database_skipped" not in d and DB not in n.lookups
+    assert set(d["dns_raw"]) == {"erp", "aws"} and not any("database" in f for f in d["findings"])
+
+
+def test_the_probe_reports_lookup_nameserver_answer_and_a_connection_per_address(net, fake_dns):
+    addrs = ["10.1.2.%d" % i for i in range(1, 7)]
+    n = net({ERP: ["10.9.1.5"], AWS: ["10.0.0.9"], DB: [addrs]},
+            {("10.9.1.5", 80): True, ("10.0.0.9", 443): True, **{(a, 1433): True for a in addrs}})
+    d = dg.run_diagnostics(probe_cfg(), 5, database=True)
+    db = d["database"]
+    assert db["host"] == DB and db["port"] == 1433 and db["ok"] and db["connected"]
+    assert len(db["connections"]) == dg.MAX_ADDRESSES and [c for c in n.connections if c[1] == 1433] and len(
+        [c for c in n.connections if c[1] == 1433]) == dg.MAX_ADDRESSES
+    assert d["dns_raw"]["database"][0]["name"] == DB
+    assert any("The database host and port are reachable" in f for f in d["findings"])
+
+
+def test_a_missing_server_or_a_bad_port_is_reported_as_skipped(net, fake_dns):
+    net({ERP: ["10.9.1.5"], AWS: ["10.0.0.9"]})
+    d = dg.run_diagnostics(probe_cfg(SQL_SERVER=""), 5, database=True)
+    assert d["database_skipped"] == "the secret holds no SQL_SERVER" and "database" not in d
+    d = dg.run_diagnostics(probe_cfg(SQL_PORT="14x"), 5, database=True)
+    assert d["database_skipped"] == "SQL_PORT is not a number" and "database" not in d
+
+
+def test_finding_for_a_name_the_nameserver_says_does_not_exist(net, fake_dns):
+    net({ERP: ["10.9.1.5"], AWS: ["10.0.0.9"]}, {("10.9.1.5", 80): True, ("10.0.0.9", 443): True})
+    fake_dns[DB] = ns_answer(DB, "NXDOMAIN")
+    d = dg.run_diagnostics(probe_cfg(), 5, database=True)
+    assert d["database"]["ok"] is False
+    assert any("database name does not exist (NXDOMAIN)" in f for f in d["findings"])
+
+
+def test_finding_for_a_resolved_host_whose_port_does_not_answer(net, fake_dns):
+    net({ERP: ["10.9.1.5"], AWS: ["10.0.0.9"], DB: ["10.1.2.3"]}, {("10.9.1.5", 80): True, ("10.0.0.9", 443): True})
+    d = dg.run_diagnostics(probe_cfg(), 5, database=True)
+    assert d["database"]["ok"] and not d["database"]["connected"]
+    found = [f for f in d["findings"] if "no connection to port 1433" in f]
+    assert found and "security group" in found[0] and "SQL Server not listening" in found[0]
+
+
+def test_finding_when_the_nameserver_knows_the_name_but_the_function_lookup_fails(net, fake_dns):
+    net({ERP: ["10.9.1.5"], AWS: ["10.0.0.9"]}, {("10.9.1.5", 80): True, ("10.0.0.9", 443): True})
+    d = dg.run_diagnostics(probe_cfg(), 5, database=True)  # fake nameserver answers 10.1.2.3, the function's lookup fails
+    assert any("answers the database name correctly (10.1.2.3)" in f for f in d["findings"])
+
+
+def test_the_probe_sends_nothing_but_lookups_and_connects(net, fake_dns):
+    n = net({ERP: ["10.9.1.5"], AWS: ["10.0.0.9"], DB: ["10.1.2.3"]},
+            {("10.9.1.5", 80): True, ("10.0.0.9", 443): True, ("10.1.2.3", 1433): True})
+    d = dg.run_diagnostics(probe_cfg(SQL_USER="svc-login", SQL_PASS="S3cr3t-DB-Pass"), 5, database=True)
+    assert sorted(set(n.connections)) == [("10.0.0.9", 443), ("10.1.2.3", 1433), ("10.9.1.5", 80)]  # connects only
+    assert "pytds" not in vars(dg) and "SqlServer" not in vars(dg)  # no driver, so no login or query is possible
+    assert "S3cr3t-DB-Pass" not in repr(d) and "svc-login" not in repr(d)

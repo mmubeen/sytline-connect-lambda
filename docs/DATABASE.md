@@ -73,6 +73,18 @@ The functions run in the plant-routed network. They need a route to the database
 | Customer match is ambiguous, below the threshold or not found | `CUSTOMER_AMBIGUOUS` / `CUSTOMER_LOW_CONFIDENCE` / `CUSTOMER_NOT_FOUND`, with the best candidates and scores; nothing is reserved or written |
 | The customer defaults cannot be read, or the customer has no orders | the order is saved without terms and ship-via and a warning says why (shown by the reservation status) |
 
+## Diagnosing the database connection
+
+`{"action": "health", "diagnose": true}` adds a database probe to the `diagnostics` section **only when the health check itself tests the database** (a plant operation uses the database route, or the stand-alone function is attached and `DatabaseCheck` is `auto` or `true`). It uses the server name and port the health check read from the credentials secret and does a name lookup (every attempt), a direct question to the function's nameserver, and a TCP connection test to each address (`diagnostics.database`, `diagnostics.dns_raw.database`), then adds database lines to `diagnostics.findings`:
+
+| Finding | Meaning |
+|---|---|
+| the nameserver says the database name does not exist (NXDOMAIN) | plant DNS is not reachable from the function's network, or `SQL_SERVER` should be an address |
+| the host resolves but no connection to the port succeeded | missing route to the plant, a security group or firewall blocking the port, or SQL Server not listening |
+| the database host and port are reachable | the cause is the login, the certificate or the encryption setting: read the `db_login` stage's error |
+
+It never logs in and sends no credential, query or data, and `stages`, `ok` and `warnings` are the same as without `diagnose`. When it cannot run it says so in `diagnostics.database_skipped`: a dry run does not read the secret, the secret could not be read, the secret holds no `SQL_SERVER`, or `SQL_PORT` is not a number. When the health check would not test the database, the probe and the key are absent.
+
 ## Stand-alone version
 
 The stand-alone Lambda has no actions that reserve numbers, search customers or save orders, so it never uses the database for them. When it is **attached to an existing VPC** it can run the same connectivity stages (`db_dns`, `db_tcp`, `db_login`, with the encryption detail and the unencrypted warning) in its health check:

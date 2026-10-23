@@ -61,3 +61,10 @@ Verify the `LongList` / `Infobar` types, the routine signatures and the `custadd
 1. `./deploy.sh --standalone --yes` with the three `ATTACH_*` settings prints the `Check: ...` network line once, before the build.
 2. With `SQL_SERVER` (and the other database values) set it prints `Will add or update these keys in the credentials secret: ...`; the output never contains the password.
 
+## Database in the diagnostics (revision)
+
+1. Plant deployment, database route in use: invoke `{"action": "health", "diagnose": true}`; `diagnostics.database` shows the name lookup and a connection per address, `findings` has a database entry, and `stages`/`ok` are the same as without `diagnose`.
+2. Block port 1433 (security group): the same call shows `database.connected: false` and a finding that names the port and the security group; `db_login` fails as before.
+3. `{"dry_run": true, "diagnose": true}`: `diagnostics.database_skipped` says a dry run does not read the secret.
+4. Stand-alone deployment not attached (or `DatabaseCheck=false`): no database key appears in `diagnostics`.
+

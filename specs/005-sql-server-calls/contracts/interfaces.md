@@ -83,3 +83,17 @@ A missing database key makes `db_login` fail naming the keys (`database not conf
 | `STAND-ALONE ONLY` | `ATTACH_VPC_ID`, `ATTACH_SUBNET_IDS`, `ATTACH_SG_IDS`, `ALLOW_PLAIN_HTTP`, `VERIFY_TLS`, `DATABASE_CHECK` | `--standalone`; ignored by plant mode |
 
 `./deploy.sh --standalone` with a `deploy.standalone.env` present exits before building: "deploy.standalone.env is no longer read: move its settings into deploy.env (stand-alone block) and delete it". No other behaviour changes.
+
+## Diagnostics (`{"diagnose": true}`), revision: database probe
+
+Added keys of the `diagnostics` section, present only when the health check would run the database stages (spec FR-019):
+
+```json
+"database": {"host": "sql.plant.example", "port": 1433, "ok": true, "attempts": [...], "addresses": ["10.1.2.3"],
+             "connections": [{"address": "10.1.2.3", "ok": true, "ms": 4}], "connected": true},
+"dns_raw": {"erp": [...], "aws": [...], "database": [...]},
+"findings": ["... existing entries ...", "The database host and port are reachable: ..."]
+```
+
+or, when the rule says probe but it cannot be done: `"database_skipped": "<reason>"` (dry run / secret not readable / no `SQL_SERVER` in the secret). When the rule says no probe, none of these keys is added. No login, TLS handshake, credential, query or data is sent; `stages`, `ok` and `warnings` are unchanged by the probe.
+

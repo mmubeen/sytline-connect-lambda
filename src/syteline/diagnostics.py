@@ -9,9 +9,13 @@ Reports, in a separate `diagnostics` section that never changes the health stage
     name and the AWS endpoint name, reporting the response code (NOERROR / NXDOMAIN / SERVFAIL / REFUSED) or a timeout.
     It separates "the resolver says no" from "the resolver answers but the function's own lookup fails",
   * the same lookup + connection test for the function's own regional AWS endpoint (the secret store),
+  * only when the health check would test the database (`database=True`): the same lookup, nameserver answer and connection
+    test for the SQL Server host and port, or `database_skipped` with the reason,
   * `findings`: plain-language conclusions drawn from the combination.
 
-It contacts ONLY the ERP host and that AWS endpoint, sends no data and no credentials, and reads no secret.
+It contacts ONLY the ERP host, that AWS endpoint and (when asked) the database host, sends no data and no credentials, and
+reads no secret itself: the database server name and port are the ones the health check already read from the secret. The
+database probe is a name lookup and TCP connections only: no login, no TLS handshake, no query.
 Probes use the module-level `socket` so tests can replace them.
 """
 
@@ -286,11 +290,52 @@ def findings(d):
         out.append("Name resolution and connections to the ERP"
                    + (" and the AWS endpoint" if aws_known else "") + " all succeeded: if a health stage still fails, "
                    "look at that stage's own error (HTTP status, TLS, login).")
+    return out + database_findings(d)
+
+
+def database_findings(d):
+    """Conclusions about the SQL Server host. Empty unless the database was probed."""
+    db = d.get("database")
+    if not db:
+        return []
+    aws = d.get("aws")
+    raw = (d.get("dns_raw") or {}).get("database") or []
+    raw_answers = [a for r in raw if r.get("ok") and r.get("rcode") == 0 for a in r.get("answers", [])]
+    out = []
+    if not db["ok"]:
+        rcodes = {r["rcode_name"] for r in raw if r.get("ok")}
+        if raw_answers:
+            out.append(f"The nameserver answers the database name correctly ({', '.join(raw_answers[:4])}) but the function's "
+                       "own lookup of it fails: the problem is inside the function's runtime lookup, not in DNS.")
+        elif "NXDOMAIN" in rcodes:
+            out.append("The nameserver this function uses says the database name does not exist (NXDOMAIN): a private plant "
+                       "name needs plant DNS reachable from the function's network (a Route 53 Resolver forwarding rule or a "
+                       "private hosted zone), or SQL_SERVER in the secret should be an address.")
+        elif rcodes & {"SERVFAIL", "REFUSED"}:
+            out.append(f"The nameserver answered {', '.join(sorted(rcodes & {'SERVFAIL', 'REFUSED'}))} for the database name: "
+                       "the resolver cannot or will not resolve it (check the resolver rules and any DNS firewall).")
+        else:
+            out.append("The database name did not resolve: check SQL_SERVER in the credentials secret and that plant DNS is "
+                       "reachable from the function's network.")
+    elif not db.get("connected"):
+        where = (f"the database host resolves ({', '.join(db['addresses'][:MAX_ADDRESSES])}) but no connection to port "
+                 f"{db['port']} succeeded")
+        if aws and aws.get("connected"):
+            out.append(f"{where.capitalize()} while the AWS endpoint is reachable: look for a missing route to the database "
+                       "(VPN/transit; a function outside a VPC has none to a plant network), a security group or firewall "
+                       "blocking that port, or SQL Server not listening on it.")
+        else:
+            out.append(f"{where.capitalize()}: check routing, the security group on that port and the database server's "
+                       "own firewall.")
+    else:
+        out.append("The database host and port are reachable: if the db_login stage still fails, look at that stage's own "
+                   "error (the login, the certificate or the encryption setting).")
     return out
 
 
-def run_diagnostics(cfg, timeout, env=None):
-    """Probe the ERP host and the regional AWS endpoint. Sends no data, no credentials; reads no secret."""
+def run_diagnostics(cfg, timeout, env=None, database=False):
+    """Probe the ERP host and the regional AWS endpoint, and the database host when `database` is true (the health check
+    decides). Sends no data, no credentials; reads no secret itself."""
     parsed = urlparse(cfg.get("SYTELINE_WSDL", ""))
     host = parsed.hostname
     if not host:
@@ -305,5 +350,16 @@ def run_diagnostics(cfg, timeout, env=None):
     ns = d["resolver"].get("nameservers", [])
     if ns:  # ask the function's own nameserver(s) directly; sends only a DNS query for these two names
         d["dns_raw"] = {"erp": raw_probe(host, ns), "aws": raw_probe(ep, ns) if ep else None}
+    if database:
+        server = (cfg.get("SQL_SERVER") or "").strip()
+        port = str(cfg.get("SQL_PORT") or "1433").strip()
+        if not server:
+            d["database_skipped"] = "the secret holds no SQL_SERVER"
+        elif not port.isdigit():
+            d["database_skipped"] = "SQL_PORT is not a number"
+        else:
+            d["database"] = probe_host(server, int(port), probe_timeout)
+            if ns:
+                d["dns_raw"]["database"] = raw_probe(server, ns)
     d["findings"] = findings(d)
     return d

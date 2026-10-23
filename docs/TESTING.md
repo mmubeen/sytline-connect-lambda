@@ -57,7 +57,7 @@ Expect `token`, and, when any operation uses the database, `db_dns`, `db_tcp` an
 | `db_login`: `login refused` | wrong login or password |
 | `db_login`: `database not configured: <keys>` | those keys are missing from the secret |
 
-`diagnostics.findings` explains name-resolution and connection problems for the web service.
+`diagnostics.findings` explains name-resolution and connection problems for the web service and, when the health check tests the database, for the database host (`diagnostics.database`; see DATABASE.md).
 
 ## Step 5: Verify the unconfirmed names, read-only
 Before any live write, check against the plant: the `LongList` and `Infobar` types and the `NextCoSp` / `NextWOSp` signatures, the `custaddr` and `co` column names, the `SLCos` terms and ship-via property names, and the other names in `src/syteline/idos.py`. Correct any that differ.

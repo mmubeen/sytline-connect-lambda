@@ -18,6 +18,8 @@ Add the PO OCR demo's three database calls to the VPC deployment, each used **on
 
 **Revision 2026-10-22 (deploy message wording):** the attached-network reminder and the secret-merge notice printed by `deploy.sh` are reworded (research.md R26, FR-018); wording only.
 
+**Revision 2026-10-22 (database in the diagnostics):** the opt-in `diagnose` section also probes the SQL Server host when the health check would run the database stages (research.md R27 to R30, FR-019); probes only, no login.
+
 ## Technical Context
 
 **Language/Version**: Python 3.13 (Lambda; existing code), SAM/CloudFormation YAML
@@ -76,12 +78,14 @@ src/
     ├── reserve.py                 # numbering through NumberSource (one connection per run); UNCERTAIN_OUTCOME mapping
     ├── savewf.py                  # header gets terms/ship-via; warning when defaults unavailable
     ├── health.py                  # + routes, + db_dns / db_tcp / db_login stages
+    ├── diagnostics.py             # revision: database probe (name lookup, nameserver answer, TCP per address) and database findings
     ├── config.py                  # + database settings from the secret; route helpers
     ├── idos.py                    # + SLCos terms/ship property names (UNCONFIRMED); route setting names
     └── errors.py                  # + DATABASE_NOT_CONFIGURED, CUSTOMER_LOW_CONFIDENCE
 src/deploy.sh                    # revision (single file): both branches read deploy.env; a leftover deploy.standalone.env stops --standalone with a message
 src/deploy.env.example           # revision: shared block, PLANT ONLY block, STAND-ALONE ONLY block; src/deploy.standalone.env.example is deleted
 src/template-standalone.yaml     # revision: + DatabaseCheck, SqlEncrypt, SqlVerifyHostname, SqlLoginTimeout parameters and env on DirectFunction
+src/syteline/health.py           # revision (diagnostics): decides `database_probe` once and passes it to every run_diagnostics call
 src/syteline/health.py           # revision: database stages also when SYTELINE_DB_CHECK=true and the function is attached (SYTELINE_ATTACHED)
 src/syteline/config.py           # revision: db_check(), attached()
 docs/
@@ -91,7 +95,7 @@ tests/
 ├── fixtures/customer_match_golden.json   # NEW: decisions from the demo's scoring code
 ├── tools/make_customer_golden.py         # NEW: regenerates the golden file from the demo checkout
 └── unit/
-    ├── test_mode_parity.py, test_deploy_script.py (revision: one settings file, retired-file refusal, mode blocks)
+    ├── test_diagnostics.py (revision: database probe cases), test_health_database.py (revision: when the probe runs), test_mode_parity.py, test_deploy_script.py (revision: one settings file, retired-file refusal, mode blocks)
     ├── test_routes.py, test_sqlserver.py, test_numbers.py, test_customer_match.py, test_defaults.py,
     ├── test_no_sql.py (changed: allow only sqlserver.py, audit statements), test_health_database.py,
     └── test_template_database.py

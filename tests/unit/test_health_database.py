@@ -363,3 +363,95 @@ def test_the_plant_routes_still_decide_whatever_the_stand_alone_setting_says(env
     fake_network(env)
     FakeSqlServer().install(env)
     assert [s["stage"] for s in db_stages(health.run_health({"action": "health"}))] == ["db_dns", "db_tcp", "db_login"]
+
+
+# ---- the database probe of the diagnostics runs exactly when the stages would (spec FR-019) -----------------------------
+def stub_probes(monkeypatch):
+    """Record which hosts the diagnostics probe, without any real lookup or connection."""
+    from syteline import diagnostics as dg
+
+    seen = []
+
+    def probe(host, port, timeout):
+        seen.append(host)
+        return {"host": host, "port": port, "ok": True, "attempts": [], "addresses": ["10.1.2.3"],
+                "connections": [{"address": "10.1.2.3", "ok": True}], "connected": True}
+
+    monkeypatch.setattr(dg, "probe_host", probe)
+    monkeypatch.setattr(dg, "raw_probe", lambda name, ns: [])
+    monkeypatch.setattr(dg, "read_resolv", lambda *a, **k: {"nameservers": [], "search": []})
+    monkeypatch.setattr(dg, "local_info", lambda: {})
+    return seen
+
+
+def without_diagnostics(out):
+    return {k: v for k, v in out.items() if k != "diagnostics"}
+
+
+def probed(env, **event):
+    seen = stub_probes(env)
+    fake_network(env)
+    FakeSqlServer().install(env)
+    out = health.run_health({"action": "health", **event})
+    return out, seen
+
+
+def test_plant_with_a_database_route_probes_the_database_and_leaves_the_stages_alone(env):
+    database_everywhere(env)
+    with_db_settings(env)
+    plain, _ = probed(env)
+    out, seen = probed(env, diagnose=True)
+    assert DB_CFG["SQL_SERVER"] in seen and out["diagnostics"]["database"]["host"] == DB_CFG["SQL_SERVER"]
+    assert any("database host and port are reachable" in f for f in out["diagnostics"]["findings"])
+    assert without_diagnostics(out) == plain  # stages, ok and warnings are the same without diagnose
+
+
+def test_plant_with_every_route_on_the_web_service_does_not_probe_the_database(env):
+    with_db_settings(env)
+    out, seen = probed(env, diagnose=True)
+    assert DB_CFG["SQL_SERVER"] not in seen
+    assert "database" not in out["diagnostics"] and "database_skipped" not in out["diagnostics"]
+
+
+@pytest.mark.parametrize("check", ["auto", "true"])
+def test_standalone_attached_probes_the_database(env, check):
+    standalone(env, check=check, attached=True)
+    with_db_settings(env)
+    out, seen = probed(env, diagnose=True)
+    assert DB_CFG["SQL_SERVER"] in seen and out["diagnostics"]["database"]["connected"]
+
+
+@pytest.mark.parametrize("check,attached", [("false", True), ("auto", False)])
+def test_standalone_not_asked_or_not_attached_adds_no_database_key(env, check, attached):
+    standalone(env, check=check, attached=attached)
+    with_db_settings(env)
+    out, seen = probed(env, diagnose=True)
+    assert DB_CFG["SQL_SERVER"] not in seen
+    assert "database" not in out["diagnostics"] and "database_skipped" not in out["diagnostics"]
+
+
+def test_a_dry_run_says_why_the_database_was_not_probed(env):
+    database_everywhere(env)
+    with_db_settings(env)
+    out, seen = probed(env, diagnose=True, dry_run=True)
+    assert DB_CFG["SQL_SERVER"] not in seen and "database" not in out["diagnostics"]
+    assert out["diagnostics"]["database_skipped"] == health.DRY_RUN_DB_SKIP
+    standalone(env)
+    out, seen = probed(env, diagnose=True, dry_run=True)
+    assert out["diagnostics"]["database_skipped"] == health.DRY_RUN_DB_SKIP and DB_CFG["SQL_SERVER"] not in seen
+
+
+def test_an_unreadable_secret_says_why_the_database_was_not_probed(env):
+    from syteline import config as cfgmod, errors
+
+    database_everywhere(env)
+    seen = stub_probes(env)
+
+    def boom(skip_secret=False):
+        if skip_secret:
+            return {"SYTELINE_WSDL": "http://127.0.0.1:9/x?wsdl"}
+        raise errors.SecretStoreUnavailable("secret store unreachable")
+
+    env.setattr(cfgmod, "load_config", boom)
+    out = health.run_health({"action": "health", "diagnose": True})
+    assert out["diagnostics"]["database_skipped"] == health.SECRET_DB_SKIP and DB_CFG["SQL_SERVER"] not in seen

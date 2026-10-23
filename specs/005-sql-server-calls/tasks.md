@@ -192,6 +192,19 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 
 ---
 
+## Phase 14: Revision 2026-10-22 - database in the diagnostics (spec FR-019; research.md R27 to R30)
+
+**Goal**: `{"action": "health", "diagnose": true}` also probes the SQL Server host (name lookup, nameserver answer, TCP per address, database findings) exactly when the health check would run the database stages; no login, credential or data is sent, and `stages`/`ok` do not change.
+
+- [X] T068 In `src/syteline/diagnostics.py` add `database=False` to `run_diagnostics(cfg, timeout, env=None, database=False)`: when true and `cfg["SQL_SERVER"]` is set, add `d["database"] = probe_host(server, port, probe_timeout)` with `port = int(SQL_PORT or 1433)` (a non-numeric port gives `database_skipped`, never an exception) and `d["dns_raw"]["database"] = raw_probe(server, nameservers)` when a nameserver is known; when true and no `SQL_SERVER`, set `d["database_skipped"] = "the secret holds no SQL_SERVER"`; when false add no key at all. Update the module docstring: it uses the server name and port the health check already read from the secret and sends no credentials (R28).
+- [X] T069 In `src/syteline/diagnostics.py` add `database_findings(d)` (R29) and call it from `findings`: (a) name not resolved, using the nameserver's own answer (NXDOMAIN, SERVFAIL/REFUSED, no answer, answers correctly but the function's lookup fails); (b) name resolved but no address accepts a connection on the port while the AWS endpoint is reachable (route, security group on that port, SQL Server not listening or its firewall); (c) resolved and connected ("the database host and port are reachable: if db_login still fails, look at the login, the certificate or the encryption setting"). Entries name "the database"; the ERP entries are unchanged.
+- [X] T070 In `src/syteline/health.py` compute once `database_probe = not dry_run and (routes.uses_database() or (mode != "false" and cfgmod.attached()))` and pass `database=database_probe` at the normal `run_diagnostics` call; the secret-store-failure, missing-config and HTTPS-refused paths pass `database=False`, and set `database_skipped` ("the credentials secret could not be read") on the secret-store-failure result when the rule would otherwise have probed; the dry-run result sets `database_skipped` ("a dry run does not read the secret, which holds the database server name") when the rule, ignoring dry run, would have probed (R30). `stages`, `ok` and `warnings` must not change.
+- [X] T071 [P] In `tests/unit/test_diagnostics.py` (or the existing diagnostics test module) add cases with the module's `socket` fake: database not asked for adds no key and leaves the existing output identical; the probe reports lookup attempts, the nameserver answer and one connection per address (at most `MAX_ADDRESSES`); a non-numeric `SQL_PORT` and a missing `SQL_SERVER` give `database_skipped`; each of the three findings (a), (b), (c) appears for its scenario and the ERP findings are unchanged; nothing is sent besides DNS queries and TCP connects (no `pytds` import, no credential in the output).
+- [X] T072 In `tests/unit/test_health_database.py` add cases for when the probe runs: plant with a database route; plant with every route on the web service (no probe); stand-alone attached with `auto` and `true`; stand-alone not attached and `false` (no probe, no key); dry run and secret-store failure (`database_skipped` with the reason); in every case `stages` and `ok` equal the same call without `diagnose`.
+- [X] T073 [P] Update `docs/DATABASE.md`, `docs/TESTING.md` and any text in `docs/DEPLOYMENT.md` or `docs/STANDALONE.md` that says the diagnostics read no secret or cover only the ERP and the secret store: describe the database probe, when it runs and what it never sends (R28). Run the whole suite, `cfn-lint src/template.yaml src/template-standalone.yaml` and `sam validate --lint` for both templates; only the pre-existing failures (12 failures, 2 errors) may remain.
+
+---
+
 ## Dependencies and order
 
 - Phase 1 first (T001 to T004 touch different files and can run together). T005 and T006 need T002 and T004; T007 needs T006's interface; T008 needs T006 and T007; T009 needs T006 and T007.
@@ -207,6 +220,7 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 
 - Phase 12 (single settings file) after Phase 11: T058 then T059 (same file); T060 needs the variable-to-block split from research.md R20; T061 needs T060; T062 needs T058 and T059; T063 in parallel with T061 and T062; T064 last.
 - Phase 13 (message wording) after Phase 12: T065 then T066 (the tests need the new text); T067 in parallel with T066.
+- Phase 14 (database diagnostics) after Phase 13: T068 then T069 (same file); T070 needs T068's signature; T071 needs T068 and T069 and can run in parallel with T072 (different files, after T070); T073 in parallel with T071 and T072, the final run last.
 
 ## Parallel examples
 
@@ -225,3 +239,4 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 - **Revision (Phase 8)**: T033 to T039 make `SQL_CA_PEM` optional by adding the explicit, warned unencrypted option; the default stays encrypted and verified. Do it before the first run against the plant database, because that server offers no certificate the functions can verify.
 - **Revision (Phase 12)**: T058 to T064 merge the two settings files into one `deploy.env`. Do T058 to T060 first (script and example), then the tests, then the docs; no stack parameter, template or function code changes.
 - **Revision (Phase 13)**: T065 to T067 reword two `deploy.sh` messages; no template, parameter or function change.
+- **Revision (Phase 14)**: T068 to T073 add the database probe to the opt-in diagnostics. Do T068 to T070 first (diagnostics module, then the single decision in `health.py`), then the tests, then the docs; no template, stack parameter or new setting changes.

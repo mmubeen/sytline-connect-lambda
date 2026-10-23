@@ -131,3 +131,22 @@ A missing database key is not special-cased: `db_login` fails naming the keys, a
 **Test**: the deploy-script tests assert the new text (both `Check:` naming the ERP route, Secrets Manager and `docs/STANDALONE.md`; the notice naming the keys and "All other keys stay as they are"), and that a database password given in the settings file never appears in stdout or stderr.
 **Alternatives**: a pre-deploy network check or one combined summary (offered in the clarification, not chosen).
 
+## Revision 2026-10-22: database in the diagnostics (R27 to R30)
+
+## R27. Who decides, and what `run_diagnostics` receives
+**Decision**: `health.run_health` computes one boolean, `database_probe = not dry_run and (routes.uses_database() or (mode != "false" and cfgmod.attached()))` (the same expression that decides the database stages) and passes it as `run_diagnostics(cfg, timeout, env=None, database=False)`. `diagnostics.py` never imports routes or the stand-alone setting, so it stays free of mode logic. A false value adds no keys, so existing diagnostics output and tests are unchanged.
+**Rationale**: one decision, one place; the diagnosis can never probe a host the health check would not test (spec FR-019).
+**Alternatives**: let `diagnostics` call `routes`/`config` itself (duplicates the rule); probe whenever `SQL_SERVER` exists (rejected in the clarification).
+
+## R28. What is probed and reported
+**Decision**: when `database` is true and `cfg["SQL_SERVER"]` is set, `run_diagnostics` adds `d["database"] = probe_host(server, port, probe_timeout)` (same shape as `erp`: lookup attempts, `gethostbyname` on failure, up to `MAX_ADDRESSES` connections, `connected`), and `d["dns_raw"]["database"] = raw_probe(server, nameservers)` when a nameserver is known. The port is `SQL_PORT` (default 1433; a non-numeric value is reported as skipped, not raised). Nothing else is sent: no TLS handshake, no login, no credential, no query.
+**Skipped, with a reason** (key `d["database_skipped"]`): the health call was a dry run ("a dry run does not read the secret, which holds the database server name"); the secret could not be read ("the credentials secret could not be read"); the secret has no `SQL_SERVER` ("the secret holds no SQL_SERVER"). When `database` is false nothing is added (no note), as for the health stages.
+**Consequence to state**: the module's promise changes from "reads no secret" to "uses the server name and port the health check has already read from the secret; sends no credentials". Updated in the module docstring and the docs.
+
+## R29. Database findings
+**Decision**: a new `database_findings(d)` appended to `findings`, one entry per case: (a) name does not resolve, with the nameserver's own answer used as for the ERP (NXDOMAIN, SERVFAIL/REFUSED, no answer, answers correctly but the function's lookup fails); (b) name resolves but no address accepts a connection on the port while the AWS endpoint is reachable (route, security group on that port, SQL Server not listening or its firewall; the stand-alone version also: not attached, so no route to the plant); (c) name resolves and a connection succeeds ("the database host and port are reachable: if db_login still fails, the cause is the login, the certificate or the encryption setting; see that stage's error"). The ERP findings are unchanged and the database entries name "the database".
+**Alternatives**: reuse the ERP finding text with a different noun (rejected: the remedies differ, e.g. port 1433 and the SQL security group).
+
+## R30. Where the decision is passed
+**Decision**: the four `run_diagnostics` call sites in `health.py` pass `database=` as follows: the normal path passes `database_probe`; the secret-store-failure path, the missing-config path and the HTTPS-refused path pass `database=False` and the result carries no database note except the secret-store-failure case, which sets `database_skipped` itself ("the credentials secret could not be read") when `database_probe` would otherwise have been true. The dry-run path sets `database_skipped` with the dry-run reason when the rule (ignoring dry run) would have probed.
+

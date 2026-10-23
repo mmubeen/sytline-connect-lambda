@@ -102,6 +102,15 @@ def _database_stages(cfg, timeout, results):
     return ok
 
 
+DRY_RUN_DB_SKIP = "a dry run does not read the secret, which holds the database server name"
+SECRET_DB_SKIP = "the credentials secret could not be read"
+
+
+def _database_rule():
+    """Would the health check test the database? (Ignoring a dry run.) Also decides whether diagnostics probe it."""
+    return routes.uses_database() or (cfgmod.db_check_mode() != "false" and cfgmod.attached())
+
+
 def run_health(event, context=None):
     event = event if isinstance(event, dict) else {}
     diagnose = cfgmod.truthy(event.get("diagnose", False))
@@ -117,6 +126,8 @@ def run_health(event, context=None):
                "errors": [errors.error(errors.SECRET_STORE_UNREACHABLE, str(exc))]}
         if diagnose:
             out["diagnostics"] = diagnostics.run_diagnostics(cfgmod.load_config(skip_secret=True), timeout)
+            if _database_rule():
+                out["diagnostics"]["database_skipped"] = SECRET_DB_SKIP
         return out
     required = ("SYTELINE_WSDL",) if dry_run else ("SYTELINE_WSDL", "SYTELINE_USER", "SYTELINE_PASS")
     missing = [k for k in required if not cfg[k]]
@@ -234,5 +245,7 @@ def run_health(event, context=None):
     if warnings:
         out["warnings"] = warnings
     if diagnose:
-        out["diagnostics"] = diagnostics.run_diagnostics(cfg, timeout)
+        out["diagnostics"] = diagnostics.run_diagnostics(cfg, timeout, database=not dry_run and _database_rule())
+        if dry_run and _database_rule():
+            out["diagnostics"]["database_skipped"] = DRY_RUN_DB_SKIP
     return out
