@@ -82,7 +82,7 @@ def test_the_settings_of_the_old_shapes_are_gone(template):
     for name in REMOVED_PARAMETERS:
         assert name not in template["Parameters"], name
     assert set(template.get("Rules", {})) == {"IdpAllOrNothing"}
-    assert set(template["Conditions"]) == {"HasIdp", "IdpRegionGiven", "HasIdpEvents", "HasApi"}
+    assert set(template["Conditions"]) == {"HasIdp", "IdpRegionGiven", "HasIdpEvents", "HasApi", "HasIdpKeys"}
 
 
 # ---- US2: the one function carries every entry point ---------------------------------------------------------------------
@@ -209,6 +209,27 @@ def test_the_idp_permissions_include_the_lookup_function_of_the_idp_stack_and_on
     # the other IDP read permissions are still there
     actions = {a for s in statements for a in (s["Action"] if isinstance(s["Action"], list) else [s["Action"]])}
     assert {"cloudformation:DescribeStacks", "s3:GetObject", "dynamodb:GetItem"} <= actions
+
+
+KMS_A = "arn:aws-us-gov:kms:us-gov-east-1:108375521309:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+KMS_B = "arn:aws-us-gov:kms:us-gov-east-1:108375521309:key/aaaabbbb-12ab-34cd-56ef-1234567890ab"
+
+
+def test_the_kms_decrypt_permission_exists_only_for_the_keys_given_and_only_for_decrypt(template):
+    param = template["Parameters"]["IdpKmsKeyArns"]
+    assert param["Default"] == ""
+    pattern = re.compile(param["AllowedPattern"])
+    for good in ("", KMS_A, KMS_A + "," + KMS_B):
+        assert pattern.match(good), good
+    for bad in ("not-an-arn", KMS_A + ", " + KMS_B, KMS_A + ",", "arn:aws-us-gov:kms:us-gov-east-1:1:alias/x", KMS_A.replace("key/", "")):
+        assert not pattern.match(bad), bad
+    assert Evaluator(template, **NET).condition("HasIdpKeys") is False
+    assert Evaluator(template, IdpKmsKeyArns=KMS_A, **NET).condition("HasIdpKeys") is True
+    cond = [p for p in fn(template)["Policies"] if isinstance(p, dict) and "Fn::If" in p and p["Fn::If"][0] == "HasIdpKeys"]
+    assert len(cond) == 1 and cond[0]["Fn::If"][2] == {"Ref": "AWS::NoValue"}
+    statement = cond[0]["Fn::If"][1]["Statement"]
+    assert len(statement) == 1 and statement[0]["Effect"] == "Allow" and statement[0]["Action"] == "kms:Decrypt"
+    assert statement[0]["Resource"] == {"Fn::Split": [",", {"Ref": "IdpKmsKeyArns"}]}  # exactly the keys given, nothing broader
 
 
 def test_the_erp_secret_and_live_writes_settings_are_unchanged(template):

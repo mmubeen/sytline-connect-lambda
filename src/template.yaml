@@ -159,6 +159,14 @@ Parameters:
     Default: ""
     AllowedPattern: '^$|^[A-Za-z0-9_.-]{3,255}$'
     Description: The IDP stack's document tracking table (the functions may read it); required with IdpStackName.
+  IdpKmsKeyArns:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]+:key/[0-9a-fA-F-]+(,arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]+:key/[0-9a-fA-F-]+)*$'
+    Description: >-
+      Customer-managed KMS key ARN(s), comma-separated, that encrypt the IDP's output bucket and tracking table. When given, the
+      function may kms:Decrypt with exactly those keys (reading a document needs it). The key policy must also allow this
+      function's role, unless it delegates to IAM. Empty = no KMS permission.
   IdpStateMachineArn:
     Type: String
     Default: ""
@@ -196,6 +204,7 @@ Conditions:
   HasIdpEvents: !Not [!Equals [!Ref IdpStateMachineArn, ""]]
   # the private API (and its permission) exists only when an existing execute-api endpoint is supplied
   HasApi: !Not [!Equals [!Ref ApiVpcEndpointId, ""]]
+  HasIdpKeys: !Not [!Equals [!Ref IdpKmsKeyArns, ""]]
 
 Globals:
   Function:
@@ -391,6 +400,13 @@ Resources:
                 Resource: !Sub
                   - arn:${AWS::Partition}:dynamodb:${IdpRegionName}:${AWS::AccountId}:table/${IdpTrackingTableName}
                   - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
+          - !Ref AWS::NoValue
+        - !If
+          - HasIdpKeys
+          - Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Split [",", !Ref IdpKmsKeyArns]
           - !Ref AWS::NoValue
       Events:
         Sweep:

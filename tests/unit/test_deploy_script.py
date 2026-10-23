@@ -458,3 +458,22 @@ def test_the_api_endpoint_is_optional_and_without_it_no_api_is_requested(run):
     assert overrides(calls)["ApiVpcEndpointId"] == NET["API_VPCE_ID"] and "private API will be created" in p.stdout
     assert "NO API is created" not in p.stdout
 
+
+# ---- the IDP's KMS keys (IDP_KMS_KEY_ARNS) -----------------------------------------------------------------------------
+KMS_A = "arn:aws-us-gov:kms:us-gov-east-1:108375521309:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+KMS_B = "arn:aws-us-gov:kms:us-gov-east-1:108375521309:key/aaaabbbb-12ab-34cd-56ef-1234567890ab"
+
+
+def test_the_kms_keys_are_always_passed_and_empty_clears_an_earlier_value(run):
+    p, calls = run({**BASE, **NET})
+    assert p.returncode == 0 and overrides(calls)["IdpKmsKeyArns"] == ""
+    p, calls = run({**BASE, **NET, "IDP_KMS_KEY_ARNS": KMS_A + "," + KMS_B})
+    assert p.returncode == 0, p.stderr
+    assert overrides(calls)["IdpKmsKeyArns"] == KMS_A + "," + KMS_B
+
+
+@pytest.mark.parametrize("bad", ["not-an-arn", KMS_A + ", " + KMS_B, "arn:aws-us-gov:kms:us-gov-east-1:1:alias/x", KMS_A + ",x"])
+def test_a_malformed_kms_key_arn_is_refused_before_any_sam_call(run, bad):
+    p, calls = run({**BASE, **NET, "IDP_KMS_KEY_ARNS": bad})
+    assert p.returncode != 0 and "IDP_KMS_KEY_ARNS" in p.stderr and "is not a KMS key ARN" in p.stderr and "SAM" not in calls
+

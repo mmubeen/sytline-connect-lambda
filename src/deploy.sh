@@ -204,6 +204,14 @@ fi
 # IDP_STATE_MACHINE_ARN: when given, the IDP's finished-document events start the event intake (always passed: empty clears it)
 [[ -z "${IDP_STATE_MACHINE_ARN:-}" || "$IDP_STATE_MACHINE_ARN" =~ ^arn:aws[a-z-]*:states:[a-z0-9-]+:[0-9]+:stateMachine:[A-Za-z0-9_-]+$ ]] \
   || die "IDP_STATE_MACHINE_ARN is not a Step Functions state machine ARN (arn:...:states:REGION:ACCOUNT:stateMachine:NAME)"
+# IDP_KMS_KEY_ARNS: the customer-managed key(s) that encrypt the IDP's bucket and table (comma-separated; always passed)
+if [[ -n "${IDP_KMS_KEY_ARNS:-}" ]]; then
+  IFS=',' read -r -a kms_keys <<< "$IDP_KMS_KEY_ARNS"
+  for k in "${kms_keys[@]}"; do
+    [[ "$k" =~ ^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]+:key/[0-9a-fA-F-]+$ ]] \
+      || die "IDP_KMS_KEY_ARNS: '$k' is not a KMS key ARN (arn:...:kms:REGION:ACCOUNT:key/ID), comma-separated, no spaces"
+  done
+fi
 if [[ -n "${IDP_STATE_MACHINE_ARN:-}" && -z "${IDP_STACK_NAME:-}" ]]; then
   die "IDP_STATE_MACHINE_ARN needs IDP_STACK_NAME (and the other IDP settings): the event intake reads the document through the IDP SDK"
 fi
@@ -262,6 +270,7 @@ overrides=(
   "$(q IdpRegion "${IDP_REGION:-}")"
   "$(q IdpOutputBucketName "${IDP_OUTPUT_BUCKET:-}")"
   "$(q IdpTrackingTableName "${IDP_TRACKING_TABLE:-}")"
+  "$(q IdpKmsKeyArns "${IDP_KMS_KEY_ARNS:-}")"
   "$(q IdpStateMachineArn "${IDP_STATE_MACHINE_ARN:-}")"
 )
 

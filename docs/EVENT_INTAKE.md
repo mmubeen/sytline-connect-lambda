@@ -71,6 +71,8 @@ The response then carries `cause` (the exception type only, never its message) a
 
 `./invoke.sh --log <payload>` prints the log tail, which has the line `IDP client could not be created: <type>`.
 
+**`kms:Decrypt ... AccessDenied`** (for example `Failed to get metadata: ... GetObject ... kms:Decrypt on resource: arn:...:key/<id>`): the IDP's output bucket (and perhaps its tracking table) is encrypted with a customer-managed KMS key. Put the key ARN from the message into `IDP_KMS_KEY_ARNS` in `deploy.env` (several, comma-separated, no spaces) and redeploy: the function's role then gets `kms:Decrypt` on exactly those keys. The **key policy** must also allow the role (`sytline-connect-DirectFunctionRole-...`) unless it delegates to IAM; if it does not, the IDP's administrator has to add the role to the key policy.
+
 A failed read (`cause` `IDPProcessingError`, `ClientError`, ...) is explained by the log line `IDP read failed: <type>: <the SDK's message, shortened to 300 characters>`; the message is in the function's log only, never in the response. Typical messages: `AccessDeniedException ... <action> ... <resource>` (add that permission to the role, as `lambda:InvokeFunction` on the IDP stack's LookupFunction was added), `Results not found for document` (the document ID is not in the IDP tracking table), a timeout (no network path from the subnets to that service).
 
 ## Known limits
