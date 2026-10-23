@@ -46,10 +46,12 @@ Parameters:
       AWS services. This stack adds no rule to them. Required.
   ApiVpcEndpointId:
     Type: String
-    AllowedPattern: '^vpce-[0-9a-f]+$'
+    Default: ""
+    AllowedPattern: '^$|^vpce-[0-9a-f]+$'
     Description: >-
       Existing execute-api interface VPC endpoint (vpce-...) through which approved clients call the private API.
-      The stack never creates one. Required.
+      The stack never creates one. Optional: empty = no API at all (the function is then reached only by direct
+      invocation, the IDP event and its own schedule).
   UseFipsEndpoints:
     Type: String
     Default: "true"
@@ -192,6 +194,8 @@ Conditions:
   HasIdp: !Not [!Equals [!Ref IdpStackName, ""]]
   IdpRegionGiven: !Not [!Equals [!Ref IdpRegion, ""]]
   HasIdpEvents: !Not [!Equals [!Ref IdpStateMachineArn, ""]]
+  # the private API (and its permission) exists only when an existing execute-api endpoint is supplied
+  HasApi: !Not [!Equals [!Ref ApiVpcEndpointId, ""]]
 
 Globals:
   Function:
@@ -237,8 +241,11 @@ Resources:
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
 
+  # The private API in front of the function; created only when ApiVpcEndpointId is given. Its routes are defined here (not as
+  # Events of the function) because an Event cannot be conditional. Every route is proxied to the one function.
   OrderApi:
     Type: AWS::Serverless::Api
+    Condition: HasApi
     Properties:
       StageName: prod
       EndpointConfiguration:
@@ -250,6 +257,56 @@ Resources:
         ResourcePolicy:
           IntrinsicVpcWhitelist:
             - !Ref ApiVpcEndpointId
+      DefinitionBody:
+        swagger: "2.0"
+        info:
+          title: !Ref AWS::StackName
+          version: "1.0"
+        paths:
+          /confirmed-orders:
+            post:
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DirectFunction.Arn}/invocations
+                credentials: !Sub arn:${AWS::Partition}:iam::*:user/*   # the caller's own credentials invoke the function, as before
+          /upload-jobs/{id}:
+            get:
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DirectFunction.Arn}/invocations
+                credentials: !Sub arn:${AWS::Partition}:iam::*:user/*   # the caller's own credentials invoke the function, as before
+          /job-reservations:
+            post:
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DirectFunction.Arn}/invocations
+                credentials: !Sub arn:${AWS::Partition}:iam::*:user/*   # the caller's own credentials invoke the function, as before
+          /job-reservations/{id}/save:
+            post:
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DirectFunction.Arn}/invocations
+                credentials: !Sub arn:${AWS::Partition}:iam::*:user/*   # the caller's own credentials invoke the function, as before
+          /job-reservations/{id}:
+            get:
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DirectFunction.Arn}/invocations
+                credentials: !Sub arn:${AWS::Partition}:iam::*:user/*   # the caller's own credentials invoke the function, as before
+
+  OrderApiPermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DirectFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OrderApi}/*/*/*
 
   # THE function. The request decides what runs: an API route, an `action` (health, notes, document_event, the background
   # work_upload / work_save / sweep), or by default the IDP finished-document event. It is attached to the existing network and
@@ -330,36 +387,6 @@ Resources:
                   - IdpRegionName: !If [IdpRegionGiven, !Ref IdpRegion, !Ref "AWS::Region"]
           - !Ref AWS::NoValue
       Events:
-        CreateOrder:
-          Type: Api
-          Properties:
-            RestApiId: !Ref OrderApi
-            Path: /confirmed-orders
-            Method: post
-        GetUploadJob:
-          Type: Api
-          Properties:
-            RestApiId: !Ref OrderApi
-            Path: /upload-jobs/{id}
-            Method: get
-        Reserve:
-          Type: Api
-          Properties:
-            RestApiId: !Ref OrderApi
-            Path: /job-reservations
-            Method: post
-        SaveReservation:
-          Type: Api
-          Properties:
-            RestApiId: !Ref OrderApi
-            Path: /job-reservations/{id}/save
-            Method: post
-        GetReservation:
-          Type: Api
-          Properties:
-            RestApiId: !Ref OrderApi
-            Path: /job-reservations/{id}
-            Method: get
         Sweep:
           Type: Schedule
           Properties:
@@ -400,6 +427,7 @@ Outputs:
   FunctionArn:
     Value: !GetAtt DirectFunction.Arn
   ApiId:
+    Condition: HasApi
     Value: !Ref OrderApi
   JobsTableName:
     Value: !Ref JobsTable

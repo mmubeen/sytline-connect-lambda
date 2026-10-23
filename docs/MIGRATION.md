@@ -6,7 +6,7 @@ What does not change: the jobs table and every record in it (it is retained by t
 
 ## Before you start (everyone)
 
-1. Read [DEPLOYMENT.md](DEPLOYMENT.md) sections 1, 3 and 3a: the stack now **requires** `WORKER_VPC_ID`, `WORKER_SUBNET_IDS`, `WORKER_SG_IDS` and `API_VPCE_ID` and **creates nothing in the network**.
+1. Read [DEPLOYMENT.md](DEPLOYMENT.md) sections 1, 3 and 3a: the stack now **requires** `WORKER_VPC_ID`, `WORKER_SUBNET_IDS` and `WORKER_SG_IDS` (and `API_VPCE_ID` only if you want the private API; empty means no API) and **creates nothing in the network**.
 2. Take a copy of the table's state: note the item count (`aws dynamodb scan --table-name <JobsTableName> --select COUNT`); optionally an on-demand backup (`aws dynamodb create-backup`). The count must be the same after the move.
 3. Update `deploy.env` from the new `deploy.env.example`. Settings that no longer exist (`WORKER_ROUTE_TABLE_IDS`, `HOST_NETWORK_CIDR`, `PLANT_CIDR_*`, `DYNAMODB_PREFIX_LIST_ID`, `CREATE_VPC_ENDPOINTS`, `CREATE_API_ENDPOINT`, `ATTACH_*`, `ALLOW_PLAIN_HTTP`, `VERIFY_TLS`, `DATABASE_CHECK`) are ignored with a notice; delete them.
 4. Make sure the network gives the function what it needs ([DEPLOYMENT.md](DEPLOYMENT.md) section 3a). The old stack may have created Secrets Manager and DynamoDB endpoints for you; with an existing network they must exist already.

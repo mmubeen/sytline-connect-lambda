@@ -51,11 +51,24 @@ def test_the_network_is_supplied_not_created_and_is_required(template):
     params = template["Parameters"]
     for name, good, bad in (("WorkerVpcId", "vpc-0abc123", "subnet-1"),
                             ("WorkerSubnetIds", "subnet-a1,subnet-b2", "subnet-a1, subnet-b2"),
-                            ("WorkerSecurityGroupIds", "sg-1,sg-2", "sg-1;rm"),
-                            ("ApiVpcEndpointId", "vpce-0abc", "vpc-1")):
+                            ("WorkerSecurityGroupIds", "sg-1,sg-2", "sg-1;rm")):
         assert "Default" not in params[name], f"{name} must be required (no default)"
         pattern = re.compile(params[name]["AllowedPattern"])
         assert pattern.match(good) and not pattern.match(bad) and not pattern.match("")
+
+
+def test_the_api_endpoint_is_optional_and_no_endpoint_means_no_api(template):
+    param = template["Parameters"]["ApiVpcEndpointId"]
+    assert param["Default"] == ""
+    pattern = re.compile(param["AllowedPattern"])
+    assert pattern.match("") and pattern.match("vpce-0abc") and not pattern.match("vpc-1") and not pattern.match("vpce-")
+    assert Evaluator(template, **{**NET, "ApiVpcEndpointId": ""}).condition("HasApi") is False
+    assert Evaluator(template, **NET).condition("HasApi") is True
+    for name in ("OrderApi", "OrderApiPermission"):
+        assert template["Resources"][name]["Condition"] == "HasApi", name
+    assert template["Outputs"]["ApiId"]["Condition"] == "HasApi"
+    text = repr(template["Resources"]["DirectFunction"])
+    assert "OrderApi" not in text  # the function never refers to the API, so it exists with or without it
 
 
 def test_the_function_is_attached_to_the_supplied_subnets_and_groups(template):
@@ -69,23 +82,32 @@ def test_the_settings_of_the_old_shapes_are_gone(template):
     for name in REMOVED_PARAMETERS:
         assert name not in template["Parameters"], name
     assert set(template.get("Rules", {})) == {"IdpAllOrNothing"}
-    assert set(template["Conditions"]) == {"HasIdp", "IdpRegionGiven", "HasIdpEvents"}
+    assert set(template["Conditions"]) == {"HasIdp", "IdpRegionGiven", "HasIdpEvents", "HasApi"}
 
 
 # ---- US2: the one function carries every entry point ---------------------------------------------------------------------
-def test_the_five_api_routes_and_the_cleanup_schedule_are_on_the_one_function(template):
+def test_the_five_api_routes_proxy_to_the_one_function_and_only_the_schedule_is_an_event(template):
     events = fn(template)["Events"]
-    routes = {(e["Properties"]["Path"], e["Properties"]["Method"]) for e in events.values() if e["Type"] == "Api"}
-    assert routes == {("/confirmed-orders", "post"), ("/upload-jobs/{id}", "get"), ("/job-reservations", "post"),
-                      ("/job-reservations/{id}/save", "post"), ("/job-reservations/{id}", "get")}
-    assert all(e["Properties"]["RestApiId"] == {"Ref": "OrderApi"} for e in events.values() if e["Type"] == "Api")
-    schedule = [e for e in events.values() if e["Type"] == "Schedule"]
-    assert len(schedule) == 1 and schedule[0]["Properties"]["Schedule"] == "rate(5 minutes)"
-    assert schedule[0]["Properties"]["Input"] == '{"action":"sweep"}'
+    assert [e["Type"] for e in events.values()] == ["Schedule"]  # events cannot be conditional: the API holds its own routes
+    schedule = next(iter(events.values()))["Properties"]
+    assert schedule["Schedule"] == "rate(5 minutes)" and schedule["Input"] == '{"action":"sweep"}'
+    paths = template["Resources"]["OrderApi"]["Properties"]["DefinitionBody"]["paths"]
+    assert {(path, method) for path, methods in paths.items() for method in methods} == {
+        ("/confirmed-orders", "post"), ("/upload-jobs/{id}", "get"), ("/job-reservations", "post"),
+        ("/job-reservations/{id}/save", "post"), ("/job-reservations/{id}", "get")}
+    for methods in paths.values():
+        for op in methods.values():
+            integration = op["x-amazon-apigateway-integration"]
+            assert integration["type"] == "aws_proxy" and integration["httpMethod"] == "POST"
+            assert "${DirectFunction.Arn}/invocations" in integration["uri"]["Fn::Sub"]
+            assert integration["credentials"]["Fn::Sub"].endswith(":iam::*:user/*")  # the caller's own credentials
+    perm = template["Resources"]["OrderApiPermission"]["Properties"]
+    assert perm["Principal"] == "apigateway.amazonaws.com" and perm["FunctionName"] == {"Ref": "DirectFunction"}
 
 
 def test_the_private_api_uses_the_existing_endpoint_and_iam_auth(template):
     api = template["Resources"]["OrderApi"]["Properties"]
+    assert template["Resources"]["OrderApi"]["Condition"] == "HasApi"
     assert api["EndpointConfiguration"] == {"Type": "PRIVATE", "VPCEndpointIds": [{"Ref": "ApiVpcEndpointId"}]}
     assert api["Auth"]["DefaultAuthorizer"] == "AWS_IAM"
     assert api["Auth"]["ResourcePolicy"]["IntrinsicVpcWhitelist"] == [{"Ref": "ApiVpcEndpointId"}]

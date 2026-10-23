@@ -18,7 +18,7 @@ to a VPC, subnets and security group(s) that already exist. The network and ERP 
 | Resource | Purpose |
 |---|---|
 | `DirectFunction` (`<stack>-fn`, in your VPC, timeout 300 s, no reserved concurrency, no automatic retries of asynchronous invokes) | **the one function**: the request decides what runs (see below) |
-| `OrderApi` (private REST API, stage `prod`) | `POST /confirmed-orders`, `GET /upload-jobs/{id}`, `POST /job-reservations`, `POST /job-reservations/{id}/save`, `GET /job-reservations/{id}`; IAM auth; callable only through your existing `execute-api` VPC endpoint |
+| `OrderApi` (private REST API, stage `prod`; **only if `API_VPCE_ID` is set**) | `POST /confirmed-orders`, `GET /upload-jobs/{id}`, `POST /job-reservations`, `POST /job-reservations/{id}/save`, `GET /job-reservations/{id}`; IAM auth; callable only through your existing `execute-api` VPC endpoint; every route goes to the one function |
 | Schedule (every 5 minutes) | starts the cleanup action on the same function |
 | Document event rule (**only if `IDP_STATE_MACHINE_ARN` is set**) | starts the same function from the IDP's finished-document event |
 | `DepsLayer` (`sytline-connect-deps`) | zeep, lxml, requests, urllib3 and the rest, built for Linux x86_64 / Python 3.13 |
@@ -51,7 +51,7 @@ ERP writes stay one at a time: background uploads and saves take a lease lock ke
    ```
    Note the ARN it prints (`arn:aws-us-gov:secretsmanager:us-gov-east-1:...`). The database login can be merged into it by `deploy.sh` ([DATABASE.md](DATABASE.md)).
 2. **The network** (section 3a): a VPC, subnets and security group(s), made and owned by the network team.
-3. **The API client path.** An `execute-api` **interface VPC endpoint** in the VPC the approved callers use; note its ID (`vpce-...`). The stack restricts the API to it and never creates it.
+3. **The API client path (optional).** If you want the private API: an `execute-api` **interface VPC endpoint** in the VPC the approved callers use; note its ID (`vpce-...`). The stack restricts the API to it and never creates it. Without one, set no `API_VPCE_ID` and there is no API.
 
 ## 3. Configure
 
@@ -73,7 +73,7 @@ cp deploy.env.example deploy.env
 | `WORKER_VPC_ID` | `WorkerVpcId` | **required**: the existing VPC (`vpc-...`) |
 | `WORKER_SUBNET_IDS` | `WorkerSubnetIds` | **required**: existing subnets of that VPC, comma-separated, no spaces (one is allowed but is not highly available; two in different Availability Zones recommended) |
 | `WORKER_SG_IDS` | `WorkerSecurityGroupIds` | **required**: existing security groups, comma-separated |
-| `API_VPCE_ID` | `ApiVpcEndpointId` | **required**: the existing `execute-api` interface endpoint (`vpce-...`) |
+| `API_VPCE_ID` | `ApiVpcEndpointId` | **optional**: the existing `execute-api` interface endpoint (`vpce-...`) the private API is reachable through. **Empty = no API is created** (the function is then reached by direct invocation, the IDP event and its own schedule only). Always passed, so emptying it later removes the API |
 | `IDP_STATE_MACHINE_ARN` | `IdpStateMachineArn` | optional: the IDP state machine whose `SUCCEEDED` events start the event intake (same account and region; needs the IDP settings); empty = nothing starts automatically. See [EVENT_INTAKE.md](EVENT_INTAKE.md) |
 | `LIVE_WRITES`, `LIVE_APPROVAL_REF` | `LiveWrites` | leave `false`; see section 7 |
 | route, database, IDP and tuning settings | various | optional; see [DATABASE.md](DATABASE.md), [RESERVATIONS.md](RESERVATIONS.md) |
@@ -90,7 +90,7 @@ The deployment only **attaches** the function to the network you give it. That n
 | outbound **TCP 1433** to the SQL Server (and a route to it) | the database calls ([DATABASE.md](DATABASE.md)), only when an operation uses the database |
 | a private path to **Secrets Manager** and **DynamoDB** (VPC endpoints with private DNS, or a NAT route) and outbound HTTPS from the security group | the credentials and the jobs table |
 | a private path to **S3 and CloudFormation** (and the IDP's tracking table) | reading documents through the IDP SDK, when the IDP is configured |
-| the `execute-api` interface endpoint (`API_VPCE_ID`) | callers reach the private API through it |
+| the `execute-api` interface endpoint (`API_VPCE_ID`), only if you want the API | callers reach the private API through it |
 
 This deployment adds **no rule** to your security groups and changes nothing in your network. If a path is missing, the health check names the stage that fails (`dns`, `tcp`, `wsdl`, `token`, `db_*`) and `"diagnose": true` explains why (section 5).
 
@@ -124,7 +124,7 @@ aws cloudformation describe-stacks --region us-gov-east-1 --stack-name sytline-c
    Expected stages: `load`, `dns`, `tcp`, `wsdl`. A failing stage names where connectivity breaks (DNS, routing, security group, VPN).
    **To find out why a stage fails, add `"diagnose": true`** to the payload (`'{"action":"health","dry_run":true,"diagnose":true}'`): the result then carries a separate `diagnostics` section (resolver settings, the ERP name lookup with retries, a connection test to each ERP address, the same for the function's regional AWS endpoint, and plain-language `findings`). It contacts only the ERP host and that AWS endpoint (and the database host when the health check tests the database: see [DATABASE.md](DATABASE.md)) and sends no data or credentials; the stages are unchanged.
 2. **Full health check** (logs in with the secret): same call with `'{"action":"health"}'`; expected stages `dns`, `tcp`, `wsdl`, `token`.
-3. **API from an approved client** (inside the VPC that has the `execute-api` endpoint, with IAM credentials):
+3. **API from an approved client** (only when `API_VPCE_ID` is set; inside the VPC that has the `execute-api` endpoint, with IAM credentials):
    ```
    awscurl --service execute-api --region us-gov-east-1 -X POST \
        -H 'Content-Type: application/json' -d @order.json \

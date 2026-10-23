@@ -126,7 +126,7 @@ json.dump(new, open(sys.argv[1], "w"))
 # =========================================================================================
 # --- always required ---------------------------------------------------------------------
 missing=()
-for v in SYTELINE_WSDL SYTELINE_USER SYTELINE_SECRET_ARN WORKER_VPC_ID WORKER_SUBNET_IDS WORKER_SG_IDS API_VPCE_ID; do
+for v in SYTELINE_WSDL SYTELINE_USER SYTELINE_SECRET_ARN WORKER_VPC_ID WORKER_SUBNET_IDS WORKER_SG_IDS; do
   [[ -n "${!v:-}" ]] || missing+=("$v")
 done
 if (( ${#missing[@]} )); then die "missing in $env_file: ${missing[*]}"; fi
@@ -135,7 +135,13 @@ if (( ${#missing[@]} )); then die "missing in $env_file: ${missing[*]}"; fi
 [[ "$WORKER_VPC_ID" =~ ^vpc-[0-9a-f]+$ ]] || die "WORKER_VPC_ID must look like vpc-0123abcd"
 [[ "$WORKER_SUBNET_IDS" =~ ^subnet-[0-9a-f]+(,subnet-[0-9a-f]+)*$ ]] || die "WORKER_SUBNET_IDS must be comma-separated subnet-... ids, no spaces"
 [[ "$WORKER_SG_IDS" =~ ^sg-[0-9a-f]+(,sg-[0-9a-f]+)*$ ]] || die "WORKER_SG_IDS must be comma-separated sg-... ids, no spaces"
-[[ "$API_VPCE_ID" =~ ^vpce-[0-9a-f]+$ ]] || die "API_VPCE_ID must look like vpce-0123abcd (an existing execute-api interface endpoint)"
+# the private API is optional: with an existing execute-api interface endpoint it is created, without one there is no API
+if [[ -n "${API_VPCE_ID:-}" ]]; then
+  [[ "$API_VPCE_ID" =~ ^vpce-[0-9a-f]+$ ]] || die "API_VPCE_ID must look like vpce-0123abcd (an existing execute-api interface endpoint)"
+  echo "API: the private API will be created and made reachable through endpoint $API_VPCE_ID."
+else
+  echo "API: API_VPCE_ID is empty, so NO API is created; the function is reached by direct invocation, the IDP event and its own schedule only."
+fi
 if [[ "$WORKER_SUBNET_IDS" != *,* ]]; then
   echo "WARNING: only one subnet is given (WORKER_SUBNET_IDS): the function is not highly available. Use subnets in two Availability Zones."
 fi
@@ -234,7 +240,7 @@ overrides=(
   "$(q WorkerVpcId "$WORKER_VPC_ID")"
   "$(q WorkerSubnetIds "$WORKER_SUBNET_IDS")"
   "$(q WorkerSecurityGroupIds "$WORKER_SG_IDS")"
-  "$(q ApiVpcEndpointId "$API_VPCE_ID")"
+  "$(q ApiVpcEndpointId "${API_VPCE_ID:-}")"   # always passed: empty = no API (and clears an earlier endpoint)
   # always passed (empty clears a value an earlier deployment set: sam keeps old values for parameters it is not given)
   # which route each ERP operation uses: an IDO name = the web service, `database` = the SyteLine database (always passed)
   "$(q NextCoIdo "${NEXT_CO_IDO:-database}")"

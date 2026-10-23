@@ -83,3 +83,10 @@
 - **MVP**: Phases 1 to 4 (T001 to T012): the single entry point and the lock, usable and testable while the eight-function template still exists.
 - **Then** US1 (T013 to T018) flips the deployment to the one function and the existing network; this is the breaking step, so do it only once the suite is green.
 - Nothing here deploys anything: the migration of a real stack follows `docs/MIGRATION.md` (T019) and is done by the deployer; it needs the network team for a stack that created its own VPC.
+
+## Phase 8: Revision 2026-10-23 - the API is optional (spec FR-005; research.md R5)
+
+- [X] T021 In `src/template.yaml` make `ApiVpcEndpointId` optional (default empty, pattern `^$|^vpce-[0-9a-f]+$`), add the condition `HasApi`, give `OrderApi` and a new `OrderApiPermission` (principal `apigateway.amazonaws.com`, source `.../${OrderApi}/*/*/*`) `Condition: HasApi`, move the five routes from the function's `Api` events into `OrderApi`'s `DefinitionBody` as `aws_proxy` integrations (with caller credentials), keep only the schedule as an event, make the `ApiId` output conditional; verify by translating before and after that the paths, security, resource policy and integrations are unchanged.
+- [X] T022 In `src/deploy.sh` and `src/deploy.env.example` make `API_VPCE_ID` optional: not in the required list, validated only when given, a message either way, `ApiVpcEndpointId` always passed (empty clears).
+- [X] T023 Update `tests/unit/test_template_single.py` and `tests/unit/test_deploy_script.py` (optional endpoint, conditional API and permission, routes in the definition body, only the schedule is an event, `ApiVpcEndpointId` passed empty), and the docs and spec files that called the endpoint required.
+

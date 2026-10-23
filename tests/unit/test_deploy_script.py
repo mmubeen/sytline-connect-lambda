@@ -380,7 +380,7 @@ def test_the_state_machine_arn_needs_the_idp_settings(run):
 
 
 # ---- one deployment, an existing network (specs/007) -----------------------------------------------------------------
-@pytest.mark.parametrize("missing", ["WORKER_VPC_ID", "WORKER_SUBNET_IDS", "WORKER_SG_IDS", "API_VPCE_ID"])
+@pytest.mark.parametrize("missing", ["WORKER_VPC_ID", "WORKER_SUBNET_IDS", "WORKER_SG_IDS"])
 def test_each_network_setting_is_required_and_a_missing_one_stops_before_any_sam_call(run, missing):
     settings = {**BASE, **{k: v for k, v in NET.items() if k != missing}}
     p, calls = run(settings)
@@ -446,4 +446,15 @@ def test_the_notice_about_functions_of_the_earlier_shape_appears_only_when_they_
     assert "earlier shape" not in p.stdout
     p, _ = run({**BASE, **NET}, with_aws=False)
     assert p.returncode == 0 and "earlier shape" not in p.stdout
+
+
+def test_the_api_endpoint_is_optional_and_without_it_no_api_is_requested(run):
+    settings = {**BASE, **{k: v for k, v in NET.items() if k != "API_VPCE_ID"}}
+    p, calls = run(settings)
+    assert p.returncode == 0, p.stderr
+    assert overrides(calls)["ApiVpcEndpointId"] == ""  # always passed: empty = no API, and it clears an earlier endpoint
+    assert "NO API is created" in p.stdout and "private API will be created" not in p.stdout
+    p, calls = run({**BASE, **NET})
+    assert overrides(calls)["ApiVpcEndpointId"] == NET["API_VPCE_ID"] and "private API will be created" in p.stdout
+    assert "NO API is created" not in p.stdout
 

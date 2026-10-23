@@ -73,7 +73,7 @@ the default credential chain).
 - **Build:** `src/Makefile` (selected by `Metadata: BuildMethod: makefile`) installs the dependencies as
   Linux x86_64 / CPython 3.13 wheels into the `sytline-connect-deps` layer and copies the code into each function.
 - **Network:** the deployment creates **no** network resource. Give it an existing VPC, subnets (two Availability Zones recommended) and
-  security group(s) plus an existing `execute-api` endpoint (`WORKER_VPC_ID`, `WORKER_SUBNET_IDS`, `WORKER_SG_IDS`, `API_VPCE_ID`, all required). The
+  security group(s) (`WORKER_VPC_ID`, `WORKER_SUBNET_IDS`, `WORKER_SG_IDS`, all required). The private API is **optional**: set `API_VPCE_ID` to an existing `execute-api` interface endpoint to create it, leave it empty for no API at all (direct invocation, the IDP event and the schedule only). The
   network must provide a route to the ERP and the database and a private path to Secrets Manager, DynamoDB and the IDP; see
   [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) section 3a. Coming from an earlier shape: [`docs/MIGRATION.md`](docs/MIGRATION.md).
 - **Parameters:** site-specific values (web-service WSDL and user, secret ARN, the four network values) come from `deploy.env`; `deploy.sh` refuses to run if any is missing or malformed.

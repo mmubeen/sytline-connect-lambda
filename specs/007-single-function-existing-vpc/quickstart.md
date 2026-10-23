@@ -4,7 +4,7 @@
 `PYENV_VERSION=3.12 pytest tests/unit/test_template_single.py`: exactly one function, no `AWS::EC2::*` resource, five routes and the schedule on it, three required network parameters plus the API endpoint, table retained. `cfn-lint src/template.yaml` and `sam validate --lint` are clean.
 
 ## 2. Settings
-Copy `src/deploy.env.example` to `src/deploy.env`; fill the ERP settings, `WORKER_VPC_ID`, `WORKER_SUBNET_IDS`, `WORKER_SG_IDS`, `API_VPCE_ID`. `./deploy.sh --validate` passes; with one of the four missing or malformed it stops before building and names it.
+Copy `src/deploy.env.example` to `src/deploy.env`; fill the ERP settings, `WORKER_VPC_ID`, `WORKER_SUBNET_IDS`, `WORKER_SG_IDS`, and `API_VPCE_ID` only if you want the API (empty = no API). `./deploy.sh --validate` passes; with one of the three network values missing or malformed it stops before building and names it.
 
 ## 3. Deploy and check
 `./deploy.sh`; the change set creates one function and no network resource. `aws cloudformation list-stack-resources --stack-name sytline-connect` shows one `AWS::Lambda::Function`, no `AWS::EC2::*`.
