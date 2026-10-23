@@ -237,3 +237,20 @@ def test_a_non_import_error_has_no_module_field(monkeypatch):
     with pytest.raises(IntegrationError) as ei:
         idp.read_document(DOC)
     assert "module" not in ei.value.extra
+
+
+def test_the_log_gets_the_sdk_message_shortened_but_the_response_never_does(fake, caplog):
+    import logging
+
+    class IDPProcessingError(Exception):
+        pass
+
+    fake.add(DOC, po_fields())
+    fake.raise_for[DOC] = IDPProcessingError("Error querying document status for X:\n  AccessDenied " + "y" * 600)
+    caplog.set_level(logging.WARNING)
+    with pytest.raises(IntegrationError) as ei:
+        idp.read_document(DOC)
+    line = next(r.getMessage() for r in caplog.records if "IDP read failed" in r.getMessage())
+    assert line.startswith("IDP read failed: IDPProcessingError: Error querying document status for X: AccessDenied")
+    assert len(line) < len("IDP read failed: IDPProcessingError: ") + 301 and "\n" not in line
+    assert ei.value.extra == {"cause": "IDPProcessingError"} and "AccessDenied" not in repr(ei.value.extra)

@@ -80,7 +80,9 @@ def _idp_errors(document_id):
     except Exception as exc:
         if type(exc).__name__ == "IDPResourceNotFoundError":
             raise _refuse(errors.DOCUMENT_NOT_FOUND, f"no such document in IDP: {document_id}") from None
-        log.warning("IDP read failed: %s", type(exc).__name__)
+        # the function's own log (not the response) gets the SDK's message, shortened: it is how a denied permission or a
+        # missing record is told apart; it carries no credentials
+        log.warning("IDP read failed: %s: %s", type(exc).__name__, " ".join(str(exc).split())[:300])
         raise _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be read", cause=type(exc).__name__) from None
 
 

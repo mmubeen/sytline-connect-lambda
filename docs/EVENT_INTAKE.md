@@ -71,6 +71,8 @@ The response then carries `cause` (the exception type only, never its message) a
 
 `./invoke.sh --log <payload>` prints the log tail, which has the line `IDP client could not be created: <type>`.
 
+A failed read (`cause` `IDPProcessingError`, `ClientError`, ...) is explained by the log line `IDP read failed: <type>: <the SDK's message, shortened to 300 characters>`; the message is in the function's log only, never in the response. Typical messages: `AccessDeniedException ... <action> ... <resource>` (add that permission to the role, as `lambda:InvokeFunction` on the IDP stack's LookupFunction was added), `Results not found for document` (the document ID is not in the IDP tracking table), a timeout (no network path from the subnets to that service).
+
 ## Known limits
 
 - A reservation made **before** this feature has no document marker, so an event for that document is not recognised as already handled. An event and a request that start for the same document at the very same moment can both reserve (the request path has no claim).
