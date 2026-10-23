@@ -98,7 +98,7 @@ update_secret() {
   local arn="${SYTELINE_SECRET_ARN:-}" region
   [[ "$arn" =~ ^arn:aws[a-z-]*:secretsmanager:([a-z0-9-]+): ]] || die "SYTELINE_SECRET_ARN is not a Secrets Manager ARN"
   region="${BASH_REMATCH[1]}"
-  echo "The database settings in $env_file will be MERGED into the credentials secret (keys: ${keys[*]}); its other keys are kept. Values are never printed."
+  echo "Will add or update these keys in the credentials secret: ${keys[*]}. All other keys stay as they are, and values are never printed."
   if [[ "$assume_yes" != "true" ]]; then
     if [[ -t 0 ]]; then
       local answer; read -r -p "Write them to the secret now? [y/N] " answer
@@ -218,7 +218,7 @@ if [[ "$standalone" == "true" ]]; then
   fi
   if [[ "$attached" == "true" ]]; then
     echo "Deploying the STAND-ALONE version ATTACHED to existing VPC $ATTACH_VPC_ID (stack sytline-connect-standalone). No network resources are created."
-    echo "Reminder: this network must give the functions a route to the ERP and a private path to Secrets Manager (an endpoint or a NAT route)."
+    echo "Check: the subnets need a route to the ERP and a way to reach Secrets Manager (VPC endpoint or NAT). The stack does not create either. See docs/STANDALONE.md."
   else
     echo "Deploying the STAND-ALONE version (no VPC): stack sytline-connect-standalone. No network resources are created."
   fi

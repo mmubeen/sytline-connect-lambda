@@ -124,3 +124,10 @@ A missing database key is not special-cased: `db_login` fails naming the keys, a
 **Decision**: today `--standalone` stops with "not applicable to the stand-alone version" when a plant network setting (`WORKER_*`, `HOST_NETWORK_CIDR`, `PLANT_CIDR_*`, `DYNAMODB_PREFIX_LIST_ID`, `API_VPCE_ID`, `CREATE_API_ENDPOINT`, `CREATE_VPC_ENDPOINTS`) is set. With one shared file those values are normal, so the refusal is removed: the settings are not passed to CloudFormation and one line names them ("ignored by the stand-alone version: ..."). Consistent with R22 and with the plant branch's existing "ignored" warning for create-mode settings.
 **Consequence**: two tests that expect the refusal (`test_deploy_script.py`, "not applicable") change to expect the notice and no pass-through.
 
+## Revision 2026-10-22: deploy message wording (R26)
+
+## R26. Two messages reworded, nothing else
+**Decision**: in `src/deploy.sh` the attached stand-alone line becomes `Check: the subnets need a route to the ERP and a way to reach Secrets Manager (VPC endpoint or NAT). The stack does not create either. See docs/STANDALONE.md.` and the line in `update_secret` becomes `Will add or update these keys in the credentials secret: <keys>. All other keys stay as they are, and values are never printed.` Both keep their place, their trigger (attached deploy; database values present) and the existing confirmation question and `--yes`; no value is ever interpolated except key names.
+**Test**: the deploy-script tests assert the new text (both `Check:` naming the ERP route, Secrets Manager and `docs/STANDALONE.md`; the notice naming the keys and "All other keys stay as they are"), and that a database password given in the settings file never appears in stdout or stderr.
+**Alternatives**: a pre-deploy network check or one combined summary (offered in the clarification, not chosen).
+

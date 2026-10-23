@@ -670,3 +670,30 @@ def test_build_and_validate_modes_never_touch_the_secret(run):
     for flag in ("--build", "--validate"):
         p, calls = run({**BASE, **CREATE, **DB}, args=[flag, "--yes"])
         assert not any(c in calls for c in SECRET_CALLS), flag
+
+
+# ---- wording of the two deploy messages (spec FR-018) -----------------------------------------------------------------
+def test_the_attached_standalone_run_prints_the_network_check_once(run):
+    p, calls = sa(run, ATTACH)
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.count("Check: the subnets need a route to the ERP") == 1
+    line = next(l for l in p.stdout.splitlines() if l.startswith("Check:"))
+    for part in ("Secrets Manager", "VPC endpoint or NAT", "does not create either", "docs/STANDALONE.md"):
+        assert part in line
+    assert "Reminder" not in p.stdout
+
+
+def test_an_unattached_standalone_run_does_not_print_the_network_check(run):
+    p, _ = sa(run)
+    assert p.returncode == 0 and "Check: the subnets" not in p.stdout
+
+
+def test_the_merge_notice_names_the_keys_and_never_a_value(run):
+    p, calls = sa(run, {**ATTACH, **DB}, args=["--yes"])
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert ("Will add or update these keys in the credentials secret: SQL_SERVER SQL_DATABASE SQL_USER SQL_PASS SQL_PORT."
+            in p.stdout)
+    assert "All other keys stay as they are, and values are never printed." in p.stdout
+    assert "MERGED" not in p.stdout
+    for value in DB.values():
+        assert value not in p.stdout + p.stderr

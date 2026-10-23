@@ -16,6 +16,8 @@ Add the PO OCR demo's three database calls to the VPC deployment, each used **on
 
 **Revision 2026-10-22 (single settings file):** both deployment modes read one `deploy.env` with one `deploy.env.example`; shared settings appear once, mode-specific settings sit in marked blocks, and `deploy.standalone.env` is retired (research.md R20 to R23, FR-017).
 
+**Revision 2026-10-22 (deploy message wording):** the attached-network reminder and the secret-merge notice printed by `deploy.sh` are reworded (research.md R26, FR-018); wording only.
+
 ## Technical Context
 
 **Language/Version**: Python 3.13 (Lambda; existing code), SAM/CloudFormation YAML

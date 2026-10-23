@@ -182,6 +182,16 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 
 ---
 
+## Phase 13: Revision 2026-10-22 - deploy message wording (spec FR-018; research.md R26)
+
+**Goal**: the attached-network reminder and the secret-merge notice printed by `deploy.sh` say what the clarification specifies. Wording only: triggers, confirmation and `--yes` are unchanged.
+
+- [X] T065 In `src/deploy.sh` replace the line printed when the stand-alone deployment is attached (now "Reminder: this network must give the functions a route to the ERP and a private path to Secrets Manager (an endpoint or a NAT route).") with "Check: the subnets need a route to the ERP and a way to reach Secrets Manager (VPC endpoint or NAT). The stack does not create either. See docs/STANDALONE.md." and the first `echo` of `update_secret` (now "The database settings in $env_file will be MERGED ...") with "Will add or update these keys in the credentials secret: ${keys[*]}. All other keys stay as they are, and values are never printed." Print key names only, never values.
+- [X] T066 In `tests/unit/test_deploy_script.py` add tests: the attached stand-alone run prints the "Check:" line exactly once, before the first `SAM` call, naming the ERP route, Secrets Manager, "VPC endpoint or NAT", "does not create either" and `docs/STANDALONE.md`, and an unattached run does not print it; with database values set and `--yes` the output contains "Will add or update these keys in the credentials secret: SQL_SERVER SQL_DATABASE SQL_USER SQL_PASS SQL_PORT" and "All other keys stay as they are", and neither stdout nor stderr contains the password or login values.
+- [X] T067 [P] Update any text in `docs/STANDALONE.md`, `docs/DATABASE.md` and `docs/DEPLOYMENT.md` that quotes the old wording of either message (search for "Reminder" and "MERGED"); run the whole suite and `./deploy.sh --validate` / `--standalone --validate`; only the pre-existing failures (12 failures, 2 errors) may remain.
+
+---
+
 ## Dependencies and order
 
 - Phase 1 first (T001 to T004 touch different files and can run together). T005 and T006 need T002 and T004; T007 needs T006's interface; T008 needs T006 and T007; T009 needs T006 and T007.
@@ -196,6 +206,7 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 - Phase 8 (revision) after Phases 1-7: T033 first (config); T034 needs T033; T035 needs T034 and the existing `FakeSqlServer`; T036 needs T034 (`SqlServer.encrypted`); T037 needs only the setting name from T033 and can run in parallel with T034 to T036; T038 after T034 to T037; T039 last.
 
 - Phase 12 (single settings file) after Phase 11: T058 then T059 (same file); T060 needs the variable-to-block split from research.md R20; T061 needs T060; T062 needs T058 and T059; T063 in parallel with T061 and T062; T064 last.
+- Phase 13 (message wording) after Phase 12: T065 then T066 (the tests need the new text); T067 in parallel with T066.
 
 ## Parallel examples
 
@@ -213,3 +224,4 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 - **Revision (Phases 9 and 10)**: T040 to T046 add the optional stand-alone database check (done); T047 to T052 make it automatic when the function is attached (`DatabaseCheck=auto`, the new default). Do T047 to T049 first (config, health, template), then the script and docs in parallel.
 - **Revision (Phase 8)**: T033 to T039 make `SQL_CA_PEM` optional by adding the explicit, warned unencrypted option; the default stays encrypted and verified. Do it before the first run against the plant database, because that server offers no certificate the functions can verify.
 - **Revision (Phase 12)**: T058 to T064 merge the two settings files into one `deploy.env`. Do T058 to T060 first (script and example), then the tests, then the docs; no stack parameter, template or function code changes.
+- **Revision (Phase 13)**: T065 to T067 reword two `deploy.sh` messages; no template, parameter or function change.

@@ -55,3 +55,9 @@ Verify the `LongList` / `Infobar` types, the routine signatures and the `custadd
 2. `./deploy.sh --validate` and `./deploy.sh --standalone --validate` both succeed from that one file.
 3. With a leftover `src/deploy.standalone.env`, `./deploy.sh --standalone` stops with the move-and-delete message and builds nothing.
 4. `PYENV_VERSION=3.12 pytest tests/unit/test_mode_parity.py tests/unit/test_deploy_script.py` passes; moving a variable into the wrong block makes it fail.
+
+## Deploy message wording (revision)
+
+1. `./deploy.sh --standalone --yes` with the three `ATTACH_*` settings prints the `Check: ...` network line once, before the build.
+2. With `SQL_SERVER` (and the other database values) set it prints `Will add or update these keys in the credentials secret: ...`; the output never contains the password.
+
