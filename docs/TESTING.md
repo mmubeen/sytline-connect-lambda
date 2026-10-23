@@ -120,6 +120,14 @@ Wait for `saved` (or investigate `partly_saved`, `failed`, `needs_reconciliation
 ## Step 11: Through the real API (optional)
 The API is private: call it from inside the VPC or through the execute-api endpoint with an IAM-signed request (for example `awscurl --service execute-api`). Routes: `POST /job-reservations`, `POST /job-reservations/{id}/save`, `GET /job-reservations/{id}` (and `POST /confirmed-orders` for the one-step upload). The API ID is the `ApiId` stack output. The caller identity is then the signing principal.
 
+## Step 11b: Stand-alone version, database check (optional)
+Deploy `./deploy.sh --standalone` with the three `ATTACH_*` settings and `DATABASE_CHECK=true` (the database keys in the secret, TCP 1433 allowed from the function's security group), then:
+```
+aws lambda invoke --function-name <StandaloneDirectFunction> --cli-binary-format raw-in-base64-out \
+  --payload '{"action":"health"}' out.json && cat out.json
+```
+Expect `db_dns`, `db_tcp`, `db_login` after the web-service stages, and a `warnings` entry if `SQL_ENCRYPT=false`. Without the VPC attachment the script refuses `DATABASE_CHECK=true`. With `DATABASE_CHECK=false` the health result has no database stage. Failure meanings are the same as in step 4.
+
 ## Step 12: Check the records and stop
 - **CloudWatch logs:** each function writes one structured line per request, and each database step its own line (type, outcome, duration, counts). Confirm no password or login appears.
 - **DynamoDB** (`JobsTableName` output): reservation items (`RESERVATION#<id>`) hold the document ID, line count, numbers and results, and no customer, PO number or lines.

@@ -31,10 +31,11 @@ def test_the_route_variables_are_on_exactly_the_functions_that_number_resolve_or
             assert not set(ROUTE_VARS) & set(env_of(template, fn)), fn
 
 
-def test_the_standalone_template_sets_none_of_them():
+def test_the_standalone_template_sets_no_route_variable_and_no_network_rule():
     standalone = load_template(os.path.join(os.path.dirname(__file__), "..", "..", "src", "template-standalone.yaml"))
     text = repr(standalone)
-    assert not any(v in text for v in ROUTE_VARS) and "SQL_" not in text and "1433" not in text
+    assert not any(v in text for v in ROUTE_VARS)
+    assert not [r for r in standalone["Resources"].values() if r["Type"].startswith("AWS::EC2::")]  # no rule: the deployer's group applies
 
 
 def sql_rules(template, e):
@@ -81,11 +82,11 @@ def test_the_encryption_parameter_defaults_to_true_and_is_on_exactly_the_databas
             assert "SYTELINE_SQL_ENCRYPT" not in env_of(template, fn), fn
 
 
-def test_the_standalone_template_has_no_encryption_setting():
-    import os
-
+def test_the_standalone_template_has_the_encryption_setting_only_for_its_health_check():
     standalone = load_template(os.path.join(os.path.dirname(__file__), "..", "..", "src", "template-standalone.yaml"))
-    assert "SqlEncrypt" not in repr(standalone) and "SYTELINE_SQL_ENCRYPT" not in repr(standalone)
+    env = standalone["Resources"]["DirectFunction"]["Properties"]["Environment"]["Variables"]
+    assert env["SYTELINE_SQL_ENCRYPT"] == {"Ref": "SqlEncrypt"} and env["SYTELINE_DB_CHECK"] == {"Ref": "DatabaseCheck"}
+    assert standalone["Parameters"]["DatabaseCheck"]["Default"] == "false"  # the default stand-alone health is unchanged
 
 
 TUNING_VARS = {"SYTELINE_SITE_ID": "SiteId", "SYTELINE_MATCH_MIN_SCORE": "MatchMinScore",

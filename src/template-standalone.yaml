@@ -67,6 +67,34 @@ Parameters:
     Default: "true"
     AllowedValues: ["false", "true"]
     Description: Use FIPS AWS service endpoints (GovCloud)
+  # --- Optional database connectivity check (feature 005). The stand-alone actions never use the database; this only
+  #     adds the db_dns / db_tcp / db_login stages to the health check, and only when attached to an existing VPC. ---
+  DatabaseCheck:
+    Type: String
+    Default: "false"
+    AllowedValues: ["false", "true"]
+    Description: >-
+      "true": the health check also tests the SyteLine database (name lookup, connection, login). Needs the three Attach*
+      settings. The database keys (SQL_SERVER, SQL_DATABASE, SQL_USER, SQL_PASS, and SQL_CA_PEM while encrypted) go in
+      the credentials secret; the security group must allow TCP 1433 to the database.
+  SqlEncrypt:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      "true" (default): encrypted, certificate verified, SQL_CA_PEM required. "false": an UNENCRYPTED connection is
+      allowed and no CA is needed; the login and password then cross the network unprotected (warned on every
+      connection and in the health result). A SQL Server set to Force Encryption refuses it.
+  SqlVerifyHostname:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Encrypted connections only - "false" turns off just the host-name check of the server certificate.
+  SqlLoginTimeout:
+    Type: String
+    Default: "5"
+    AllowedPattern: '^[0-9]{1,3}$'
+    Description: Seconds allowed for the database connection and login.
 
 # cfn-lint warns (W1030) that the empty defaults do not match the address patterns; empty means "not given".
 Metadata:
@@ -97,6 +125,14 @@ Rules:
           - !Not [!Equals [!Ref AttachSubnetIds, ""]]
           - !Not [!Equals [!Ref AttachSecurityGroupIds, ""]]
         AssertDescription: Supply all three of AttachVpcId, AttachSubnetIds and AttachSecurityGroupIds, or none of them to run outside any VPC.
+  DatabaseCheckNeedsAttachment:
+    RuleCondition: !Equals [!Ref DatabaseCheck, "true"]
+    Assertions:
+      - Assert: !And
+          - !Not [!Equals [!Ref AttachVpcId, ""]]
+          - !Not [!Equals [!Ref AttachSubnetIds, ""]]
+          - !Not [!Equals [!Ref AttachSecurityGroupIds, ""]]
+        AssertDescription: DatabaseCheck=true needs AttachVpcId, AttachSubnetIds and AttachSecurityGroupIds (outside a VPC there is no route to the plant database).
   PlainHttpNeedsOverride:
     RuleCondition: !Not [!Equals [!Ref SytelineWsdlHttp, ""]]
     Assertions:
@@ -182,6 +218,11 @@ Resources:
           SYTELINE_ALLOW_HTTP: !Ref AllowPlainHttp
           SYTELINE_VERIFY_TLS: !Ref VerifyTls
           AWS_USE_FIPS_ENDPOINT: !Ref UseFipsEndpoints
+          SYTELINE_DB_CHECK: !Ref DatabaseCheck
+          SYTELINE_ATTACHED: !If [AttachToVpc, "true", "false"]
+          SYTELINE_SQL_ENCRYPT: !Ref SqlEncrypt
+          SYTELINE_SQL_VERIFY_HOSTNAME: !Ref SqlVerifyHostname
+          SYTELINE_SQL_LOGIN_TIMEOUT: !Ref SqlLoginTimeout
 
 Outputs:
   NetworkMode:

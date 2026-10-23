@@ -96,3 +96,15 @@ def test_the_ca_certificate_is_required_only_while_encrypted(monkeypatch):
     assert config.sql_missing(cfg) == []              # explicit unencrypted option: no CA needed
     assert config.sql_missing(dict(cfg, SQL_PASS="")) == ["SQL_PASS"]  # the other keys stay required in both modes
     assert config.sql_missing({}) == ["SQL_SERVER", "SQL_DATABASE", "SQL_USER", "SQL_PASS"]
+
+
+# ---- stand-alone database check (feature 005, revision 2026-10-22) -----------------------------------------
+@pytest.mark.parametrize("name,fn", [("SYTELINE_DB_CHECK", config.db_check), ("SYTELINE_ATTACHED", config.attached)])
+@pytest.mark.parametrize("value,expected", [(None, False), ("", False), ("false", False), ("1", False), ("yes", False),
+                                            ("truee", False), ("true", True), (" TRUE ", True), ("True", True)])
+def test_the_standalone_switches_are_on_only_for_the_exact_value_true(monkeypatch, name, fn, value, expected):
+    if value is None:
+        monkeypatch.delenv(name, raising=False)
+    else:
+        monkeypatch.setenv(name, value)
+    assert fn() is expected

@@ -54,3 +54,17 @@ The template always sets all four, with default `database` (the existing web-ser
 
 ## R12. Stand-alone version
 **Decision**: unchanged and out of scope. Its template sets none of the route variables, so the absent-variable rule keeps its web-service behaviour; the database code is in the zip but unreachable without settings.
+
+
+## Revision 2026-10-22: the stand-alone health check (R13 to R15)
+
+## R13. What the stand-alone version gets
+**Decision**: only the connectivity test. The stand-alone function has just the `health`, `add_note` and `get_notes` actions, so no number reservation, customer search or defaults exist there to route. It reuses `health._database_stages` (`db_dns`, `db_tcp`, `db_login`) and `sqlserver.SqlServer` unchanged, with the same encryption rules (encrypted and verified by default, `SYTELINE_SQL_ENCRYPT=false` the explicit warned option, no CA then needed) and the same credential rules (keys only in the secret; the stand-alone role already reads that secret).
+**Rationale**: matches the clarified spec (FR-011, assumptions); no new code path that can write.
+
+## R14. Switching the check on, and attachment
+**Decision**: the route variables are not set in the stand-alone template (absent = earlier behaviour, and none of its actions use the database), so `routes.uses_database()` is false there. A new setting `SYTELINE_DB_CHECK` (stand-alone parameter `DatabaseCheck`, default `false`) turns the database stages on explicitly. The template also sets `SYTELINE_ATTACHED` to `true` only when all three attachment settings are supplied (the existing `AttachToVpc` condition). Rule in `health.run_health`: run the database stages when not a dry run and (`routes.uses_database()` or `config.db_check()`); when `db_check()` is on but the function is not attached, do not run them and add `"database_check": "skipped: the function is not attached to a VPC"` to the response (a route to the plant database cannot exist outside a VPC). The plant version is unchanged: it never sets `SYTELINE_DB_CHECK`.
+**Alternatives**: setting the four route variables to `database` in the stand-alone template (misleading: no action uses them, and `routes` would claim the database serves operations it does not); always running the stages when attached (changes the default health result of existing attached deployments, and fails them where the database settings are not yet in the secret).
+
+## R15. Template, deploy and network
+**Decision**: `template-standalone.yaml` gains parameters `DatabaseCheck` (default `false`), `SqlEncrypt` (default `true`), `SqlVerifyHostname` (default `true`), `SqlLoginTimeout` (default `5`) and the env on `DirectFunction`: `SYTELINE_DB_CHECK`, `SYTELINE_SQL_ENCRYPT`, `SYTELINE_SQL_VERIFY_HOSTNAME`, `SYTELINE_SQL_LOGIN_TIMEOUT`, `SYTELINE_ATTACHED`. A rule refuses `DatabaseCheck=true` without the three attachment settings (nothing is created). `deploy.sh --standalone` and `deploy.standalone.env.example` get `DATABASE_CHECK`, `SQL_ENCRYPT`, `SQL_VERIFY_HOSTNAME`, `SQL_LOGIN_TIMEOUT` (always passed, validated like the plant ones; `SQL_ENCRYPT=false` warns). The database keys go in the secret (`SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, optional `SQL_PORT`, `SQL_CA_PEM` while encrypted). The stack creates no network rule: the deployer's security group must allow TCP 1433 from the function to the database. The layer already contains the driver (shared `requirements.txt`).

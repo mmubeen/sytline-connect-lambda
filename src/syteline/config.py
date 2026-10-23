@@ -116,6 +116,18 @@ def verify_tls():
 SQL_REQUIRED = ("SQL_SERVER", "SQL_DATABASE", "SQL_USER", "SQL_PASS", "SQL_CA_PEM")
 
 
+def db_check():
+    """True only when SYTELINE_DB_CHECK is exactly `true` (trimmed, any case): the stand-alone health check also tests the
+    database. Never set by the plant deployment, which switches the check on through its route settings instead."""
+    return os.environ.get("SYTELINE_DB_CHECK", "false").strip().lower() == "true"
+
+
+def attached():
+    """True only when SYTELINE_ATTACHED is exactly `true`: the stand-alone function is attached to an existing VPC (set by
+    its template), so a private route to the database can exist."""
+    return os.environ.get("SYTELINE_ATTACHED", "false").strip().lower() == "true"
+
+
 def sql_encrypt():
     """False only when SYTELINE_SQL_ENCRYPT is exactly `false` (trimmed, any case): the explicit option to allow an
     UNENCRYPTED database connection. Any other value, including empty or unset, means encrypted (the default)."""

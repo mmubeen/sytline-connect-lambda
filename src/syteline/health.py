@@ -211,13 +211,21 @@ def run_health(event, context=None):
             break  # later stages depend on earlier ones
 
     ok = len(results) == len(plan) and all(r["ok"] for r in results)
-    if not dry_run and routes.uses_database():  # the database is checked on its own: a web-service failure must not hide it
+    standalone_skip = False
+    # the database is checked on its own: a web-service failure must not hide it. The plant version checks it when an
+    # operation uses it; the stand-alone version only when asked (SYTELINE_DB_CHECK) and attached to a VPC.
+    wanted = routes.uses_database() or cfgmod.db_check()
+    if not dry_run and wanted and (routes.uses_database() or cfgmod.attached()):
         db_ok = _database_stages(cfg, timeout, results)
         ok = ok and db_ok
         if not cfgmod.sql_encrypt():  # the explicit option is in use: say so, loudly
             warnings.append(UNENCRYPTED_WARNING)
+    elif not dry_run and wanted:
+        standalone_skip = True
     out = {"ok": ok, "dry_run": dry_run, "host": host, "config": cfg["SYTELINE_CONFIG"], "stages": results,
            "routes": routes.describe()}
+    if standalone_skip:
+        out["database_check"] = "skipped: the function is not attached to a VPC"
     insecure = [r for r in results if r.get("code") == errors.INSECURE_TRANSPORT]
     if insecure:
         out["errors"] = [errors.error(errors.INSECURE_TRANSPORT, cfgmod.INSECURE_MESSAGE)]

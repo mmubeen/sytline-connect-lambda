@@ -129,6 +129,20 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 
 ---
 
+## Phase 9: Revision 2026-10-22 - database check in the stand-alone health check (spec FR-011, assumptions; research.md R13 to R15)
+
+**Goal**: the stand-alone Lambda can run the same database connectivity stages when it is attached to a VPC; nothing else in it uses the database, and the default (no check) is unchanged.
+
+- [X] T040 In `src/syteline/config.py` add `db_check()` (True only when `SYTELINE_DB_CHECK` is exactly `true` after trimming and lower-casing) and `attached()` (True only when `SYTELINE_ATTACHED` is exactly `true`); tests in `tests/unit/test_config.py`
+- [X] T041 In `src/syteline/health.py` run `_database_stages` when not a dry run and (`routes.uses_database()` or (`config.db_check()` and `config.attached()`)); when `config.db_check()` is true and not attached and no route uses the database, run no database stage and add `"database_check": "skipped: the function is not attached to a VPC"` to the response; keep the encrypted/unencrypted detail and the unencrypted warning; extend `tests/unit/test_health_database.py` (check off: no stages, response keys unchanged; check on and attached: the three stages, encryption detail, warning when unencrypted; check on, not attached: skipped note and no connection attempt; plant routes still trigger the stages as before)
+- [X] T042 In `src/template-standalone.yaml` add parameters `DatabaseCheck` (String, default `"false"`, AllowedValues true/false), `SqlEncrypt` (default `"true"`), `SqlVerifyHostname` (default `"true"`), `SqlLoginTimeout` (default `"5"`, AllowedPattern `^[0-9]{1,3}$`), a Rule refusing `DatabaseCheck=true` unless all three `Attach*` settings are supplied (message names them), and on `DirectFunction` the environment `SYTELINE_DB_CHECK`, `SYTELINE_SQL_ENCRYPT`, `SYTELINE_SQL_VERIFY_HOSTNAME`, `SYTELINE_SQL_LOGIN_TIMEOUT` and `SYTELINE_ATTACHED: !If [AttachToVpc, "true", "false"]`; no route variable, no new resource, no network rule; extend `tests/unit/test_template_standalone.py` and replace the two assertions in `tests/unit/test_template_database.py` that say the stand-alone template has no encryption setting or `SQL_`/`1433` text with checks that exactly these parameters and variables exist and no route variable or egress rule does
+- [X] T043 [P] In `src/deploy.sh` (`--standalone` branch) pass `DatabaseCheck` (`DATABASE_CHECK`, default `false`), `SqlEncrypt` (`SQL_ENCRYPT`, default `true`), `SqlVerifyHostname` (`SQL_VERIFY_HOSTNAME`) and `SqlLoginTimeout` (`SQL_LOGIN_TIMEOUT`) always, validate them like the plant ones, refuse `DATABASE_CHECK=true` without `ATTACH_VPC_ID`, `ATTACH_SUBNET_IDS` and `ATTACH_SG_IDS`, and warn when `SQL_ENCRYPT=false`; add the entries to `src/deploy.standalone.env.example` (with a comment that the database keys go in the secret and TCP 1433 must be allowed); extend `tests/unit/test_deploy_script.py`
+- [X] T044 [P] Extend `tests/unit/test_standalone_parity.py`: with the defaults the stand-alone and plant dry-run and full health shapes and stage names are unchanged; with the check on and attached the stand-alone stages and warning equal the plant ones; the stand-alone notes actions never open a database connection (a recording fake sees none)
+- [X] T045 Update `docs/DATABASE.md` (stand-alone section: what it does, the new settings, attachment requirement, security group on 1433), `docs/STANDALONE.md`, `docs/TESTING.md` (a stand-alone database check step) and the README line about the stand-alone version
+- [X] T046 Run the whole suite, `cfn-lint src/template.yaml src/template-standalone.yaml`, `sam validate --lint` for both templates; only the pre-existing failures (12 failures, 2 errors in `tests/unit/test_transport.py`, `tests/contract/test_health.py`, `tests/unit/test_standalone_parity.py`) may remain
+
+---
+
 ## Dependencies and order
 
 - Phase 1 first (T001 to T004 touch different files and can run together). T005 and T006 need T002 and T004; T007 needs T006's interface; T008 needs T006 and T007; T009 needs T006 and T007.
@@ -137,6 +151,7 @@ description: "Task list for SQL Server Calls for Numbers and Customer Lookup"
 - US3 (T021 to T024) needs T006 and T003; T023 follows T013 and T012's file changes (`pipeline.py`, `reserve.py` are touched by earlier tasks) and US2's `resolver.py` (customer match is its input).
 - US4 (T025 to T026) needs T005 and T006 and can run any time after Phase 2.
 - Polish after the stories it documents or checks (T027 needs T005's setting names).
+- Phase 9 (stand-alone database check) after Phase 8: T040 first; T041 needs T040; T042 needs only the setting names from T040; T043 needs T042's parameter names (different file, parallel after T042); T044 needs T041 and T042; T045 after T041 to T043; T046 last.
 - Phase 8 (revision) after Phases 1-7: T033 first (config); T034 needs T033; T035 needs T034 and the existing `FakeSqlServer`; T036 needs T034 (`SqlServer.encrypted`); T037 needs only the setting name from T033 and can run in parallel with T034 to T036; T038 after T034 to T037; T039 last.
 
 ## Parallel examples

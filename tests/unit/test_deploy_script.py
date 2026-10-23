@@ -395,6 +395,37 @@ def test_http_address_without_the_override_is_refused_before_any_sam_call(run):
     assert p.returncode != 0 and "ALLOW_PLAIN_HTTP=true" in p.stderr and "SAM" not in calls
 
 
+STANDALONE_DB = {"DatabaseCheck": "false", "SqlEncrypt": "true", "SqlVerifyHostname": "true", "SqlLoginTimeout": "5"}
+ATT = {"ATTACH_VPC_ID": "vpc-0abc1234", "ATTACH_SUBNET_IDS": "subnet-0a1,subnet-0b2", "ATTACH_SG_IDS": "sg-0c3"}
+
+
+def test_standalone_always_passes_the_database_settings_with_safe_defaults(run):
+    p, calls = sa(run)
+    assert p.returncode == 0, p.stderr
+    o = overrides(calls)
+    assert {k: o[k] for k in STANDALONE_DB} == STANDALONE_DB and "UNENCRYPTED" not in p.stdout
+
+
+def test_standalone_database_check_needs_the_vpc_attachment_and_passes_through_when_attached(run):
+    p, calls = sa(run, {"DATABASE_CHECK": "true"})
+    assert p.returncode != 0 and "DATABASE_CHECK=true needs ATTACH_VPC_ID" in (p.stdout + p.stderr) and not deployed(calls)
+    p, calls = sa(run, {"DATABASE_CHECK": "true", "SQL_ENCRYPT": "false", "SQL_VERIFY_HOSTNAME": "false",
+                        "SQL_LOGIN_TIMEOUT": "9", **ATT})
+    assert p.returncode == 0, p.stdout + p.stderr
+    o = overrides(calls)
+    assert (o["DatabaseCheck"], o["SqlEncrypt"], o["SqlVerifyHostname"], o["SqlLoginTimeout"]) == ("true", "false", "false", "9")
+    assert "UNENCRYPTED" in p.stdout
+
+
+@pytest.mark.parametrize("name,value,message", [("DATABASE_CHECK", "yes", "DATABASE_CHECK must be true or false"),
+                                                 ("SQL_ENCRYPT", "maybe", "SQL_ENCRYPT must be true or false"),
+                                                 ("SQL_VERIFY_HOSTNAME", "1", "SQL_VERIFY_HOSTNAME must be true or false"),
+                                                 ("SQL_LOGIN_TIMEOUT", "fast", "SQL_LOGIN_TIMEOUT must be a whole number")])
+def test_standalone_refuses_bad_database_values_before_any_sam_call(run, name, value, message):
+    p, calls = sa(run, {name: value})
+    assert p.returncode != 0 and message in (p.stdout + p.stderr) and not deployed(calls)
+
+
 def test_standalone_passes_use_fips_endpoints_and_refuses_a_bad_value(run):
     p, calls = sa(run)
     assert overrides(calls)["UseFipsEndpoints"] == "true"

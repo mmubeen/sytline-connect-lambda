@@ -8,6 +8,8 @@
 
 Add the PO OCR demo's three database calls to the VPC deployment, each used **only for an operation that has no web-service endpoint configured**: (1) reserve the CO and job numbers by running `NextCoSp` / `NextWOSp` and committing, (2) find the customer from name and address by searching the customer address data with the demo's scoring (threshold 70, ambiguity margin 3, candidate cap 1000), (3) read the customer's default terms and ship-via codes from its most recent order. The route per operation is decided by a setting before anything is sent (an IDO name for the web service, or `database`/empty); no failure ever switches it. A new module `src/syteline/sqlserver.py` is the only code that talks to the database: a pure-Python TDS driver (`python-tds`) over a TLS connection that is encrypted and certificate-verified by default (with an explicit, warned `SYTELINE_SQL_ENCRYPT=false` option for a server that offers no verifiable certificate), with a fixed whitelist of statements (SELECT of two tables, EXEC of the two routines, COMMIT/ROLLBACK, a harmless ping) so it can never insert, update or delete a row. Existing numbering, customer-resolution and header-save code gains a route switch; the web-service code stays for operations that have an endpoint. The connectivity check reports each operation's route and the database stages. See [research.md](research.md).
 
+**Revision 2026-10-22 (stand-alone health check):** the stand-alone Lambda also gets the database settings, used only by its connectivity check and only when attached to an existing VPC (research.md R13 to R15). No new database operation; `sqlserver.py` and the health stages are reused.
+
 ## Technical Context
 
 **Language/Version**: Python 3.13 (Lambda; existing code), SAM/CloudFormation YAML
@@ -69,6 +71,9 @@ src/
     ├── config.py                  # + database settings from the secret; route helpers
     ├── idos.py                    # + SLCos terms/ship property names (UNCONFIRMED); route setting names
     └── errors.py                  # + DATABASE_NOT_CONFIGURED, CUSTOMER_LOW_CONFIDENCE
+src/template-standalone.yaml     # revision: + DatabaseCheck, SqlEncrypt, SqlVerifyHostname, SqlLoginTimeout parameters and env on DirectFunction
+src/syteline/health.py           # revision: database stages also when SYTELINE_DB_CHECK=true and the function is attached (SYTELINE_ATTACHED)
+src/syteline/config.py           # revision: db_check(), attached()
 docs/
 └── DATABASE.md                    # NEW: when the database is used, settings, secret keys, TLS, least-privilege login, network
 tests/

@@ -213,3 +213,83 @@ def test_no_warning_and_no_database_stage_when_no_operation_uses_the_database(en
     env.setenv("SYTELINE_SQL_ENCRYPT", "false")
     out = health.run_health({"action": "health"})
     assert db_stages(out) == [] and UNENC_WARNING not in out.get("warnings", [])
+
+
+# ---- the stand-alone database check (revision 2026-10-22) -------------------------------------------------------
+def standalone(monkeypatch, check=True, attached=True):
+    """Stand-alone shape: no route variable set (nothing routes to the database), database check by its own switch."""
+    for v in OPS.values():
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("SYTELINE_DB_CHECK", "true" if check else "false")
+    monkeypatch.setenv("SYTELINE_ATTACHED", "true" if attached else "false")
+
+
+def test_standalone_default_has_no_database_stage_and_the_response_is_unchanged(env):
+    standalone(env, check=False, attached=True)
+    f = FakeSqlServer().install(env)
+    out = health.run_health({"action": "health"})
+    assert db_stages(out) == [] and "database_check" not in out and f.connect_kwargs == []
+    assert set(out) == {"ok", "dry_run", "host", "config", "stages", "routes"}
+
+
+def test_standalone_check_on_and_attached_runs_the_three_stages(env):
+    standalone(env)
+    with_db_settings(env)
+    fake_network(env)
+    f = FakeSqlServer().install(env)
+    out = health.run_health({"action": "health"})
+    assert [s["stage"] for s in db_stages(out)] == ["db_dns", "db_tcp", "db_login"]
+    assert [s["ok"] for s in db_stages(out)] == [True, True, True] and "database_check" not in out
+    login = [s for s in out["stages"] if s["stage"] == "db_login"][0]
+    assert login["detail"].startswith("encrypted connection") and [s for s, _ in f.statements] == ["SELECT 1"]
+    assert out["routes"]["next_co"].startswith("webservice")  # the stand-alone actions still do not use the database
+
+
+def test_standalone_unencrypted_option_warns_and_needs_no_ca(env):
+    standalone(env)
+    with_db_settings(env, SQL_CA_PEM="")
+    env.setenv("SYTELINE_SQL_ENCRYPT", "false")
+    fake_network(env)
+    f = FakeSqlServer().install(env)
+    out = health.run_health({"action": "health"})
+    login = [s for s in out["stages"] if s["stage"] == "db_login"][0]
+    assert login["ok"] and login["detail"].startswith("UNENCRYPTED") and UNENC_WARNING in out["warnings"]
+    assert "cafile" not in f.connect_kwargs[0]
+
+
+def test_standalone_check_on_but_not_attached_skips_and_makes_no_connection(env):
+    standalone(env, attached=False)
+    with_db_settings(env)
+    f = FakeSqlServer().install(env)
+    out = health.run_health({"action": "health"})
+    assert db_stages(out) == [] and out["database_check"] == "skipped: the function is not attached to a VPC"
+    assert f.connect_kwargs == [] and f.statements == []
+
+
+def test_standalone_dry_run_never_checks_the_database(env):
+    standalone(env)
+    with_db_settings(env)
+    f = FakeSqlServer().install(env)
+    out = health.run_health({"action": "health", "dry_run": True})
+    assert db_stages(out) == [] and "database_check" not in out and f.connect_kwargs == []
+
+
+def test_standalone_failures_name_the_stage_and_hide_credentials(env):
+    standalone(env)
+    with_db_settings(env)
+    fake_network(env)
+    FakeSqlServer(connect_error="login_fail").install(env)
+    out = health.run_health({"action": "health"})
+    login = [s for s in out["stages"] if s["stage"] == "db_login"][0]
+    assert login["ok"] is False and "login refused" in login["error"] and out["ok"] is False
+    assert DB_CFG["SQL_PASS"] not in repr(out) and DB_CFG["SQL_USER"] not in repr(out)
+
+
+def test_the_plant_version_is_unchanged_routes_still_trigger_the_stages_even_if_attached_is_unset(env):
+    database_everywhere(env)
+    env.delenv("SYTELINE_ATTACHED", raising=False)
+    env.delenv("SYTELINE_DB_CHECK", raising=False)
+    with_db_settings(env)
+    fake_network(env)
+    FakeSqlServer().install(env)
+    assert [s["stage"] for s in db_stages(health.run_health({"action": "health"}))] == ["db_dns", "db_tcp", "db_login"]

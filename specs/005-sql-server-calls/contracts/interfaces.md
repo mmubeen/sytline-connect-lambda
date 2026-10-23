@@ -46,3 +46,16 @@ Where a response carries these, `step` names the operation (`number_co`, `number
 - A route is decided from the settings alone; a failure on one route never starts the same operation on the other.
 - By default the database connection is TLS with a verified certificate chain (host-name check off only by `SYTELINE_SQL_VERIFY_HOSTNAME=false`, with a warning per connection). The only way to an unencrypted connection is `SYTELINE_SQL_ENCRYPT=false`, which warns on every connection and is reported by the connectivity check; no failure, missing CA or handshake error ever leads to an unencrypted connection.
 - Every database statement is one of the five in data-model.md; none changes a row except the routines' own reservation.
+
+
+## Revision 2026-10-22: stand-alone health check
+| Stand-alone parameter | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `DatabaseCheck` | `SYTELINE_DB_CHECK` | `false` | `true`: the health check also runs `db_dns`, `db_tcp`, `db_login`. Requires the three `Attach*` settings (refused otherwise) |
+| `SqlEncrypt` | `SYTELINE_SQL_ENCRYPT` | `true` | as in the plant version (`false` = unencrypted, warned, no CA needed) |
+| `SqlVerifyHostname` | `SYTELINE_SQL_VERIFY_HOSTNAME` | `true` | as in the plant version |
+| `SqlLoginTimeout` | `SYTELINE_SQL_LOGIN_TIMEOUT` | `5` | seconds for the connection and login |
+| (template) | `SYTELINE_ATTACHED` | `true` when attached, else `false` | lets the function know it can reach a private network |
+
+Health response, stand-alone, `DatabaseCheck=true`: attached -> the stages and the unencrypted warning exactly as in the plant version; not attached (only reachable by forcing the environment) -> no database stage and `"database_check": "skipped: the function is not attached to a VPC"`. With `DatabaseCheck=false` (default) the response is unchanged from today.
+Secret keys, error and stage messages: as in the sections above. The stand-alone actions `add_note` and `get_notes` never use the database.

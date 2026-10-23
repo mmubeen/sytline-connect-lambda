@@ -99,6 +99,19 @@ if [[ "$standalone" == "true" ]]; then
     attached="false"
   fi
 
+  # optional database connectivity check of the health action (feature 005): needs the VPC attachment
+  database_check="${DATABASE_CHECK:-false}"
+  [[ "$database_check" =~ ^(true|false)$ ]] || die "DATABASE_CHECK must be true or false"
+  [[ "${SQL_ENCRYPT:-true}" =~ ^(true|false)$ ]] || die "SQL_ENCRYPT must be true or false"
+  [[ "${SQL_VERIFY_HOSTNAME:-true}" =~ ^(true|false)$ ]] || die "SQL_VERIFY_HOSTNAME must be true or false"
+  [[ "${SQL_LOGIN_TIMEOUT:-5}" =~ ^[0-9]+$ ]] || die "SQL_LOGIN_TIMEOUT must be a whole number"
+  if [[ "$database_check" == "true" && "$attached" != "true" ]]; then
+    die "DATABASE_CHECK=true needs ATTACH_VPC_ID, ATTACH_SUBNET_IDS and ATTACH_SG_IDS (outside a VPC there is no route to the plant database)"
+  fi
+  if [[ "${SQL_ENCRYPT:-true}" == "false" ]]; then
+    echo "WARNING: SQL_ENCRYPT=false: the database connection will be UNENCRYPTED; the database login and password cross the network unprotected."
+  fi
+
   # every other network setting does not apply to this version
   na=()
   for v in WORKER_VPC_ID WORKER_SUBNET_IDS WORKER_SG_IDS WORKER_ROUTE_TABLE_IDS HOST_NETWORK_CIDR PLANT_CIDR_1 \
@@ -160,6 +173,10 @@ if [[ "$standalone" == "true" ]]; then
     "$(q SytelineConfig "${SYTELINE_CONFIG:-CCT}")" \
     "$(q LiveWrites "$live")" \
     "$(q UseFipsEndpoints "${USE_FIPS_ENDPOINTS:-true}")" \
+    "$(q DatabaseCheck "$database_check")" \
+    "$(q SqlEncrypt "${SQL_ENCRYPT:-true}")" \
+    "$(q SqlVerifyHostname "${SQL_VERIFY_HOSTNAME:-true}")" \
+    "$(q SqlLoginTimeout "${SQL_LOGIN_TIMEOUT:-5}")" \
     ${attach_overrides[@]+"${attach_overrides[@]}"}
   exit 0
 fi

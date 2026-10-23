@@ -207,3 +207,47 @@ def test_the_vpc_template_has_no_standalone_parameters_or_guard(standalone_templ
     assert "SytelineWsdlHttps" not in vpc["Parameters"]
     env = str(vpc["Resources"]["WorkerFunction"]) + str(vpc["Globals"])
     assert "SYTELINE_REQUIRE_HTTPS" not in env  # the plant deployment keeps working over HTTP (SC-005)
+
+
+# ---- optional database connectivity check (feature 005, revision 2026-10-22) -----------------------------------------
+DB_PARAMS = {"DatabaseCheck": "false", "SqlEncrypt": "true", "SqlVerifyHostname": "true", "SqlLoginTimeout": "5"}
+DB_ENV = {"SYTELINE_DB_CHECK": "DatabaseCheck", "SYTELINE_SQL_ENCRYPT": "SqlEncrypt",
+          "SYTELINE_SQL_VERIFY_HOSTNAME": "SqlVerifyHostname", "SYTELINE_SQL_LOGIN_TIMEOUT": "SqlLoginTimeout"}
+
+
+def test_the_database_parameters_default_to_off_and_to_the_safe_encrypted_mode(standalone_template):
+    for name, default in DB_PARAMS.items():
+        assert standalone_template["Parameters"][name]["Default"] == default, name
+    assert ev(standalone_template, SytelineWsdlHttps=HTTPS).parameter_errors() == []
+
+
+def test_the_function_gets_the_database_settings_and_knows_whether_it_is_attached(standalone_template):
+    env = fn(standalone_template)["Environment"]["Variables"]
+    for var, param in DB_ENV.items():
+        assert env[var] == {"Ref": param}, var
+    assert env["SYTELINE_ATTACHED"] == {"Fn::If": ["AttachToVpc", "true", "false"]}
+    e = ev(standalone_template, SytelineWsdlHttps=HTTPS)
+    assert e.resolve(env["SYTELINE_ATTACHED"]) == "false"
+    assert ev(standalone_template, SytelineWsdlHttps=HTTPS, **ATTACH).resolve(env["SYTELINE_ATTACHED"]) == "true"
+
+
+def test_no_route_variable_no_secret_value_and_no_network_rule_were_added(standalone_template):
+    text = repr(standalone_template)
+    for var in ("SYTELINE_NEXT_CO_IDO", "SYTELINE_NEXT_JOB_IDO", "SYTELINE_CUSTOMER_IDO", "SYTELINE_DEFAULTS_IDO"):
+        assert var not in text
+    assert not [r for r in standalone_template["Resources"].values() if r["Type"].startswith("AWS::EC2::")]
+    env = fn(standalone_template)["Environment"]["Variables"]
+    assert not [k for k in env if k in ("SQL_PASS", "SQL_USER", "SQL_SERVER", "SQL_CA_PEM")]  # the login stays in the secret
+
+
+def test_database_check_without_a_vpc_attachment_is_refused_naming_all_three(standalone_template):
+    msgs = ev(standalone_template, SytelineWsdlHttps=HTTPS, DatabaseCheck="true").violations()
+    assert any("AttachVpcId" in m and "AttachSubnetIds" in m and "AttachSecurityGroupIds" in m and "DatabaseCheck" in m
+               for m in msgs)
+    assert ev(standalone_template, SytelineWsdlHttps=HTTPS, DatabaseCheck="true", **ATTACH).violations() == []
+    assert ev(standalone_template, SytelineWsdlHttps=HTTPS, DatabaseCheck="false").violations() == []
+
+
+def test_the_encryption_and_numeric_parameters_reject_bad_values(standalone_template):
+    for p, v in (("SqlEncrypt", "maybe"), ("SqlVerifyHostname", "1"), ("DatabaseCheck", "yes"), ("SqlLoginTimeout", "x")):
+        assert ev(standalone_template, SytelineWsdlHttps=HTTPS, **{p: v}).parameter_errors(), p

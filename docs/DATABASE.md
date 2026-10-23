@@ -63,6 +63,19 @@ The functions run in the plant-routed network. They need a route to the database
 | Customer match is ambiguous, below the threshold or not found | `CUSTOMER_AMBIGUOUS` / `CUSTOMER_LOW_CONFIDENCE` / `CUSTOMER_NOT_FOUND`, with the best candidates and scores; nothing is reserved or written |
 | The customer defaults cannot be read, or the customer has no orders | the order is saved without terms and ship-via and a warning says why (shown by the reservation status) |
 
+## Stand-alone version
+
+The stand-alone Lambda has no actions that reserve numbers, search customers or save orders, so it never uses the database for them. When it is **attached to an existing VPC** it can run the same connectivity stages (`db_dns`, `db_tcp`, `db_login`, with the encryption detail and the unencrypted warning) in its health check:
+
+| `deploy.standalone.env` | Stack parameter | Default | Meaning |
+|---|---|---|---|
+| `DATABASE_CHECK` | `DatabaseCheck` | `false` | `true` adds the database stages; refused unless all three `ATTACH_*` settings are given |
+| `SQL_ENCRYPT` | `SqlEncrypt` | `true` | as above (`false` = unencrypted, warned, no CA needed) |
+| `SQL_VERIFY_HOSTNAME` | `SqlVerifyHostname` | `true` | as above |
+| `SQL_LOGIN_TIMEOUT` | `SqlLoginTimeout` | `5` | seconds |
+
+The database keys go in the secret, and the security group must allow TCP 1433. If the check is switched on but the function is not attached, no stage runs and the response says `database_check: skipped: the function is not attached to a VPC`. See [STANDALONE.md](STANDALONE.md).
+
 ## Checking it (before the first PO)
 
 `{"action":"health"}` reports `routes` and, when any operation uses the database, three separate stages: `db_dns` (the name resolves), `db_tcp` (the port accepts a connection) and `db_login` (TLS handshake and certificate when encrypted, login, then `SELECT 1`; the detail says `encrypted` or `UNENCRYPTED`). Failures say which: `certificate not trusted`, `host name does not match the certificate`, `login refused`, `database not configured: <keys>`. Nothing is changed and no credential is shown. The credential-free dry run reports `routes` only.

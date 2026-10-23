@@ -43,3 +43,9 @@ Returned by `NumberSource.next_co()` / `next_job()` as a string of digits. Creat
 4. `COMMIT TRANSACTION` and `IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION`
 5. `SELECT 1` (connectivity check)
 All values travel as parameters; the routine name comes from a two-entry constant, never from input.
+
+
+## Revision 2026-10-22: stand-alone health check
+- Settings (stand-alone template parameter -> environment variable): `DatabaseCheck` -> `SYTELINE_DB_CHECK` (`true` runs the database stages, default `false`), `SqlEncrypt` -> `SYTELINE_SQL_ENCRYPT`, `SqlVerifyHostname` -> `SYTELINE_SQL_VERIFY_HOSTNAME`, `SqlLoginTimeout` -> `SYTELINE_SQL_LOGIN_TIMEOUT`; `SYTELINE_ATTACHED` (`true` only when the function is attached to a VPC; set by the template, not a parameter).
+- Rule: the stages run when not a dry run and (any route is `database` or `SYTELINE_DB_CHECK` is true) and, for `SYTELINE_DB_CHECK`, the function is attached; `DatabaseCheck=true` without a VPC attachment is refused at deployment and, if forced through the environment, reported as skipped.
+- Same secret keys as the plant version; no new stored data.

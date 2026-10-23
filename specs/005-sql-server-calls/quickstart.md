@@ -35,3 +35,8 @@ Expected: no new failures versus before this feature (the 12 failures and 2 erro
 3. With live writes **off**: reserve a PO: `LIVE_WRITES_DISABLED`, no number reserved.
 4. With live writes **on** in an approved test window: reserve a 2-line PO, check in SyteLine that the numbers advanced and nothing else changed, then save it and check the header carries the customer's terms and ship-via.
 Verify the `LongList` / `Infobar` types, the routine signatures and the `custaddr` / `co` column names read-only first (research.md R3).
+
+
+## 6. Stand-alone version (revision 2026-10-22)
+1. `python -m pytest tests/unit/test_template_standalone.py tests/unit/test_standalone_parity.py tests/unit/test_health_database.py tests/unit/test_deploy_script.py -q`: the new parameters default to off, `DatabaseCheck=true` needs the three attachment settings, the plant health result is unchanged, the stand-alone result is unchanged with the default, and with the check on and attached the stages and warning match the plant version.
+2. Deploy `./deploy.sh --standalone` with the three `ATTACH_*` settings, `DATABASE_CHECK=true` and the database keys in the secret; invoke `{"action":"health"}`: `db_dns`, `db_tcp`, `db_login` pass (the security group must allow TCP 1433). Without `ATTACH_*` the script refuses `DATABASE_CHECK=true`.
