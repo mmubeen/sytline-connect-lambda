@@ -105,3 +105,19 @@ def test_unwrap_returns_the_event_under_an_event_key_as_object_or_text_else_the_
     assert eventdoc.unwrap(event) is event
     assert eventdoc.unwrap({"event": "{nope"}) == {"event": "{nope"}
     assert eventdoc.unwrap({}) == {} and eventdoc.unwrap("text") == "text"
+
+
+def test_an_ignored_foreign_event_says_what_arrived_and_what_was_expected():
+    out = eventdoc.parse({"source": "aws.s3", "detail-type": "Object Created", "detail": {"secret": "x"}, "z": 1})
+    assert out["action"] == "ignore"
+    assert out["received"] == {"source": "aws.s3", "detail-type": "Object Created"}
+    assert out["expected"] == {"source": "aws.states", "detail-type": "Step Functions Execution Status Change"}
+    assert out["top_level_keys"] == ["detail", "detail-type", "source", "z"]
+    assert "secret" not in repr(out) and "'x'" not in repr(out)  # keys of the top level only, never values
+
+
+def test_a_payload_missing_both_labels_shows_none_and_long_values_are_not_echoed():
+    out = eventdoc.parse({"detail": {"status": "SUCCEEDED"}})  # e.g. only the `detail` part of the event was sent
+    assert out["received"] == {"source": None, "detail-type": None} and out["top_level_keys"] == ["detail"]
+    out = eventdoc.parse({"source": "x" * 500, "detail-type": 5})
+    assert out["received"] == {"source": "<not a short string>", "detail-type": "<not a short string>"}

@@ -88,7 +88,12 @@ def parse(event, today=None):
     if not isinstance(event, dict):
         raise _invalid("the event is not a JSON object")
     if event.get("source") != SOURCE or event.get("detail-type") != DETAIL_TYPE:
-        return {"action": "ignore", "reason": "not a Step Functions execution status change event"}
+        # say what arrived (two short labels, no event content) so a wrong payload explains itself
+        shown = lambda v: v if isinstance(v, str) and len(v) <= 80 else (None if v is None else "<not a short string>")  # noqa: E731
+        return {"action": "ignore", "reason": "not a Step Functions execution status change event",
+                "received": {"source": shown(event.get("source")), "detail-type": shown(event.get("detail-type"))},
+                "expected": {"source": SOURCE, "detail-type": DETAIL_TYPE},
+                "top_level_keys": sorted(str(k) for k in event)[:20]}
     detail = event.get("detail")
     if not isinstance(detail, dict):
         raise _invalid("the event has no detail")

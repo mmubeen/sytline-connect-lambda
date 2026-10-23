@@ -210,6 +210,13 @@ def test_an_event_that_is_not_a_finished_execution_is_ignored_and_nothing_is_con
     assert world.untouched()
 
 
+def test_the_ignored_answer_for_a_foreign_event_lists_what_was_received(world):
+    out = world.run(ev(source="aws.s3", detail_type="Other"))
+    assert out["received"] == {"source": "aws.s3", "detail-type": "Other"}
+    assert out["expected"]["source"] == "aws.states" and "detail" in out["top_level_keys"]
+    assert world.untouched()
+
+
 @pytest.mark.parametrize("event,cause", [
     (ev(input_id=None, output_id=None), "neither"), (ev(input_id="a.pdf", output_id="b.pdf"), "different documents"),
     (ev(input_id="RAW:{bad"), "not valid JSON"), (ev(input_id="a b", output_id="a b"), "valid document ID")])

@@ -104,7 +104,8 @@ def process(payload, context):
         return _refused(exc)
     if parsed["action"] == "ignore":
         _log(started, "ignored", reason=parsed["reason"])
-        return _out("ignored", reason=parsed["reason"])
+        extra = {k: parsed[k] for k in ("received", "expected", "top_level_keys") if k in parsed}
+        return _out("ignored", reason=parsed["reason"], **extra)
     document_id = parsed["document_id"]
 
     try:  # one read of the document serves the summary and the PO details

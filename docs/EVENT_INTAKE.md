@@ -36,7 +36,7 @@ The reservation is recorded as made by `event-intake:<execution name>` (`uploade
 
 | `outcome` | Meaning | Anything reserved or written? |
 |---|---|---|
-| `ignored` | not a finished-processing event | no, nothing contacted |
+| `ignored` | not a finished-processing event. When the payload is not a Step Functions status change at all, the answer lists `received` (its `source` and `detail-type`), `expected` and the payload's `top_level_keys` (keys only, never values) so you can see what was sent | no, nothing contacted |
 | `refused` | `errors[0].code` says why (`EVENT_INVALID`, `DOCUMENT_NOT_FOUND`, `DOCUMENT_NOT_READY`, `DOCUMENT_INCOMPLETE`, `DOCUMENT_NEEDS_REVIEW`, `IDP_UNAVAILABLE`, `DEFAULTS_NOT_CONFIGURED`, `SECRET_STORE_UNREACHABLE`, `STORE_UNAVAILABLE`) | no |
 | `read_only` | usable result, but live writes are off, the customer was not matched, or the ERP was unreachable before the first number | no number consumed; a later delivery may try again |
 | `reserved` | numbers reserved, the save could not be handed to the worker | numbers; save it through the API |
