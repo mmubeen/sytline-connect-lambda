@@ -128,6 +128,10 @@ aws lambda invoke --function-name <StandaloneDirectFunction> --cli-binary-format
 ```
 Expect `db_dns`, `db_tcp`, `db_login` after the web-service stages, and a `warnings` entry if `SQL_ENCRYPT=false`. Until the database keys are in the secret `db_login` fails naming them and `ok` is false. Without the VPC attachment there is no database stage (and the script refuses `DATABASE_CHECK=true`). With `DATABASE_CHECK=false` the health result has no database stage. Failure meanings are the same as in step 4.
 
+## Step 11c: Start from the IDP's finished-document event (optional)
+
+`aws lambda invoke --function-name <EventIntakeFunctionName> --payload fileb://sample_events.json out.json`: with live writes off the response is `refused` (a field below its threshold) or `read_only`, with the scan result `summary` and nothing reserved. See [EVENT_INTAKE.md](EVENT_INTAKE.md) for the outcomes and for switching on the automatic rule (`IDP_STATE_MACHINE_ARN`).
+
 ## Step 12: Check the records and stop
 - **CloudWatch logs:** each function writes one structured line per request, and each database step its own line (type, outcome, duration, counts). Confirm no password or login appears.
 - **DynamoDB** (`JobsTableName` output): reservation items (`RESERVATION#<id>`) hold the document ID, line count, numbers and results, and no customer, PO number or lines.

@@ -207,6 +207,9 @@ class FakeJobsTable:
             else:
                 item[names.get(lhs, lhs)] = vals[rhs]
 
+    def delete_item(self, Key):
+        self.items.pop(Key["pk"], None)
+
     def scan_all(self):
         return [dict(i) for i in self.items.values()]
 
@@ -244,8 +247,9 @@ class FakeIdp:
         self.document = self
         self.assessment = self
 
-    def add(self, document_id, fields, status="COMPLETED", document_class=None, low=()):
-        self.docs[document_id] = {"fields": fields, "status": status, "class": document_class, "low": set(low)}
+    def add(self, document_id, fields, status="COMPLETED", document_class=None, low=(), pages=1, issues=0):
+        self.docs[document_id] = {"fields": fields, "status": status, "class": document_class, "low": set(low),
+                                  "pages": pages, "issues": issues}
         return self
 
     def update(self, document_id, **changes):
@@ -263,7 +267,8 @@ class FakeIdp:
     # document.*
     def get_status(self, document_id, **kw):
         d = self._doc(document_id, "status")
-        return self._Obj(document_id=document_id, status=self._Obj(value=d["status"]))
+        return self._Obj(document_id=document_id, status=self._Obj(value=d["status"]), num_pages=d.get("pages"),
+                         processing_issue_count=d.get("issues"))
 
     def get_metadata(self, document_id, section_id=1, **kw):
         d = self._doc(document_id, "metadata")
@@ -453,3 +458,29 @@ class _FakeSqlCursor:
             rows.sort(key=lambda r: r["co_num"], reverse=True)
             self.description = [("terms_code",), ("ship_code",)]
             self._rows = [(r["terms_code"], r["ship_code"]) for r in rows[:1]]
+
+
+# ---- the processing status change event of feature 006 -----------------------------------------------------
+def status_change_event(document_id="159112.pdf", status="SUCCEEDED", source="aws.states",
+                        detail_type="Step Functions Execution Status Change", input_id=Ellipsis, output_id=Ellipsis,
+                        time="2026-10-22T23:02:29Z", name=None, as_text=False, extra_input=None):
+    """The EventBridge event the IDP state machine emits. `input_id` / `output_id` default to `document_id`; None leaves
+    the document out of that text, a string is used as the raw text (to test invalid JSON)."""
+    import json
+
+    def text(doc_id, body):
+        if doc_id is Ellipsis:
+            doc_id = document_id
+        if isinstance(doc_id, str) and doc_id.startswith("RAW:"):
+            return doc_id[4:]
+        doc = {} if doc_id is None else {"document": {"id": doc_id, **(body or {})}}
+        return json.dumps(doc)
+
+    event = {"version": "0", "id": "40f0b36a-31bb-2911-0414-3e99f8f8b4b4", "detail-type": detail_type, "source": source,
+             "account": "108375521309", "time": time, "region": "us-gov-east-1",
+             "detail": {"executionArn": "arn:aws-us-gov:states:us-gov-east-1:108375521309:execution:wf:"
+                                        + (name or f"{document_id}-33b430ca"),
+                        "name": name or f"{document_id}-33b430ca", "status": status,
+                        "input": text(input_id, extra_input), "output": text(output_id, {"status": "EVALUATING"})}}
+    return json.dumps(event) if as_text else event
+

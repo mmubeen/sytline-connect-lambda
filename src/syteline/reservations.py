@@ -18,6 +18,7 @@ TERMINAL = (SAVED, PARTLY_SAVED, FAILED, NEEDS_RECONCILIATION)
 
 PK = "RESERVATION#"
 REF_PK = "RESREF#"
+DOC_PK = "DOCRES#"  # document ID -> its latest reservation (specs/006: an event must see an API-made reservation)
 
 
 class ReservationStore:
@@ -52,8 +53,10 @@ class ReservationStore:
                 "uploaded_by": uploaded_by, "caller_identity": caller_identity, "state": RESERVING,
                 "job_numbers": [], "attempts": 0, "created_at": now, "updated_at": now}
         index = {"pk": f"{REF_PK}{ref}", "request_ref": ref, "reservation_id": rid, "payload_hash": payload_hash}
+        marker = {"pk": f"{DOC_PK}{request['document_id']}", "document_id": request["document_id"],
+                  "reservation_id": rid, "created_at": now}
         try:
-            self._t.transact_put([(item, None), (index, "attribute_not_exists(pk)")])
+            self._t.transact_put([(item, None), (index, "attribute_not_exists(pk)"), (marker, None)])
             return item, False
         except Exception as exc:
             if not _cond_failed(exc):
@@ -67,6 +70,15 @@ class ReservationStore:
 
     def get(self, reservation_id):
         return self._t.get_item(Key={"pk": f"{PK}{reservation_id}"}).get("Item")
+
+    @property
+    def table(self):
+        return self._t
+
+    def reservation_for_document(self, document_id):
+        """The latest reservation made for the IDP document (by either workflow), or None."""
+        marker = self._t.get_item(Key={"pk": f"{DOC_PK}{document_id}"}).get("Item")
+        return self.get(marker["reservation_id"]) if marker else None
 
     # -- transitions (all conditional on the expected state) ----------------------------
     def _transition(self, reservation_id, expected, new_state, extra=None):

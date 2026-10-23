@@ -118,3 +118,16 @@ def test_attached_is_on_only_for_the_exact_value_true(monkeypatch, value, expect
     else:
         monkeypatch.setenv("SYTELINE_ATTACHED", value)
     assert config.attached() is expected
+
+
+def test_event_defaults_use_the_event_date_and_the_configured_warehouse_and_order_type(monkeypatch):
+    monkeypatch.setenv("SYTELINE_DEFAULT_WHSE", "MAIN")
+    monkeypatch.setenv("SYTELINE_DEFAULT_ORDTYPE", "R")
+    assert config.event_defaults("2026-10-22") == {
+        "order_date": "2026-10-22", "received_date": "2026-10-22", "warehouse": "MAIN", "order_type": "R", "missing": []}
+
+
+def test_event_defaults_name_what_is_not_configured(monkeypatch):
+    monkeypatch.delenv("SYTELINE_DEFAULT_WHSE", raising=False)
+    monkeypatch.setenv("SYTELINE_DEFAULT_ORDTYPE", "  ")
+    assert config.event_defaults("2026-10-22")["missing"] == ["SYTELINE_DEFAULT_WHSE", "SYTELINE_DEFAULT_ORDTYPE"]

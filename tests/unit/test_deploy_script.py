@@ -709,3 +709,35 @@ def test_an_incomplete_secret_arn_is_named_before_aws_is_called(run, arn):
     p, calls = run({**BASE, **CREATE, "SYTELINE_SECRET_ARN": arn, "SQL_SERVER": "x"}, args=["--yes"])
     assert p.returncode != 0 and "not a complete secret ARN" in p.stderr and "ACCOUNT placeholder" in p.stderr
     assert "get-secret-value" not in calls and not deployed(calls)
+
+
+# ---- the event intake rule (specs/006): IDP_STATE_MACHINE_ARN -----------------------------------------------------------
+SM_ARN = "arn:aws-us-gov:states:us-gov-east-1:108375521309:stateMachine:idp-DocumentProcessingWorkflow"
+IDP = {"IDP_STACK_NAME": "idp", "IDP_OUTPUT_BUCKET": "out-bucket", "IDP_TRACKING_TABLE": "tracking"}
+
+
+def test_the_state_machine_arn_is_always_passed_and_empty_clears_an_earlier_value(run):
+    p, calls = run({**BASE, **CREATE})
+    assert p.returncode == 0, p.stderr
+    assert overrides(calls)["IdpStateMachineArn"] == ""
+    p, calls = run({**BASE, **CREATE, **IDP, "IDP_STATE_MACHINE_ARN": SM_ARN})
+    assert p.returncode == 0, p.stderr
+    assert overrides(calls)["IdpStateMachineArn"] == SM_ARN
+
+
+@pytest.mark.parametrize("bad", ["not-an-arn", SM_ARN + " x", SM_ARN.replace("stateMachine", "execution")])
+def test_a_malformed_state_machine_arn_is_refused_before_any_sam_call(run, bad):
+    p, calls = run({**BASE, **CREATE, **IDP, "IDP_STATE_MACHINE_ARN": bad})
+    assert p.returncode != 0 and "IDP_STATE_MACHINE_ARN is not a Step Functions state machine ARN" in p.stderr
+    assert "SAM" not in calls
+
+
+def test_the_state_machine_arn_needs_the_idp_settings(run):
+    p, calls = run({**BASE, **CREATE, "IDP_STATE_MACHINE_ARN": SM_ARN})
+    assert p.returncode != 0 and "needs IDP_STACK_NAME" in p.stderr and "SAM" not in calls
+
+
+def test_the_standalone_deployment_ignores_the_state_machine_arn(run):
+    p, calls = run({**SA, **IDP, "IDP_STATE_MACHINE_ARN": SM_ARN}, args=["--standalone"])
+    assert p.returncode == 0, p.stderr
+    assert "IdpStateMachineArn" not in overrides(calls)

@@ -1,0 +1,97 @@
+# Tasks: Document Result from a Processing-Complete Event
+
+**Input**: Design documents from `/specs/006-event-document-result/` (plan.md, spec.md, research.md, data-model.md, contracts/event-intake.md, quickstart.md)
+
+**Tests**: included (the repository tests every feature against fakes; no real AWS, ERP or IDP call is made by any task).
+
+**Format**: `- [ ] T### [P?] [US?] Description with file path`. Run tests with `PYENV_VERSION=3.12 python -m pytest`; template checks with `/private/tmp/venv/bin/cfn-lint` and `sam validate --lint`. Only the 12 failures and 2 errors that already exist (`tests/unit/test_transport.py`, `tests/contract/test_health.py`) may remain.
+
+## Phase 1: Setup
+
+- [X] T001 In `src/syteline/errors.py` add the codes `EVENT_IGNORED`, `EVENT_INVALID` and `DEFAULTS_NOT_CONFIGURED` (research.md R9), following the existing pattern for codes and any status mapping table.
+- [X] T002 [P] Create `tests/tools/make_sample_event.py` (research.md R3): read `sample_events.json`, normalise the Python-style dump (single quotes, `None`, `True`, spaces inside ARNs and the `time` value, raw line breaks inside the quoted `input` and `output` texts), parse the two embedded JSON texts (the only invalid escape in them is `\'`), and write valid JSON to `tests/fixtures/sample_event.json` and back over `sample_events.json`; add `tests/unit/test_sample_event.py` asserting both files parse, `source` is `aws.states`, `detail.status` is `SUCCEEDED`, and `detail.input` and `detail.output` parse to documents with `id` `159112.pdf`.
+- [X] T003 [P] In `tests/fakes.py` add `status_change_event(document_id="159112.pdf", status="SUCCEEDED", source="aws.states", input_id=..., output_id=..., time="2026-10-22T23:02:29Z", as_text=False)` building the event of data-model.md, and extend `FakeIdp` so a document can carry a class, a page count, a processing-issue count, extracted fields with confidence and `meets_threshold`, and the states of the existing fake (`COMPLETED`, not found, unavailable).
+
+## Phase 2: Foundational (blocks every story)
+
+- [X] T004 Create `src/syteline/eventdoc.py` with `parse(event)` (research.md R2, data-model.md "Event"): accept an object or JSON text; return an "ignored" result (reason) unless `source` is `aws.states`, `detail-type` is "Step Functions Execution Status Change" and `detail.status` is `SUCCEEDED`; parse `detail.input` then `detail.output` (JSON text or object), take `document.id`, refuse (`EVENT_INVALID`, naming the cause) when neither has one, when they differ, or when a text is not valid JSON; check the ID is "1 to 256 characters of letters, digits, `. _ - /`; no `..`"; return the document ID, the execution name (`detail.name`, at most 256 characters), and the event date (`time`, first 10 characters when `YYYY-MM-DD`, else today UTC). Nothing else from the event is read.
+- [X] T005 [P] Create `tests/unit/test_eventdoc.py`: the repaired sample, text-form event, `input`-only and `output`-only documents, differing IDs, no ID, invalid JSON text, bad ID characters, `..`, 257 characters, non-SUCCEEDED statuses, foreign source and detail type, missing `time`.
+- [X] T006 In `src/syteline/idp.py` split `_read` (research.md R6): `read_document(document_id)` does the client creation, status check (`NOT_READY` unless `COMPLETED`), metadata and confidence reads and returns one bundle `{state, meta, attributes}` with the existing refusals (`DOCUMENT_NOT_FOUND`, `DOCUMENT_NOT_READY`, `IDP_UNAVAILABLE`); `po_details(document_id, read=None)` uses the bundle when given (otherwise calls `read_document`) and applies the existing class, missing-field, line-count and low-confidence checks unchanged. No behaviour change for existing callers.
+- [X] T007 [P] Add the cases to `tests/unit/test_idp.py` (or the module that tests `idp.py`): `po_details` with and without a pre-read bundle gives identical results and refusals, and with a bundle the fake client is read exactly once.
+- [X] T008 In `src/syteline/config.py` add `event_defaults(event_date)` (research.md R7) returning `{"order_date", "received_date", "warehouse", "order_type"}` with both dates equal to `event_date`, the warehouse from `SYTELINE_DEFAULT_WHSE` and the order type from `SYTELINE_DEFAULT_ORDTYPE`, and a `missing` list naming the blank ones; add its cases to `tests/unit/test_config.py`.
+
+**Checkpoint**: parsing, the single IDP read and the defaults exist; no handler yet.
+
+## Phase 3: User Story 1 - Read the scan result of the document named in the event (Priority: P1) MVP
+
+**Goal**: the function takes the document ID from the event, reads the current result once, and returns the scan result summary; nothing is reserved or written in this story's tests.
+
+**Independent Test**: invoke the handler with the repaired sample event and a fake IDP holding `159112.pdf`; the response shows the document ID, state, class `purchase_order`, 3 pages, the fields with confidence, `line_items[0].material_code` in `below_threshold`, outcome `refused` with `DOCUMENT_NEEDS_REVIEW`, and no store or ERP object was touched.
+
+- [X] T009 [US1] In `src/syteline/idp.py` add `scan_summary(read)` building the summary of data-model.md "Scan Result Summary": `document_id`, `state`, `class`, `pages`, `issues` (count), `fields` as a list of `{path, value, confidence, meets_threshold}` flattened from the metadata fields and the assessment attributes, and `below_threshold` as the sorted paths with `meets_threshold` false; it MUST NOT contain page images, raw text, URIs or credentials (FR-005).
+- [X] T010 [US1] Create `src/handlers/event_intake.py` with `handler(event, context)`: call `eventdoc.parse`; for an ignored or invalid event return at once (US3 completes this); `idp.read_document` once; build the summary; run the usability checks through `idp.po_details(document_id, read=...)` mapping an `IntegrationError` to outcome `refused` with the summary included for `DOCUMENT_INCOMPLETE`, `DOCUMENT_NEEDS_REVIEW` and `TOO_MANY_LINES`; when the result is usable return outcome `read_only` with reason "live ERP writes are disabled" if `config.live_writes_enabled()` is false (the reserve step is added in US2). The response follows contracts/event-intake.md; field values appear only in `summary.fields`.
+- [X] T011 [US1] In the same handler add the log line (FR-009, research.md R8) through `handlers._common.log_event`: document ID, event status, outcome, number of fields and of fields below threshold, reservation id when any; never field values, names, addresses or part numbers.
+- [X] T012 [P] [US1] Create `tests/unit/test_event_intake.py` with the US1 cases: the sample event gives `refused` / `DOCUMENT_NEEDS_REVIEW` naming `line_items[0].material_code` and the summary matches the fake IDP; an event whose embedded document says `EVALUATING` while the fake says `COMPLETED` gives the fake's values (SC-003); a fully confident document with live writes off gives `read_only`; the IDP fake is read once per event; captured logs contain no field value, customer name, address or part number from the example (SC-006); the summary has no URI, image or raw-text key.
+
+**Checkpoint**: the read-only path works and is the shippable MVP (nothing automatic is deployed yet).
+
+## Phase 4: User Story 2 - Reserve the job numbers and save the order automatically (Priority: P2)
+
+**Goal**: a usable result with live writes on is reserved and the save is started, once per document.
+
+**Independent Test**: fake IDP with a fully confident 3-line PO, fake ERP, live writes on: one CO and three job numbers, `save_accepted`, the worker invoked once; the same event again gives `already_processed`.
+
+- [X] T013 [US2] In `src/syteline/reservations.py` make `create_reservation` also put the marker `DOCRES#<document_id>` -> `reservation_id` with `created_at` (data-model.md; unconditional put, last wins), in the same write path as the reservation; add `ReservationStore.reservation_for_document(document_id)`; update `tests/unit/test_reservations.py` (marker written for API-style and event-style reservations, none written for a duplicate request_ref).
+- [X] T014 [US2] Create `src/syteline/eventstore.py` (research.md R5, data-model.md "EVTDOC#"): `existing(document_id)` (the `DOCRES#` marker, then `EVTDOC#`), `claim(document_id, execution)` as a conditional put of `EVTDOC#<document_id>` with `state` `processing`, `release(document_id)` deleting a claim that reserved nothing, `record(document_id, outcome, reservation_id=None, state=None)`; fields exactly as data-model.md, no field values stored. Create `tests/unit/test_eventstore.py` with `FakeJobsTable`: claim twice (second fails), release then claim, existing via marker and via claim, nothing but the listed fields stored.
+- [X] T015 [US2] Create `src/syteline/savestart.py` with `accept_and_start(store, lambda_client, reservation_id, params)` extracted from `handlers/save_intake.py` (accept_save, then the asynchronous worker invoke; a failed invoke leaves `save_accepted` for the sweeper) and make `handlers/save_intake.py` call it; the existing save-intake tests must pass unchanged.
+- [X] T016 [US2] Extend `src/handlers/event_intake.py` (research.md R5 to R7): after a usable result and `live_writes_enabled()`, check `config.event_defaults` and refuse with `DEFAULTS_NOT_CONFIGURED` naming the missing ones before anything is reserved; return `already_processed` with `first_outcome` when `eventstore.existing` finds a reservation or claim; otherwise `claim`, call `run_reserve({"request_ref": "event-<document_id>" (at most 128 characters), "document_id", "uploaded_by": "event-intake"}, soap, store, "event-intake:<execution name>", remaining_ms, source=lambda _id: <the pre-read details>, cfg=...)`; on a reserved reservation call `savestart.accept_and_start` with `{document_id, order_date, received_date, warehouse, order_type}` and return `save_accepted` with the reservation id, CO number and jobs; a failed reservation returns `failed` with the consumed numbers and is never retried or saved; release the claim and record `last outcome` only when no number was reserved (customer refusals, live writes off, ERP unreachable before any number); keep it when a number exists.
+- [X] T017 [P] [US2] Add the US2 cases to `tests/unit/test_event_intake.py`: success for a 3-line and a 25-line PO (one CO, one job per line, worker invoked once, request_ref and caller identity as specified, SC-007 shape); live writes off reserves nothing; missing default warehouse/order type refused before any reservation; customer not matched / low confidence reserves nothing; second delivery and two simultaneous deliveries (claim conflict) reserve once and return the first outcome (SC-005); a document reserved through the API first gives `already_processed`; an uncertain number outcome is reported `failed`, consumes no further number and is not replayed on redelivery; a claim is released after a refusal that reserved nothing so a later delivery proceeds.
+- [X] T018 [US2] In `src/template.yaml` add `EventIntakeFunction` (research.md R4: handler `handlers.event_intake.handler`, `Timeout: 60`, the host VPC settings and environment of `ReserveFunction` plus `WORKER_FUNCTION_NAME`, `SYTELINE_DEFAULT_WHSE`, `SYTELINE_DEFAULT_ORDTYPE`, the jobs-table, secret, IDP-read and worker-invoke policies, `EventInvokeConfig` with `MaximumRetryAttempts: 0`), the parameter `IdpStateMachineArn` (default `""`, pattern `^$|^arn:aws[a-z-]*:states:[a-z0-9-]+:[0-9]+:stateMachine:[A-Za-z0-9_-]+$`), a condition and an `AWS::Events::Rule` (pattern of contracts/event-intake.md) with the Lambda permission only when the ARN is given, and an output for the function name; add `EventIntakeFunction` to the build targets of `src/Makefile`. Create `tests/unit/test_template_event.py` (no rule without the ARN, the rule's pattern with it, no retries, function in the host VPC, the same SQL/IDP variables as `ReserveFunction`) and run `cfn-lint` and `sam validate --lint`.
+- [X] T019 [P] [US2] In `src/deploy.sh` (plant branch only) pass `IdpStateMachineArn` from `IDP_STATE_MACHINE_ARN` (always passed, empty clears an earlier value; refuse a value that does not look like a state machine ARN) and add `IDP_STATE_MACHINE_ARN=` with a comment to the PLANT ONLY block of `src/deploy.env.example`; add cases to `tests/unit/test_deploy_script.py`; confirm `tests/unit/test_mode_parity.py` still passes (the parameter is plant-only).
+
+**Checkpoint**: the automatic path works against fakes; nothing starts automatically until `IDP_STATE_MACHINE_ARN` is set.
+
+## Phase 5: User Story 3 - Ignore events that cannot be used, clearly (Priority: P3)
+
+**Goal**: unusable events cost nothing and say why.
+
+**Independent Test**: events with status `RUNNING`, `FAILED`, `TIMED_OUT`, `ABORTED`, a foreign source, no ID, differing IDs and bad JSON text: each answers with its reason and no IDP, ERP or store call is made.
+
+- [X] T020 [US3] In `src/handlers/event_intake.py` make the ignored and invalid paths return before any client, store or secret is created (build clients lazily) and shape the responses per contracts/event-intake.md (`ignored` + `reason`; `refused` + `EVENT_INVALID` naming the cause); no summary for either.
+- [X] T021 [P] [US3] Add the US3 cases to `tests/unit/test_event_intake.py`: each status other than `SUCCEEDED`, a foreign source and detail type, no document ID, `input` and `output` IDs differing, invalid JSON in `input`, a bad ID; for every case the fake IDP, fake ERP, fake table and fake Lambda record zero calls (SC-002) and the response carries the reason.
+
+## Phase 6: User Story 4 - Failures are reported, not hidden (Priority: P4)
+
+**Goal**: not found, not finished and unavailable services give distinct, named outcomes and nothing is reserved.
+
+**Independent Test**: fake IDP answering not found, `RUNNING`, unavailable; fake ERP unreachable at the first number: each a distinct named outcome, no reservation, claim released.
+
+- [X] T022 [US4] In `src/handlers/event_intake.py` map `DOCUMENT_NOT_FOUND` (naming the document ID), `DOCUMENT_NOT_READY` (with `state`), `IDP_UNAVAILABLE`, `SECRET_STORE_UNREACHABLE`, `STORE_UNAVAILABLE` and `ERP_UNREACHABLE` to `refused`/`failed` outcomes without a summary where the result was not read, releasing the claim when no number was reserved; an unexpected exception is logged by type only and re-raised only when nothing was claimed.
+- [X] T023 [P] [US4] Add the US4 cases to `tests/unit/test_event_intake.py`: the three IDP failures, a secret-store failure, a store failure on claim, and an unreachable ERP before the first number; each names its code, reserves nothing, writes nothing, and a later delivery proceeds once the fault is fixed (claim released).
+
+## Phase 7: Polish and cross-cutting
+
+- [X] T024 [P] Create `docs/EVENT_INTAKE.md` (set-up of `IDP_STATE_MACHINE_ARN`, the same-account-and-region limit, the outcomes table of contracts/event-intake.md, what happens to the example document and why, how to re-run after a review, the marker limit of research.md R5, the sample-file repair) and add one line each to `README.md`, `docs/TESTING.md`, `docs/DEPLOYMENT.md` (new setting row) and `docs/RESERVATIONS.md`.
+- [X] T025 Run the whole suite, `cfn-lint src/template.yaml src/template-standalone.yaml`, `./deploy.sh --validate` and `./deploy.sh --standalone --validate`; check no log line, response key or stored item outside `summary.fields` holds a field value; mark completed tasks `[X]`.
+
+## Dependencies and order
+
+- Phase 1: T001 first for the error codes; T002 and T003 in parallel with it.
+- Phase 2: T004 then T005; T006 then T007; T008 independent; all of Phase 2 before any story.
+- US1 (T009 to T012) needs T001, T003, T004, T006, T008 and is the MVP. T010 before T011; T009 before T010.
+- US2 (T013 to T019) needs US1: T013 and T014 and T015 are different files and can start together; T016 needs T013 to T015; T017 needs T016; T018 needs T010 (handler path) and can run in parallel with T016/T017; T019 needs the parameter name from T018.
+- US3 (T020, T021) and US4 (T022, T023) need US1; they edit `handlers/event_intake.py`, so sequential after T016: T020, then T022.
+- Polish after the stories: T024 in parallel with T025's run; T025 last.
+
+## Parallel examples
+
+- Phase 1: T002 and T003 together.
+- Phase 2: T005 alongside T006; T007 alongside T008.
+- US2: T013, T014, T015 together; T017 (tests) and T018 (template) together once T016 is done; T019 alongside T018 after the parameter name is fixed.
+- US3 and US4 tests (T021, T023) can be written alongside their handler tasks, in the same test file only one at a time.
+
+## Implementation strategy
+
+- **MVP**: Phases 1 and 2 and US1 (T001 to T012): the read-only summary, safe to ship because no ERP or table write exists on that path.
+- **Then**: US2 adds the automatic reserve and save (writes to the ERP only with live writes on and `IDP_STATE_MACHINE_ARN` set), US3 and US4 finish the refusal paths.
+- Do not turn on live writes or the event rule until the unconfirmed ERP and IDP names of features 004 and 005 are verified read-only (quickstart.md step 1).

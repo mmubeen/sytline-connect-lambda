@@ -36,6 +36,9 @@ class DynamoTable:
     def update_item(self, **kw):
         return self._table.update_item(**kw)
 
+    def delete_item(self, Key):
+        return self._table.delete_item(Key=Key)
+
     def transact_put(self, puts):
         """All-or-nothing puts: list of (item, condition_expression_or_None)."""
         items = []

@@ -81,6 +81,7 @@ cp deploy.env.example deploy.env
 | `SYTELINE_SECRET_ARN` | `SytelineSecretArn` | the secret from step 2.1 |
 | `SYTELINE_CONFIG` | `SytelineConfig` | SyteLine configuration, default `CCT` |
 | `SYTELINE_DEFAULT_WHSE`, `SYTELINE_DEFAULT_ORDTYPE` | `DefaultWhse`, `DefaultOrdType` | used when an order omits them |
+| `IDP_STATE_MACHINE_ARN` | `IdpStateMachineArn` | optional: the IDP state machine whose `SUCCEEDED` events start the event intake (same account and region; needs the IDP settings); empty = nothing starts automatically. See [EVENT_INTAKE.md](EVENT_INTAKE.md) |
 | `API_VPCE_ID` | `ApiVpcEndpointId` | existing `execute-api` interface endpoint; empty only with `CREATE_API_ENDPOINT=true` |
 | `CREATE_API_ENDPOINT` | `CreateApiEndpoint` | `true` creates that endpoint in the **new** host network (create mode only); default `false` |
 | `WORKER_VPC_ID`, `WORKER_SUBNET_IDS`, `WORKER_SG_IDS`, `WORKER_ROUTE_TABLE_IDS` | `WorkerVpcId`, `WorkerSubnetIds`, `WorkerSecurityGroupIds`, `WorkerRouteTableIds` | existing network: **all four** (lists comma-separated). All four empty: the stack creates the network |

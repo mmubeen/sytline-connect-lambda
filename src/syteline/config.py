@@ -161,3 +161,15 @@ def match_settings():
     """(minimum confident score, ambiguity margin, candidate cap) of the customer search; the demo's defaults."""
     return (float(os.environ.get("SYTELINE_MATCH_MIN_SCORE", "70")), float(os.environ.get("SYTELINE_MATCH_MARGIN", "3")),
             int(os.environ.get("SYTELINE_MATCH_CAP", "1000")))
+
+
+def event_defaults(event_date):
+    """The values an event-started save needs that the IDP document does not hold (specs/006, research R7): both dates
+    are the event date; the warehouse and order type are the configured defaults. `missing` names the blank ones."""
+    whse = os.environ.get("SYTELINE_DEFAULT_WHSE", "").strip()
+    ordtype = os.environ.get("SYTELINE_DEFAULT_ORDTYPE", "").strip()
+    missing = [name for name, value in (("SYTELINE_DEFAULT_WHSE", whse), ("SYTELINE_DEFAULT_ORDTYPE", ordtype))
+               if not value]
+    return {"order_date": event_date, "received_date": event_date, "warehouse": whse, "order_type": ordtype,
+            "missing": missing}
+

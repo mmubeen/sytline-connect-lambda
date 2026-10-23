@@ -9,8 +9,10 @@ work, with a code that names the state or the fields (research.md R13, R17).
 This is the one module that imports `idp_sdk`. Tests replace `_client_factory` with a fake.
 """
 
+import contextlib
 import logging
 import os
+import re
 
 from . import errors, idp_fields, validation
 from .errors import IntegrationError
@@ -56,17 +58,11 @@ def _low_confidence(attributes, used):
     return sorted(set(low))
 
 
-def po_details(document_id):
-    """Return {"details", "fingerprint"} for the document, or raise IntegrationError (a refusal, nothing written)."""
+@contextlib.contextmanager
+def _idp_errors(document_id):
+    """Refusals are passed through; anything the IDP client raises becomes DOCUMENT_NOT_FOUND or IDP_UNAVAILABLE."""
     try:
-        client = _client()
-    except IntegrationError:
-        raise
-    except Exception as exc:
-        log.warning("IDP client could not be created: %s", type(exc).__name__)
-        raise _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be reached") from None
-    try:
-        return _read(client, document_id)
+        yield
     except IntegrationError:
         raise
     except Exception as exc:
@@ -76,13 +72,56 @@ def po_details(document_id):
         raise _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be read") from None
 
 
-def _read(client, document_id):
-    state = _state(client.document.get_status(document_id=document_id))
-    if state != COMPLETED:
-        raise _refuse(errors.DOCUMENT_NOT_READY,
-                      f"the document has not finished processing (it is {state}); try again when it is {COMPLETED}",
-                      state=state)
-    meta = client.document.get_metadata(document_id=document_id)
+class DocumentRead:
+    """What one read of a document gave: its state, status, metadata, and (read on first use) the confidence attributes.
+
+    One read serves both the scan result summary and the PO details of an event run (specs/006, research R6).
+    """
+
+    def __init__(self, client, document_id, state, status, meta):
+        self.client, self.document_id, self.state, self.status, self.meta = client, document_id, state, status, meta
+        self._attributes = None
+
+    def attributes(self):
+        if self._attributes is None:
+            with _idp_errors(self.document_id):
+                self._attributes = getattr(self.client.assessment.get_confidence(document_id=self.document_id),
+                                           "attributes", None) or {}
+        return self._attributes
+
+
+def read_document(document_id):
+    """Read the document's state and metadata. Raises IntegrationError (a refusal, nothing written) when it does not
+    exist, has not finished, or the IDP cannot be reached."""
+    try:
+        client = _client()
+    except IntegrationError:
+        raise
+    except Exception as exc:
+        log.warning("IDP client could not be created: %s", type(exc).__name__)
+        raise _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be reached") from None
+    with _idp_errors(document_id):
+        status = client.document.get_status(document_id=document_id)
+        state = _state(status)
+        if state != COMPLETED:
+            raise _refuse(errors.DOCUMENT_NOT_READY,
+                          f"the document has not finished processing (it is {state}); try again when it is {COMPLETED}",
+                          state=state)
+        return DocumentRead(client, document_id, state, status, client.document.get_metadata(document_id=document_id))
+
+
+def po_details(document_id, read=None):
+    """Return {"details", "fingerprint"} for the document, or raise IntegrationError (a refusal, nothing written).
+
+    `read` is a DocumentRead already obtained for this document (the event run reads once); otherwise it is read here.
+    """
+    read = read or read_document(document_id)
+    with _idp_errors(document_id):
+        return _details(read)
+
+
+def _details(read):
+    meta = read.meta
     expected = idp_fields.document_class()
     if expected and getattr(meta, "document_class", None) != expected:
         raise _refuse(errors.DOCUMENT_INCOMPLETE,
@@ -96,11 +135,44 @@ def _read(client, document_id):
     if len(details["lines"]) > idp_fields.MAX_LINES:
         raise _refuse(errors.TOO_MANY_LINES, f"the document has more than {idp_fields.MAX_LINES} lines",
                       fields=["lines"])
-    attributes = getattr(client.assessment.get_confidence(document_id=document_id), "attributes", None) or {}
-    low = _low_confidence(attributes, used)
+    low = _low_confidence(read.attributes(), used)
     if low:
         raise _refuse(errors.DOCUMENT_NEEDS_REVIEW,
                       "fields the save needs are below their confidence threshold and must be reviewed in IDP first: "
                       + ", ".join(low), fields=low)
     return {"details": details, "fingerprint": validation.fingerprint(
         details["customer"], details["po_number"], len(details["lines"]))}
+
+
+_STEP = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
+
+
+def _resolve(fields, path):
+    """The value at a result path such as `line_items[0].material_code`, or None."""
+    node = fields
+    for name, index in _STEP.findall(path):
+        try:
+            node = node[int(index)] if index else node[name]
+        except (KeyError, IndexError, TypeError):
+            return None
+    return node
+
+
+def scan_summary(read):
+    """The scan result summary of a read document (specs/006 data-model): state, class, pages, issues, each assessed
+    field with value and confidence, and the fields below their threshold. No images, raw text, URIs or credentials."""
+    meta = read.meta
+    fields = getattr(meta, "fields", None) or {}
+    attributes = read.attributes()
+    out_fields = []
+    for path in sorted(attributes):
+        entry = attributes[path]
+        out_fields.append({"path": path, "value": _resolve(fields, path), "confidence": getattr(entry, "confidence", None),
+                           "meets_threshold": getattr(entry, "meets_threshold", None)})
+    for name in sorted(set(fields) - set(attributes)):  # extracted but not assessed
+        out_fields.append({"path": name, "value": fields[name], "confidence": None, "meets_threshold": None})
+    pages = getattr(read.status, "num_pages", None)
+    issues = getattr(read.status, "processing_issue_count", None)
+    return {"document_id": read.document_id, "state": read.state, "class": getattr(meta, "document_class", None),
+            "pages": pages, "issues": issues, "fields": out_fields,
+            "below_threshold": sorted(f["path"] for f in out_fields if f["meets_threshold"] is False)}

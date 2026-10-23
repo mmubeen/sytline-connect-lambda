@@ -56,6 +56,10 @@ SyteLine does not take a reserved number back. If a reservation is never saved, 
 
 The save stops at the first problem, as the order upload does; it never carries on after an unknown outcome. A rejected teardown date is only a warning on its line (the job is still saved). A timeout while setting it stops the run as `needs_reconciliation`.
 
+## Starting from an IDP event
+
+A reservation can also be started by the IDP's "processing finished" event instead of a request carrying the document ID: the event intake reads the document, reserves with the same rules and starts the save. See [EVENT_INTAKE.md](EVENT_INTAKE.md). Event-made reservations show `uploaded_by` `event-intake`.
+
 ## Limits and notes
 
 - At most 25 lines per reservation (the reserve call must answer inside API Gateway's 29 s limit; it also stops safely, keeping the numbers it got, if time runs short; the IDP document read adds a few seconds).

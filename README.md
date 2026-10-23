@@ -95,6 +95,7 @@ allow-listing. When attached, its health check also tests the plant database aut
 A two-stage alternative to the one-step order upload: `POST /job-reservations` reserves the CO and job numbers from SyteLine (writes no
 order, line or job), then `POST /job-reservations/{id}/save` saves the order information using those numbers, following the PO OCR
 demo's flow. `GET /job-reservations/{id}` explains what happened. See [`docs/RESERVATIONS.md`](docs/RESERVATIONS.md).
+The same workflow can be started automatically by the IDP's finished-document event (`IDP_STATE_MACHINE_ARN`): see [`docs/EVENT_INTAKE.md`](docs/EVENT_INTAKE.md).
 
 ## Testing the deployment
 A step-by-step test sequence, from credential-free checks to an approved live-write window: [`docs/TESTING.md`](docs/TESTING.md).

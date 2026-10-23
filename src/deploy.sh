@@ -356,6 +356,12 @@ else
   echo "Note: IDP_STACK_NAME is empty: the job-number workflow (reserve / save) will answer IDP_UNAVAILABLE."
 fi
 [[ -z "${IDP_REPO:-}" ]] || export IDP_REPO
+# IDP_STATE_MACHINE_ARN: when given, the IDP's finished-document events start the event intake (always passed: empty clears it)
+[[ -z "${IDP_STATE_MACHINE_ARN:-}" || "$IDP_STATE_MACHINE_ARN" =~ ^arn:aws[a-z-]*:states:[a-z0-9-]+:[0-9]+:stateMachine:[A-Za-z0-9_-]+$ ]] \
+  || die "IDP_STATE_MACHINE_ARN is not a Step Functions state machine ARN (arn:...:states:REGION:ACCOUNT:stateMachine:NAME)"
+if [[ -n "${IDP_STATE_MACHINE_ARN:-}" && -z "${IDP_STACK_NAME:-}" ]]; then
+  die "IDP_STATE_MACHINE_ARN needs IDP_STACK_NAME (and the other IDP settings): the event intake reads the document through the IDP SDK"
+fi
 
 update_secret
 sam build ${profile_args[@]+"${profile_args[@]}"}
@@ -394,6 +400,7 @@ overrides=(
   "$(q IdpRegion "${IDP_REGION:-}")"
   "$(q IdpOutputBucketName "${IDP_OUTPUT_BUCKET:-}")"
   "$(q IdpTrackingTableName "${IDP_TRACKING_TABLE:-}")"
+  "$(q IdpStateMachineArn "${IDP_STATE_MACHINE_ARN:-}")"
 )
 [[ -z "${API_VPCE_ID:-}" ]] || overrides+=("$(q ApiVpcEndpointId "$API_VPCE_ID")")
 

@@ -22,12 +22,16 @@ def test_the_four_route_parameters_default_to_the_database(template):
         assert p["Type"] == "String" and p["Default"] == "database" and "database" in p["Description"]
 
 
+# the functions that number, resolve or save: reserve, the worker, the connectivity check and (specs/006) the event intake
+DB_FUNCTIONS = ("ReserveFunction", "WorkerFunction", "DirectFunction", "EventIntakeFunction")
+
+
 def test_the_route_variables_are_on_exactly_the_functions_that_number_resolve_or_save(template):
-    for fn in ("ReserveFunction", "WorkerFunction", "DirectFunction"):
+    for fn in DB_FUNCTIONS:
         env = env_of(template, fn)
         assert {k: env[k] for k in ROUTE_VARS} == {k: {"Ref": v} for k, v in ROUTE_VARS.items()}, fn
     for fn, r in template["Resources"].items():
-        if r["Type"] == "AWS::Serverless::Function" and fn not in ("ReserveFunction", "WorkerFunction", "DirectFunction"):
+        if r["Type"] == "AWS::Serverless::Function" and fn not in DB_FUNCTIONS:
             assert not set(ROUTE_VARS) & set(env_of(template, fn)), fn
 
 
@@ -75,10 +79,10 @@ def test_the_encryption_parameter_defaults_to_true_and_is_on_exactly_the_databas
     p = template["Parameters"]["SqlEncrypt"]
     assert p["Default"] == "true" and p["AllowedValues"] == ["true", "false"]
     assert "UNENCRYPTED" in p["Description"] and "Force Encryption" in p["Description"]
-    for fn in ("ReserveFunction", "WorkerFunction", "DirectFunction"):
+    for fn in DB_FUNCTIONS:
         assert env_of(template, fn)["SYTELINE_SQL_ENCRYPT"] == {"Ref": "SqlEncrypt"}, fn
     for fn, r in template["Resources"].items():
-        if r["Type"] == "AWS::Serverless::Function" and fn not in ("ReserveFunction", "WorkerFunction", "DirectFunction"):
+        if r["Type"] == "AWS::Serverless::Function" and fn not in DB_FUNCTIONS:
             assert "SYTELINE_SQL_ENCRYPT" not in env_of(template, fn), fn
 
 
@@ -100,7 +104,7 @@ CODE_DEFAULTS = {"SiteId": "10", "MatchMinScore": "70", "MatchMargin": "3", "Mat
 def test_the_tuning_parameters_default_to_the_codes_own_defaults_and_are_wired_to_the_database_functions(template):
     for name, default in CODE_DEFAULTS.items():
         assert template["Parameters"][name]["Default"] == default, name
-    for fn in ("ReserveFunction", "WorkerFunction", "DirectFunction"):
+    for fn in DB_FUNCTIONS:
         env = env_of(template, fn)
         assert {k: env[k] for k in TUNING_VARS} == {k: {"Ref": v} for k, v in TUNING_VARS.items()}, fn
 

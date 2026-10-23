@@ -134,3 +134,56 @@ def test_the_fingerprint_changes_with_the_customer_po_or_line_count(fake):
     assert idp.po_details(DOC)["fingerprint"] != a
     fake.add(DOC, po_fields(2, customer_name="OTHER"))
     assert idp.po_details(DOC)["fingerprint"] != a
+
+
+# ---- one read for the summary and the details (specs/006) ---------------------------------------------------------
+def test_po_details_with_a_pre_read_document_is_identical_and_reads_the_document_once(fake):
+    fake.add(DOC, po_fields(2))
+    plain = idp.po_details(DOC)
+    fake.calls.clear()
+    read = idp.read_document(DOC)
+    assert idp.po_details(DOC, read=read) == plain
+    idp.scan_summary(read)
+    assert sorted(op for op, _ in fake.calls) == ["confidence", "metadata", "status"]  # each exactly once
+
+
+def test_read_document_refuses_unfinished_missing_and_unavailable_documents(fake):
+    fake.add(DOC, po_fields(), status="RUNNING")
+    with pytest.raises(IntegrationError) as ei:
+        idp.read_document(DOC)
+    assert ei.value.err["code"] == errors.DOCUMENT_NOT_READY and ei.value.extra["state"] == "RUNNING"
+    with pytest.raises(IntegrationError) as ei:
+        idp.read_document("nope.pdf")
+    assert ei.value.err["code"] == errors.DOCUMENT_NOT_FOUND
+    fake.raise_for["x.pdf"] = RuntimeError("down")
+    with pytest.raises(IntegrationError) as ei:
+        idp.read_document("x.pdf")
+    assert ei.value.err["code"] == errors.IDP_UNAVAILABLE
+
+
+def test_a_failure_reading_the_confidence_is_an_unavailable_idp(fake):
+    fake.add(DOC, po_fields())
+    read = idp.read_document(DOC)
+    fake.raise_for[DOC] = RuntimeError("down")
+    with pytest.raises(IntegrationError) as ei:
+        idp.po_details(DOC, read=read)
+    assert ei.value.err["code"] == errors.IDP_UNAVAILABLE
+
+
+def test_the_summary_lists_every_assessed_field_with_value_and_confidence_and_the_low_ones(fake):
+    fake.add(DOC, po_fields(1), low={"cust_po", "lines[0].part_number"}, pages=3, issues=1, document_class="purchase_order")
+    out = idp.scan_summary(idp.read_document(DOC))
+    assert out["document_id"] == DOC and out["state"] == "COMPLETED" and out["class"] == "purchase_order"
+    assert out["pages"] == 3 and out["issues"] == 1
+    by_path = {f["path"]: f for f in out["fields"]}
+    assert by_path["cust_po"] == {"path": "cust_po", "value": "PO-1", "confidence": 0.4, "meets_threshold": False}
+    assert by_path["customer_name"]["confidence"] == 0.97 and by_path["customer_name"]["value"] == "ACME"
+    assert by_path["lines[0].part_number"]["value"] == "A"  # a nested path is resolved to its value
+    assert out["below_threshold"] == ["cust_po", "lines[0].part_number"]
+
+
+def test_the_summary_has_no_bulk_content(fake):
+    fake.add(DOC, po_fields(1))
+    out = idp.scan_summary(idp.read_document(DOC))
+    assert set(out) == {"document_id", "state", "class", "pages", "issues", "fields", "below_threshold"}
+    assert all(set(f) == {"path", "value", "confidence", "meets_threshold"} for f in out["fields"])

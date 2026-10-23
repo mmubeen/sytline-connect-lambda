@@ -7,8 +7,7 @@ writes); they are never stored.
 import json
 import time
 
-from syteline import errors, idp, validation
-from syteline.config import worker_function_name
+from syteline import errors, idp, savestart, validation
 from syteline.errors import IntegrationError
 from syteline.reservations import RESERVED, SAVE_ACCEPTED, ReservationStore
 
@@ -94,7 +93,7 @@ def handler(event, context):
             "of lines changed); reserve again for the changed document", step="document")]})
 
     try:
-        accepted = store.accept_save(rid, {k: body[k] for k in SAVE_PARAMS if k in body})
+        accepted = savestart.accept_and_start(store, _lambda(), rid, {k: body[k] for k in SAVE_PARAMS if k in body})
     except Exception:
         # nothing was recorded, so the reservation is still usable
         log_event("save_intake", started, outcome="503", reservation_id=rid)
@@ -104,10 +103,5 @@ def handler(event, context):
         log_event("save_intake", started, outcome="409", reservation_id=rid, state=current["state"])
         return response(409, _state_refusal(current["state"]) or _state_refusal(SAVE_ACCEPTED))
 
-    try:  # async, no retries: a failure here leaves the reservation `save_accepted` and the sweeper re-drives it
-        _lambda().invoke(FunctionName=worker_function_name(), InvocationType="Event",
-                         Payload=json.dumps({"reservation_id": rid}).encode("utf-8"))
-    except Exception:
-        pass
     log_event("save_intake", started, outcome="202", reservation_id=rid, uploaded_by=body["uploaded_by"], caller=caller)
     return response(202, {"reservation_id": rid, "state": SAVE_ACCEPTED})
