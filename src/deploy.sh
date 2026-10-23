@@ -98,6 +98,9 @@ update_secret() {
   local arn="${SYTELINE_SECRET_ARN:-}" region
   [[ "$arn" =~ ^arn:aws[a-z-]*:secretsmanager:([a-z0-9-]+): ]] || die "SYTELINE_SECRET_ARN is not a Secrets Manager ARN"
   region="${BASH_REMATCH[1]}"
+  # the whole ARN, so a placeholder or a stray space/carriage return is named here instead of as "Invalid name" by AWS
+  [[ "$arn" =~ ^arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]+:secret:[A-Za-z0-9/_+=.@-]+$ ]] \
+    || die "SYTELINE_SECRET_ARN is not a complete secret ARN (arn:...:secretsmanager:REGION:ACCOUNT-DIGITS:secret:NAME-SUFFIX; no spaces or quotes, and the account id must not be the ACCOUNT placeholder)"
   echo "Will add or update these keys in the credentials secret: ${keys[*]}. All other keys stay as they are, and values are never printed."
   if [[ "$assume_yes" != "true" ]]; then
     if [[ -t 0 ]]; then

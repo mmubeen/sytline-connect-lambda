@@ -697,3 +697,15 @@ def test_the_merge_notice_names_the_keys_and_never_a_value(run):
     assert "MERGED" not in p.stdout
     for value in DB.values():
         assert value not in p.stdout + p.stderr
+
+
+@pytest.mark.parametrize("arn", [
+    "arn:aws-us-gov:secretsmanager:us-gov-east-1:ACCOUNT:secret:NAME",      # the example's placeholder
+    "arn:aws-us-gov:secretsmanager:us-gov-east-1:123456789012:secret:x y",  # a space
+    "arn:aws-us-gov:secretsmanager:us-gov-east-1:123456789012:secret:x\r",  # a carriage return
+    "arn:aws-us-gov:secretsmanager:us-gov-east-1:123456789012",             # cut off
+])
+def test_an_incomplete_secret_arn_is_named_before_aws_is_called(run, arn):
+    p, calls = run({**BASE, **CREATE, "SYTELINE_SECRET_ARN": arn, "SQL_SERVER": "x"}, args=["--yes"])
+    assert p.returncode != 0 and "not a complete secret ARN" in p.stderr and "ACCOUNT placeholder" in p.stderr
+    assert "get-secret-value" not in calls and not deployed(calls)
