@@ -14,14 +14,14 @@ cfn-lint src/template.yaml
 Expect only the failures that already exist: 12 failures and 2 errors in `tests/unit/test_transport.py`, `tests/contract/test_health.py` and `tests/unit/test_standalone_parity.py`. Nothing else should fail.
 
 ## Step 1: Gather what the deployment needs
-- **ERP secret** (Secrets Manager, JSON): `SYTELINE_PASS` and the database keys `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, `SQL_CA_PEM` (optional `SQL_PORT`). `SQL_CA_PEM` is needed in the default (encrypted) mode; if the plant server has no verifiable certificate, deploy with `SQL_ENCRYPT=false` instead (no CA needed, the connection is unencrypted, warnings appear: see [DATABASE.md](DATABASE.md)). See [DATABASE.md](DATABASE.md).
+- **ERP secret** (Secrets Manager, JSON): `SYTELINE_PASS` and the database keys `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, `SQL_CA_PEM` (optional `SQL_PORT`); you can put them in `deploy.env` and let `./deploy.sh` merge them into the secret (step 2). `SQL_CA_PEM` is needed in the default (encrypted) mode; if the plant server has no verifiable certificate, deploy with `SQL_ENCRYPT=false` instead (no CA needed, the connection is unencrypted, warnings appear: see [DATABASE.md](DATABASE.md)). See [DATABASE.md](DATABASE.md).
 - **IDP stack:** its name, output bucket and tracking table, and one test document that has finished processing and whose result contains the fields named in `src/syteline/idp_fields.py` (or set `IDP_FIELD_MAP`). See [RESERVATIONS.md](RESERVATIONS.md).
 - **Network:** subnets with routes to the plant web service (TCP 80) and the database (TCP 1433), and private paths to S3, CloudFormation, DynamoDB and Secrets Manager; an execute-api VPC endpoint if you will call the API.
 - **A checkout of the IDP accelerator** (`IDP_REPO`).
 - **Written approval** from the ERP owner for steps 7 onward.
 
 ## Step 2: Deploy with live writes off
-Copy `src/deploy.env.example` to `src/deploy.env` and fill in the ERP settings, the network settings, the four route settings (leave `database` unless the web service has an endpoint for the operation), the `IDP_*` settings and `LIVE_WRITES=false`. Then:
+Copy `src/deploy.env.example` to `src/deploy.env` and fill in the ERP settings, the database login (`SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, `SQL_PORT`, `SQL_CA_PEM_FILE`: `deploy.sh` merges them into the secret, asks first, `--yes` skips the question), the network settings, the four route settings (leave `database` unless the web service has an endpoint for the operation), the `IDP_*` settings and `LIVE_WRITES=false`. Then:
 ```
 cd src
 IDP_REPO=/path/to/accelerated-intelligent-document-processing-on-aws ./deploy.sh

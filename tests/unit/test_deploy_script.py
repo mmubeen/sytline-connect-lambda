@@ -20,6 +20,8 @@ SAM_STUB = '#!/usr/bin/env bash\necho "SAM $*" >> "$STUB_LOG"\n'
 AWS_STUB = '''#!/usr/bin/env bash
 echo "AWS $*" >> "$STUB_LOG"
 case "$*" in
+  *get-secret-value*) [[ "${STUB_SECRET_FAIL:-}" == "1" ]] && exit 254; printf '%s' "$STUB_SECRET" ;;
+  *put-secret-value*) f="$(printf '%s\n' "$@" | sed -n 's#^file://##p')"; cp "$f" "$STUB_PUT"; echo "tmpfile-mode $(stat -f %Lp "$f" 2>/dev/null || stat -c %a "$f")" >> "$STUB_LOG" ;;
   *list-profiles*) [[ "${STUB_PROFILES_FAIL:-}" == "1" ]] && exit 252; printf '%s\n' ${STUB_PROFILES:-default} ;;
   *StackStatus*) [[ -n "${STUB_STACK_STATUS:-}" ]] && echo "$STUB_STACK_STATUS" || exit 255 ;;
   *HostVpcId*) echo "${STUB_HOSTVPC:-None}" ;;
@@ -42,12 +44,16 @@ def run(tmp_path):
     log = tmp_path / "log"
     log.write_text("")
 
+    put_path = tmp_path / "put.json"
+
     def go(settings, args=(), stack_status="", host_vpc="", with_aws=True, profiles="default govcloud-prod",
-           profiles_fail=False, env_name="deploy.env", write_env=True):
+           profiles_fail=False, env_name="deploy.env", write_env=True, secret=None, secret_fail=False):
         if write_env:
             (work / env_name).write_text("".join(f'{k}="{v}"\n' for k, v in settings.items()))
         env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "STUB_LOG": str(log), "STUB_STACK_STATUS": stack_status,
-               "STUB_HOSTVPC": host_vpc, "STUB_PROFILES": profiles, "STUB_PROFILES_FAIL": "1" if profiles_fail else ""}
+               "STUB_HOSTVPC": host_vpc, "STUB_PROFILES": profiles, "STUB_PROFILES_FAIL": "1" if profiles_fail else "",
+               "STUB_PUT": str(put_path), "STUB_SECRET_FAIL": "1" if secret_fail else ""}
+        env["STUB_SECRET"] = secret if secret is not None else '{"SYTELINE_PASS": "erp-pass"}'
         if not with_aws:
             (bin_dir / "aws").unlink()
         log.write_text("")
@@ -55,6 +61,8 @@ def run(tmp_path):
         calls = log.read_text()
         return p, calls
 
+    go.put_path = put_path
+    go.work = work
     return go
 
 
@@ -539,3 +547,103 @@ def test_standalone_auto_and_false_need_no_vpc_attachment_and_true_does(run):
     assert p.returncode != 0 and not deployed(calls)
     p, calls = sa(run, {"DATABASE_CHECK": "true", **ATT})
     assert p.returncode == 0 and overrides(calls)["DatabaseCheck"] == "true"
+
+
+# ---- the database settings are merged into the credentials secret (not passed to CloudFormation) ---------------------
+import json  # noqa: E402
+
+DB = {"SQL_SERVER": "sql.plant.example", "SQL_DATABASE": "SL_PROD", "SQL_USER": "svc-login", "SQL_PASS": "S3cr3t-DB-Pass",
+      "SQL_PORT": "14330"}
+SECRET_CALLS = ("get-secret-value", "put-secret-value")
+
+
+def written(run):
+    return json.loads(run.put_path.read_text())
+
+
+def test_nothing_is_read_or_written_when_no_database_setting_is_given(run):
+    p, calls = run({**BASE, **CREATE})
+    assert p.returncode == 0 and not any(c in calls for c in SECRET_CALLS) and deployed(calls)
+
+
+def test_the_database_values_are_merged_into_the_secret_keeping_its_other_keys(run):
+    pem = run.work / "ca.pem"
+    pem.write_text("-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----\n")
+    p, calls = run({**BASE, **CREATE, **DB, "SQL_CA_PEM_FILE": str(pem)}, args=["--yes"],
+                   secret='{"SYTELINE_PASS": "erp-pass", "SQL_PORT": "1433", "EXTRA": "kept"}')
+    assert p.returncode == 0, p.stdout + p.stderr
+    out = written(run)
+    assert out["SYTELINE_PASS"] == "erp-pass" and out["EXTRA"] == "kept"  # untouched keys survive
+    assert out["SQL_SERVER"] == "sql.plant.example" and out["SQL_DATABASE"] == "SL_PROD"
+    assert out["SQL_USER"] == "svc-login" and out["SQL_PASS"] == "S3cr3t-DB-Pass" and out["SQL_PORT"] == "14330"
+    assert out["SQL_CA_PEM"].startswith("-----BEGIN CERTIFICATE-----") and out["SQL_CA_PEM"].endswith("-----\n")
+    assert calls.index("get-secret-value") < calls.index("put-secret-value") < calls.index("SAM build")  # before building
+    assert deployed(calls)
+
+
+def test_only_the_given_keys_change(run):
+    p, calls = run({**BASE, **CREATE, "SQL_SERVER": "new.plant.example"}, args=["--yes"],
+                   secret='{"SQL_SERVER": "old", "SQL_USER": "keep-me", "SQL_PASS": "keep-pass"}')
+    assert p.returncode == 0
+    assert written(run) == {"SQL_SERVER": "new.plant.example", "SQL_USER": "keep-me", "SQL_PASS": "keep-pass"}
+
+
+def test_the_values_never_reach_the_output_the_command_lines_or_the_stack_parameters(run):
+    p, calls = run({**BASE, **CREATE, **DB}, args=["--yes"])
+    assert p.returncode == 0
+    for secret in (DB["SQL_PASS"], DB["SQL_USER"]):
+        assert secret not in p.stdout + p.stderr and secret not in calls  # not printed, not in any logged command line
+    assert "keys: SQL_SERVER SQL_DATABASE SQL_USER SQL_PASS SQL_PORT" in p.stdout  # key names only
+    o = overrides(calls)
+    assert not {"SqlServer", "SqlDatabase", "SqlUser", "SqlPass", "SqlPort", "SqlCaPem"} & set(o)  # no such stack parameter
+    assert not set(DB.values()) & set(o.values())                                                  # and no such value
+    deploy_line = [l for l in calls.splitlines() if l.startswith("SAM deploy")][0]
+    assert not any(v in deploy_line for v in DB.values())
+
+
+def test_the_temporary_file_is_private_and_removed(run):
+    p, calls = run({**BASE, **CREATE, **DB}, args=["--yes"])
+    assert "tmpfile-mode 600" in calls
+    path = [a for a in calls.split() if a.startswith("file://")][0][len("file://"):]
+    assert not os.path.exists(path)
+
+
+def test_without_yes_and_without_a_terminal_it_refuses_and_changes_nothing(run):
+    p, calls = run({**BASE, **CREATE, **DB})
+    assert p.returncode != 0 and "re-run with --yes" in (p.stdout + p.stderr)
+    assert "put-secret-value" not in calls and not deployed(calls) and "SAM build" not in calls
+
+
+def test_a_secret_that_already_holds_the_values_is_not_rewritten(run):
+    secret = json.dumps({"SQL_SERVER": DB["SQL_SERVER"], "SQL_PORT": DB["SQL_PORT"]})
+    p, calls = run({**BASE, **CREATE, "SQL_SERVER": DB["SQL_SERVER"], "SQL_PORT": DB["SQL_PORT"]}, args=["--yes"], secret=secret)
+    assert p.returncode == 0 and "nothing to write" in p.stdout and "put-secret-value" not in calls and deployed(calls)
+
+
+@pytest.mark.parametrize("settings,secret,fail,message", [
+    ({"SQL_PORT": "abc"}, None, False, "SQL_PORT must be a whole number"),
+    ({"SQL_SERVER": "x", "SQL_CA_PEM_FILE": "/no/such/file.pem"}, None, False, "SQL_CA_PEM_FILE does not exist"),
+    ({"SQL_SERVER": "x"}, "[1, 2]", False, "not a JSON object"),
+    ({"SQL_SERVER": "x"}, "not json at all", False, "not a JSON object"),
+    ({"SQL_SERVER": "x"}, None, True, "could not read the credentials secret")])
+def test_a_problem_with_the_secret_or_the_values_stops_before_building_or_deploying(run, settings, secret, fail, message):
+    p, calls = run({**BASE, **CREATE, **settings}, args=["--yes"], secret=secret, secret_fail=fail)
+    assert p.returncode != 0 and message in (p.stdout + p.stderr)
+    assert "put-secret-value" not in calls and "SAM build" not in calls and not deployed(calls)
+
+
+def test_a_secret_arn_that_is_not_a_secrets_manager_arn_is_refused(run):
+    p, calls = run({**BASE, **CREATE, "SYTELINE_SECRET_ARN": "not-an-arn", "SQL_SERVER": "x"}, args=["--yes"])
+    assert p.returncode != 0 and "not a Secrets Manager ARN" in (p.stdout + p.stderr) and not deployed(calls)
+
+
+def test_the_standalone_mode_merges_into_its_secret_too(run):
+    p, calls = sa(run, {"SQL_SERVER": DB["SQL_SERVER"], "SQL_DATABASE": "SL", "SQL_USER": "u", "SQL_PASS": "p"}, args=["--yes"])
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert written(run)["SQL_SERVER"] == DB["SQL_SERVER"] and calls.index("put-secret-value") < calls.index("SAM build")
+
+
+def test_build_and_validate_modes_never_touch_the_secret(run):
+    for flag in ("--build", "--validate"):
+        p, calls = run({**BASE, **CREATE, **DB}, args=[flag, "--yes"])
+        assert not any(c in calls for c in SECRET_CALLS), flag

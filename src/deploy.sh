@@ -5,10 +5,13 @@
 #   ./deploy.sh --validate               lint the template only
 #   ./deploy.sh --allow-network-change   permit switching between "create" and "supply" host-network mode
 #   ./deploy.sh --profile NAME           use this AWS credentials profile (flag > AWS_PROFILE_NAME in the settings file > default chain)
+#   ./deploy.sh --yes                    do not ask before writing the database settings into the credentials secret
 #   ./deploy.sh --standalone             the STAND-ALONE (no VPC) deployment: stack "sytline-connect-standalone",
 #                                        settings in deploy.standalone.env (no network settings; https:// ERP required)
 # Flags can be combined, e.g. ./deploy.sh --profile govcloud-prod --validate
-# Settings come from deploy.env (copy deploy.env.example), or deploy.standalone.env with --standalone. Nothing secret is stored there.
+# Settings come from deploy.env (copy deploy.env.example), or deploy.standalone.env with --standalone (both git-ignored).
+# The database login (SQL_SERVER, SQL_DATABASE, SQL_USER, SQL_PASS, SQL_PORT, SQL_CA_PEM_FILE) may be given there too: it is MERGED
+# into the existing credentials secret (SYTELINE_SECRET_ARN) before deploying, never passed to CloudFormation and never printed.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -16,12 +19,14 @@ mode="deploy"
 allow_network_change="false"
 profile=""
 standalone="false"
+assume_yes="false"
 while (( $# )); do
   case "$1" in
     --build) mode="build" ;;
     --validate) mode="validate" ;;
     --allow-network-change) allow_network_change="true" ;;
     --standalone) standalone="true" ;;
+    --yes) assume_yes="true" ;;
     --profile) [[ $# -ge 2 && -n "${2:-}" && "${2:0:2}" != "--" ]] || { echo "ERROR: --profile needs a profile name" >&2; exit 2; }
                profile="$2"; shift ;;
     --profile=*) profile="${1#--profile=}"; [[ -n "$profile" ]] || { echo "ERROR: --profile needs a profile name" >&2; exit 2; } ;;
@@ -70,6 +75,57 @@ if [[ "$mode" == "build" ]]; then sam build ${cfg_args[@]+"${cfg_args[@]}"} ${pr
 set -a; . "./$env_file"; set +a
 
 die() { echo "ERROR: $*" >&2; exit 1; }
+
+# --- database settings -> credentials secret --------------------------------------------------------
+# Merges the database values of the settings file into the JSON secret named by SYTELINE_SECRET_ARN (other keys are kept).
+# The values travel through the environment and a 0600 temporary file only: not through the command line, CloudFormation
+# parameters or the output. Asks before writing unless --yes; with values set and no terminal, it refuses rather than guessing.
+update_secret() {
+  local keys=() k
+  for k in SQL_SERVER SQL_DATABASE SQL_USER SQL_PASS SQL_PORT; do [[ -z "${!k:-}" ]] || keys+=("$k"); done
+  if [[ -n "${SQL_CA_PEM_FILE:-}" ]]; then
+    [[ -f "$SQL_CA_PEM_FILE" ]] || die "SQL_CA_PEM_FILE does not exist: $SQL_CA_PEM_FILE"
+    keys+=("SQL_CA_PEM")
+  fi
+  (( ${#keys[@]} )) || return 0
+  [[ -z "${SQL_PORT:-}" || "$SQL_PORT" =~ ^[0-9]+$ ]] || die "SQL_PORT must be a whole number"
+  command -v aws >/dev/null || die "aws CLI not found: it is needed to update the credentials secret"
+  command -v python3 >/dev/null || die "python3 not found: it is needed to merge the database values into the secret"
+  local arn="${SYTELINE_SECRET_ARN:-}" region
+  [[ "$arn" =~ ^arn:aws[a-z-]*:secretsmanager:([a-z0-9-]+): ]] || die "SYTELINE_SECRET_ARN is not a Secrets Manager ARN"
+  region="${BASH_REMATCH[1]}"
+  echo "The database settings in $env_file will be MERGED into the credentials secret (keys: ${keys[*]}); its other keys are kept. Values are never printed."
+  if [[ "$assume_yes" != "true" ]]; then
+    if [[ -t 0 ]]; then
+      local answer; read -r -p "Write them to the secret now? [y/N] " answer
+      [[ "$answer" =~ ^[Yy]$ ]] || die "not confirmed: the secret was not changed and nothing was deployed (--yes skips this question)"
+    else
+      die "database settings are set but there is no terminal to confirm: re-run with --yes to write them to the secret"
+    fi
+  fi
+  local current tmp status=0
+  current="$(aws secretsmanager get-secret-value --secret-id "$arn" --region "$region" ${profile_args[@]+"${profile_args[@]}"} \
+               --query SecretString --output text)" || die "could not read the credentials secret (permissions or the ARN?)"
+  tmp="$(mktemp)"; chmod 600 "$tmp"
+  printf '%s' "$current" | KEYS="${keys[*]}" python3 -c '
+import json, os, sys
+cur = json.load(sys.stdin)
+if not isinstance(cur, dict):
+    sys.exit(2)
+new = dict(cur)
+for key in os.environ["KEYS"].split():
+    new[key] = open(os.environ["SQL_CA_PEM_FILE"]).read() if key == "SQL_CA_PEM" else os.environ[key]
+if new == cur:
+    sys.exit(3)
+json.dump(new, open(sys.argv[1], "w"))
+' "$tmp" || status=$?
+  if (( status == 3 )); then rm -f "$tmp"; echo "The credentials secret already holds these database settings; nothing to write."; return 0; fi
+  if (( status != 0 )); then rm -f "$tmp"; die "the credentials secret is not a JSON object, so the database settings were not merged"; fi
+  aws secretsmanager put-secret-value --secret-id "$arn" --region "$region" ${profile_args[@]+"${profile_args[@]}"} \
+      --secret-string "file://$tmp" >/dev/null || { rm -f "$tmp"; die "could not write the credentials secret"; }
+  rm -f "$tmp"
+  echo "Credentials secret updated (keys: ${keys[*]}). You may remove the database values from $env_file now; they are not needed again."
+}
 
 # =========================================================================================
 # Stand-alone (no VPC) deployment
@@ -162,6 +218,7 @@ if [[ "$standalone" == "true" ]]; then
   else
     echo "Deploying the STAND-ALONE version (no VPC): stack sytline-connect-standalone. No network resources are created."
   fi
+  update_secret
   sam build "${cfg_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
   sam deploy "${cfg_args[@]}" ${profile_args[@]+"${profile_args[@]}"} --parameter-overrides \
     "$(q "$wsdl_param" "$SYTELINE_WSDL")" \
@@ -293,6 +350,7 @@ else
 fi
 [[ -z "${IDP_REPO:-}" ]] || export IDP_REPO
 
+update_secret
 sam build ${profile_args[@]+"${profile_args[@]}"}
 
 # Every value is double-quoted so commas (list parameters) and other characters are kept literally.

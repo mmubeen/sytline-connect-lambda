@@ -28,6 +28,16 @@ Each setting is either an **endpoint (IDO) name**, which keeps that operation on
 | `SQL_PORT` | optional, default 1433 |
 | `SQL_CA_PEM` | PEM text of the certificate(s) to trust (the server's certificate authority, or, for a self-signed test server, its own certificate). **Required while the connection is encrypted** (the default); not needed with `SqlEncrypt=false` |
 
+### Putting the values into the secret (`deploy.sh`)
+
+You can fill them in `deploy.env` (or `deploy.standalone.env`) and let `deploy.sh` do it: `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, `SQL_PORT` and `SQL_CA_PEM_FILE` (a path to a PEM file; its text is stored as `SQL_CA_PEM`). Before building, the script reads the secret named by `SYTELINE_SECRET_ARN`, **merges** the values you gave into it (its other keys are kept; a value left empty keeps what the secret already holds) and writes a new version. Rules:
+
+- It asks first (`./deploy.sh --yes` skips the question); with values set and no terminal it refuses rather than guess.
+- The values travel only through the environment and a private temporary file that is removed afterwards: they are never stack parameters, never on a command line and never printed (only the key names are).
+- If the secret already holds exactly these values nothing is written. A problem reading or writing the secret, a secret that is not a JSON object, a bad `SQL_PORT` or a missing PEM file stops the run before anything is built or deployed.
+- `--build` and `--validate` never touch the secret. The caller needs `secretsmanager:GetSecretValue` and `PutSecretValue` on it.
+- `deploy.env` is git-ignored; once the secret has the values you may delete them from the file.
+
 Every function that can read the secret can read these. Use a login with only the rights the calls need: **execute** on `NextCoSp` and `NextWOSp` and **select** on `custaddr` and `co`.
 
 Tunables (environment): `SYTELINE_SITE_ID` (default 10), `SYTELINE_SQL_LOGIN_TIMEOUT` (5 s), `SYTELINE_SQL_TIMEOUT` (10 s), `SYTELINE_MATCH_MIN_SCORE` (70), `SYTELINE_MATCH_MARGIN` (3), `SYTELINE_MATCH_CAP` (1000).
