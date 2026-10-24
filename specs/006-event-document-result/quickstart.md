@@ -29,3 +29,10 @@ Set `IDP_STATE_MACHINE_ARN` in `deploy.env`, redeploy, upload a document to the 
 - `{"action": "document_event", "event": <the sample>}` and the raw sample give the same outcome; an unknown action gives `UNKNOWN_ACTION`.
 - Stand-alone function: `{"action": "document_event", ...}` gives `ACTION_UNAVAILABLE`.
 
+## Entry log (FR-016)
+
+1. Default: invoke any payload (`./invoke.sh ../sample_events.json`) and find the line with `"type": "event_entry"` in the function's log: `mode` is `redacted`, `detail.input` and `detail.output` show only sizes and the document ID, and no field value from the document appears anywhere in the log.
+2. Opt in: set `LOG_EVENTS=true` in `deploy.env`, redeploy, invoke again: `mode` is `whole` and the line holds the event (header credentials still `***`); a payload larger than 8000 characters shows `truncated`.
+3. Odd input: invoke with a plain string or `null`: the run behaves as before and the line says what arrived.
+4. Turn it off again (`LOG_EVENTS=false`) when finished: it exposes document and order content to whoever can read the logs.
+

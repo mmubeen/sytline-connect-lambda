@@ -58,6 +58,15 @@ Parameters:
     AllowedValues: ["false", "true"]
     Description: Use FIPS AWS service endpoints (GovCloud)
 
+  LogEvents:
+    Type: String
+    Default: "false"
+    AllowedValues: ["false", "true"]
+    Description: >-
+      "false" (default): on entry the function logs a redacted copy of the event (the bodies that can hold document or order
+      content are replaced by their size). "true": the whole event is logged (cut at 8000 characters), so the logs then hold
+      document and order content; use it to debug a payload and turn it off again. Credentials in headers are never logged.
+
   # --- Which route each ERP operation uses: an IDO name keeps it on the web service; `database` (or empty) uses the
   #     SyteLine database (the PO OCR demo's SQL calls). The database login lives in the ERP credentials secret. ---
   NextCoIdo:
@@ -340,6 +349,7 @@ Resources:
           SYTELINE_CONFIG: !Ref SytelineConfig
           SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
           SYTELINE_LIVE_WRITES: !Ref LiveWrites
+          LOG_EVENTS: !Ref LogEvents
           SYTELINE_NEXT_CO_IDO: !Ref NextCoIdo
           SYTELINE_NEXT_JOB_IDO: !Ref NextJobIdo
           SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo

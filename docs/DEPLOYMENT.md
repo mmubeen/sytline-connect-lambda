@@ -76,6 +76,7 @@ cp deploy.env.example deploy.env
 | `API_VPCE_ID` | `ApiVpcEndpointId` | **optional**: the existing `execute-api` interface endpoint (`vpce-...`) the private API is reachable through. **Empty = no API is created** (the function is then reached by direct invocation, the IDP event and its own schedule only). Always passed, so emptying it later removes the API |
 | `IDP_STATE_MACHINE_ARN` | `IdpStateMachineArn` | optional: the IDP state machine whose `SUCCEEDED` events start the event intake (same account and region; needs the IDP settings); empty = nothing starts automatically. See [EVENT_INTAKE.md](EVENT_INTAKE.md) |
 | `LIVE_WRITES`, `LIVE_APPROVAL_REF` | `LiveWrites` | leave `false`; see section 7 |
+| `LOG_EVENTS` | `LogEvents` | optional, default `false`: on entry the function logs a redacted copy of the event. `true` logs the **whole** event (cut at 8000 characters), so the logs then hold document and order content: debug with it, then turn it off. See [EVENT_INTAKE.md](EVENT_INTAKE.md#the-entry-log-line) |
 | route, database, IDP and tuning settings | various | optional; see [DATABASE.md](DATABASE.md), [RESERVATIONS.md](RESERVATIONS.md) |
 
 Settings of the earlier shapes (`WORKER_ROUTE_TABLE_IDS`, `HOST_NETWORK_CIDR`, `PLANT_CIDR_*`, `DYNAMODB_PREFIX_LIST_ID`, `CREATE_VPC_ENDPOINTS`, `CREATE_API_ENDPOINT`, `ATTACH_*`, `ALLOW_PLAIN_HTTP`, `VERIFY_TLS`, `DATABASE_CHECK`) are no longer used: `deploy.sh` prints a notice naming any it finds in `deploy.env` and does not pass them.

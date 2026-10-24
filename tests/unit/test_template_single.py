@@ -260,3 +260,16 @@ def test_every_numeric_default_is_a_value_the_code_accepts():
     from syteline import config
 
     assert config.match_settings() == (70.0, 3.0, 1000) and config.sql_timeouts() == (5.0, 10.0) and config.site_id() == 10
+
+
+# ---- feature 006, FR-016: the entry-log setting ------------------------------------------------------------------------
+def test_log_events_is_an_opt_in_parameter_off_by_default_and_reaches_the_function(template):
+    p = template["Parameters"]["LogEvents"]
+    assert p["Default"] == "false" and p["AllowedValues"] == ["false", "true"]
+    assert "document and order content" in p["Description"]
+    assert env(template)["LOG_EVENTS"] == {"Ref": "LogEvents"}
+
+
+def test_the_entry_log_adds_no_permission_and_no_resource(template):
+    assert len(of_type(template, "AWS::Serverless::Function")) == 1
+    assert not any("logs:" in str(s) for s in fn(template)["Policies"])

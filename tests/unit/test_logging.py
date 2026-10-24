@@ -65,7 +65,8 @@ def test_each_handler_logs_type_identifiers_outcome_and_duration(env, caplog):
     assert by_type["upload"]["outcome"] == "succeeded" and by_type["upload"]["co_num"] == "100"
     assert by_type["get_status"]["state"] == "succeeded"
     assert by_type["get_notes"]["record"] == ["co", "900"] and by_type["get_notes"]["ok"] is True
-    assert all(isinstance(l["ms"], int) for l in by_type.values())
+    # the entry line (FR-016 of feature 006) is written before the work, so it has no duration; every outcome line does
+    assert all(isinstance(l["ms"], int) for t, l in by_type.items() if t != "event_entry")
 
 
 def test_failures_are_logged_with_their_code(env, caplog):

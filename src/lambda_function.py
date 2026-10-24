@@ -105,7 +105,9 @@ def _background(action, payload, context):
 
 def lambda_handler(event, context):
     from handlers import routing
+    from syteline import eventlog
 
+    eventlog.log_entry(event, log)  # FR-016: one line with the event (redacted unless LOG_EVENTS=true); never raises
     raw = event
     event = event if isinstance(event, dict) else {}
     explicit = event.get("action")

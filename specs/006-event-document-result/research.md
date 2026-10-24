@@ -69,3 +69,27 @@
 ## R16. Callers that relied on the default health action
 **Decision**: every caller that omitted `action` for the health check is changed to pass `"action": "health"`: `tests/contract/test_health.py` (3 calls), `tests/unit/test_transport.py` (where the event has no action), `tests/unit/test_standalone_parity.py` (the `call(**kw)` helper), `tests/unit/test_secret_store.py`, the `__main__` local run in `lambda_function.py`, `README.md` ("omit `--payload` for the default `health` action"), and any doc example of a bare `lambda invoke` for the health check. New tests assert the old bare forms now return the strict refusal. `docs/DEPLOYMENT.md`, `docs/STANDALONE.md` and `docs/TESTING.md` are searched for bare health invocations and updated.
 
+## R17. Where and what (FR-016)
+**Decision**: the first statement of `lambda_handler`, before routing, calls `eventlog.log_entry(event)`. It writes one line `{"type": "event_entry", "mode": "redacted"|"whole", "event": ...}` through the root logger at INFO,
+the same logger and shape family as the other lines (a `type` field, one JSON object per line).
+**Rationale**: before routing means every kind of invocation is covered (IDP event, API request, direct action, sweep, the function's own `work_*` actions); the `type` field keeps the existing log readers and `test_logging` happy (the removed ad-hoc line had none).
+**Alternatives**: logging inside each handler (misses the unrouted and refused payloads, the ones that most need it); the platform's own request logging (does not exist for Lambda event payloads).
+
+## R18. Redaction (the default)
+**Decision**: a recursive copy of the event in which the value of any key in {`input`, `output`, `body`, `text`} is replaced by `{"redacted": true, "chars": n}` (`n` = its length, as text if it is a string, as JSON if not). For an IDP event the replacement of `detail.input` also carries `document_id` (read with the same parser the intake uses; a failure to read it just omits it).
+Everything else is kept: `source`, `detail-type`, `status`, ARNs, names, times, `httpMethod`, `resource`, `pathParameters`, `action`, `record_type`, `record_key`, `reservation_id`.
+**Rationale**: those four keys are exactly where document text (`input`/`output` hold page classification text, as the example event shows), order bodies (`body`) and note text (`text`, the `add_note` action) arrive; the rest are identifiers needed to debug routing.
+**Open edge**: query-string values and other action fields are kept (they are identifiers today); a new action carrying free text must add its key to the set (a test lists the set).
+
+## R19. Opt-in whole event and the credentials rule
+**Decision**: `LOG_EVENTS=true` logs the whole event, except that header values named `Authorization`, `X-Amz-Security-Token`, `Cookie` and `X-Api-Key` (any case) are always masked as `***`, in both modes. Over the cap (default 8000 characters, `LOG_EVENTS_MAX_CHARS` to change, not exposed in the template) the line carries `{"truncated": true, "chars": N, "head": "<first cap characters>"}` instead of the event so every line stays one valid JSON object under CloudWatch's limit.
+**Rationale**: the project's standing rule (credentials and secrets are never logged) outranks the opt-in; a signed request's `Authorization` header is a credential-equivalent.
+
+## R20. It must never change the run
+**Decision**: `log_entry` catches every exception (non-serialisable values use `default=str`; bytes become a size note; `None` and other non-dict values log their type and size; a string that is valid JSON is parsed and redacted like an object), logs one short warning `event_entry could not be built: <ExceptionType>` and returns. It is not wrapped around the handler's own work.
+**Alternatives**: letting it raise (would turn a logging problem into a failed ERP event).
+
+## R21. The setting
+**Decision**: template parameter `LogEvents` (`"false"` default, allowed `"true"`/`"false"`) -> function environment `LOG_EVENTS`; `deploy.sh` reads optional `LOG_EVENTS` from `deploy.env` (default `false`) and always passes it, like the other optional settings; the deploy notice warns when it is `true` that logs will hold document and order content.
+**Rationale**: one switch, visible in the deployment settings, off unless chosen; no new permission. The mock environment (feature 008) picks it up through the template rendering with no change.
+

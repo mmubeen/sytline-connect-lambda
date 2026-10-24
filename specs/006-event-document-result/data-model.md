@@ -27,3 +27,14 @@ State transitions: `processing` -> `reserved` (numbers obtained) -> `save_accept
 
 ## Scan Result Summary (response only)
 `document_id`, `state`, `class`, `pages`, `issues` (count), `fields`: list of `{path, value, confidence, meets_threshold}`, `below_threshold`: list of paths. Not stored, not logged.
+
+## Entry log line (FR-016)
+| Field | Type | Rule |
+|-------|------|------|
+| `type` | string | always `event_entry` |
+| `mode` | string | `redacted` (default) or `whole` (`LOG_EVENTS=true`) |
+| `event` | any JSON | the event as received after redaction (R18/R19); for a non-object payload `{"payload_type": "str", "chars": n}`; when over the cap in whole mode `{"truncated": true, "chars": N, "head": "..."}` |
+| redacted value | object | `{"redacted": true, "chars": n}` (+ `document_id` for an IDP event's `detail.input`) |
+
+Constraints: one JSON object per line; line length at most the cap plus a fixed envelope; header values `Authorization`, `X-Amz-Security-Token`, `Cookie`, `X-Api-Key` are `***` in both modes; no state, no persistence.
+

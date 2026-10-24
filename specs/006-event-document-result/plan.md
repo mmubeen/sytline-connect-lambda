@@ -10,6 +10,9 @@ Add a second way to start the job-number workflow (feature 004): a new function 
 
 **Revision 2026-10-22 (one Lambda, `action` decides):** the separate `EventIntakeFunction` is folded into the existing direct-invoke Lambda (`lambda_function.lambda_handler`, `DirectFunction`); the new action `document_event` is the **default** when no `action` is given, `health` must be asked for explicitly, and a bare payload that is not an IDP event is refused with a message naming `"action": "health"` (research.md R11 to R16, spec FR-011 to FR-015).
 
+**Addendum 2026-10-24 (FR-016, SC-009): entry log.** On entry to `lambda_handler` the function writes one JSON line holding the event: a redacted form by
+default, the whole event (size-capped) only when `LOG_EVENTS=true`. See research R17..R21 and `contracts/entry-log.md`.
+
 ## Technical Context
 
 **Language/Version**: Python 3.13 (Lambda; existing code), SAM/CloudFormation YAML
@@ -33,6 +36,9 @@ Add a second way to start the job-number workflow (feature 004): a new function 
 ## Constitution Check
 
 `.specify/memory/constitution.md` is still the unfilled template: no ratified gates. The spec's own rules and the standing rules of features 001 to 005 were applied; none is relaxed. Reserving and writing stay behind the live-writes switch.
+
+**Entry-log gate (added):** the standing rule that credentials are never logged is stronger than the opt-in: header values such as `Authorization` and
+`X-Amz-Security-Token` stay masked even when `LOG_EVENTS=true`. Pass: R19.
 
 ## Project Structure
 
@@ -86,3 +92,16 @@ docs/EVENT_INTAKE.md            # NEW: set-up, outcomes, what the sample documen
 | `EVTDOC#` item with a conditional claim | Two simultaneous deliveries must not both reserve; async invocations are at-least-once | Relying on `request_ref` alone covers repeats of this path but not the request workflow |
 | `read_document()` split in `idp.py` | The summary must be returned even when the PO details are refused (FR-006a) without reading the IDP three times | Calling `po_details` and a separate summary read doubles the IDP traffic |
 | `savestart.py` extracted from the save-intake handler | The event path and the API path must start a save identically | Copying the code would let the two drift |
+
+## Addendum: files for the entry log (FR-016)
+
+```text
+src/syteline/eventlog.py        # NEW  redact(), render(), log_entry(): never raises
+src/lambda_function.py          # one call at the top of lambda_handler
+src/template.yaml               # parameter LogEvents (default "false") -> env LOG_EVENTS
+src/deploy.sh, deploy.env.example   # optional LOG_EVENTS=true|false, always passed
+tests/unit/test_eventlog.py     # NEW  redaction, cap, whole mode, odd inputs
+tests/unit/test_entry_log.py    # NEW  one line per invocation, run unchanged, failure swallowed
+tests/unit/test_template_single.py, test_deploy_script.py   # the parameter and its pass-through
+docs/EVENT_INTAKE.md, docs/DEPLOYMENT.md   # what is logged, how to turn it on, who can read it
+```

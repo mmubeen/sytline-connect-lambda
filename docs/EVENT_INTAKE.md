@@ -75,6 +75,28 @@ The response then carries `cause` (the exception type only, never its message) a
 
 **Easiest:** ask for the message in the response itself: `./invoke.sh --debug ../sample_events.json` (it sends a temporary copy of the payload with `"debug": true`; add `"debug": true` yourself beside the event, or beside `event`, when invoking another way). An IDP failure then also carries `detail`: the SDK's message on one line, shortened to 700 characters. Without `debug` it is never in the response. Otherwise a failed read (`cause` `IDPProcessingError`, `ClientError`, ...) is explained by the log line `IDP read failed: <type>: <the SDK's message, shortened to 700 characters>`; the message is in the function's log only, never in the response. Typical messages: `AccessDeniedException ... <action> ... <resource>` (add that permission to the role, as `lambda:InvokeFunction` on the IDP stack's LookupFunction was added), `Results not found for document` (the document ID is not in the IDP tracking table), a timeout (no network path from the subnets to that service).
 
+## The entry log line
+
+Every invocation (an IDP event, an API request, a direct action, the schedule's sweep, the function's own background actions) writes one
+JSON line first, before anything runs, so a payload that is refused or misrouted can still be read from the log:
+
+```json
+{"type": "event_entry", "mode": "redacted", "event": {"detail-type": "Step Functions Execution Status Change", "source": "aws.states",
+ "detail": {"status": "SUCCEEDED", "input": {"redacted": true, "chars": 11204, "document_id": "159112.pdf"}, "output": {"redacted": true, "chars": 12981}}}}
+```
+
+| Setting `LOG_EVENTS` | `mode` | The line holds |
+|---|---|---|
+| `false` (default) | `redacted` | the event with the values of `input`, `output`, `body` and `text` replaced by `{"redacted": true, "chars": n}` (an IDP event's `input` also shows the document ID); everything else as received |
+| `true` | `whole` | the whole event, cut at 8000 characters (`{"truncated": true, "chars": N, "head": "..."}` beyond that) |
+
+- Header values `Authorization`, `X-Amz-Security-Token`, `Cookie` and `X-Api-Key` are `***` in both modes.
+- The example IDP event is about 20,000 characters, so with `LOG_EVENTS=true` the line shows its first 8000 characters (the envelope and the start of
+  `detail.input`). The cap is `LOG_EVENTS_MAX_CHARS` on the function if you need more; it is not a template parameter.
+- With `true` the logs hold document and order content (names, addresses, part numbers) and are readable by whoever can read the function's log group:
+  turn it off again when you have finished debugging. The default keeps the promise of this feature that no field value, customer name or address is logged.
+- Building the line never changes the run: any problem leaves one `event_entry could not be built: <ExceptionType>` warning.
+
 ## Known limits
 
 - A reservation made **before** this feature has no document marker, so an event for that document is not recognised as already handled. An event and a request that start for the same document at the very same moment can both reserve (the request path has no claim).

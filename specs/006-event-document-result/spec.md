@@ -26,6 +26,10 @@ Two facts shape the work:
 - Q: How does the IDP status-change event, which has no `action`, reach the intake? → A: The intake is the **default action**: when the payload has no `action`, the action is `document_event`. An explicit `action` always wins (`health`, `add_note`, `get_notes`, `document_event`; an unknown value is refused as today). The event is the payload itself; an `event` key holding it is also accepted.
 - Q: What does a payload with no `action` that is not an IDP event (for example `{}` or `{"dry_run": true}`) do now? → A: Strict: it is handed to the intake and refused with `EVENT_INVALID`, and the message says to pass `"action": "health"` for the health check. A health check therefore always needs `"action": "health"`; this supersedes "`action` defaults to health" of features 001 and 003 for this Lambda.
 
+### Session 2026-10-24
+
+- Q: What should the entry log line contain for an incoming event? → A: By default a redacted form of the event as JSON: the bulky parts that can hold document or order content (`detail.input`, `detail.output`, an API request body) are replaced by their size and, for an IDP event, the document ID; everything else is logged as is. Only when an opt-in setting (for example `LOG_EVENTS=true`) is on is the whole event logged, with a size cap. The setting is off by default.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Read the scan result of the document named in the event (Priority: P1)
@@ -105,7 +109,8 @@ If the document does not exist, has not finished, or the document-processing ser
 - The `output` is absent (an execution that produced none) but the `input` has the document ID: the `input` is used.
 - A document ID with characters outside the usual file-name set, or an empty one: refused as not a document ID, nothing contacted.
 - The result is very large (many pages and fields): the summary lists fields and counts but not page images, raw text or other bulk content.
-- Event bodies contain customer data (names, addresses, part numbers): the logs keep only the document ID and counts.
+- Event bodies contain customer data (names, addresses, part numbers): by default the logs keep only the document ID, counts and the redacted entry line (FR-016); the whole event is logged only when the opt-in setting is on.
+- The event is larger than the log cap, or is not JSON-serialisable (bytes, a string, `None`): the entry line says so and shows what it can; it never raises and never changes the run.
 
 ## Requirements *(mandatory)*
 
@@ -131,6 +136,7 @@ If the document does not exist, has not finished, or the document-processing ser
 - **FR-013**: A payload with no `action` that is not an IDP processing status change event MUST be refused with `EVENT_INVALID` and a message that names `"action": "health"`; it MUST NOT run a health check or contact anything. A health check MUST always require `"action": "health"` (with its existing `dry_run` and `diagnose` options).
 - **FR-014**: In the stand-alone deployment, which has no document source and no reservation store, the `document_event` action (explicit or by default) MUST be refused with a clear message that it is not available in that deployment, and MUST NOT contact anything.
 - **FR-015**: The one Lambda MUST carry the permissions and settings of both roles (the connectivity actions and the intake) in the plant deployment, and the connectivity actions MUST behave exactly as before when asked for with their `action`.
+- **FR-016**: On entry to the handler, for every invocation (IDP event, API request, direct action, scheduled sweep, the function's own background actions), the function MUST write one log line holding the event as JSON. By default that line is the redacted form: `detail.input`, `detail.output` and an API request body are replaced by their size (and the document ID for an IDP event) and everything else is kept; no field value, customer name or address appears in it. When the opt-in setting is on (off by default; set through the deployment settings) the line holds the whole event, cut to a size cap. Writing the line MUST NOT change the outcome of the run, and any failure to build it MUST be swallowed with a short note.
 
 ### Key Entities
 
@@ -150,7 +156,8 @@ If the document does not exist, has not finished, or the document-processing ser
 - **SC-005**: Delivering the same event 3 times, one of them at the same moment as another, reserves and saves the document at most once (one CO number and one job number per line in total), and the repeat deliveries return the first outcome.
 - **SC-007**: With a fully confident document, live writes on and a simulated ERP, an event results in a saved order with the reserved numbers reported in under 60 seconds for a 25-line PO, with no person involved.
 - **SC-008**: With live writes off, or a field below threshold, 100% of tests reserve and write nothing in the ERP.
-- **SC-006**: No log line of any test run contains a field value, customer name or address from the example document.
+- **SC-006**: With the event-log setting off (the default), no log line of any test run, including the entry line, contains a field value, customer name or address from the example document.
+- **SC-009**: Every invocation test produces exactly one entry line that parses as JSON; with the setting on, the line equals the event (up to the size cap), and with it off the line differs from the event only in the redacted parts.
 
 ## Assumptions
 
@@ -162,6 +169,8 @@ If the document does not exist, has not finished, or the document-processing ser
 - The saved `sample_events.json` is illustrative: its quoting is not valid JSON, so a repaired copy is the test fixture (FR-010).
 - Only documents of this service's own execution events are expected; the state machine named in the event is not checked against a configured name.
 - Thresholds and the "meets threshold" decision come from the document-processing service's own assessment, as in feature 004.
+
+- Logs are kept in the platform's log service and read by operators; turning the opt-in setting on is a deliberate choice that exposes document and order content to whoever can read them.
 
 ## Notes
 

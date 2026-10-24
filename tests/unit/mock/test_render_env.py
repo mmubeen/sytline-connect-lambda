@@ -121,3 +121,8 @@ def test_real_account_region_and_identifiers_reach_the_permission_resources():
 
 def test_defaults_are_unchanged_by_the_new_arguments():
     assert render_env.render() == render_env.render(account="000000000000", region="us-gov-east-1", partition="aws-us-gov")
+
+
+def test_the_entry_log_setting_reaches_the_rendered_function_environment():
+    assert render_env.render()["env"]["LOG_EVENTS"] == "false"
+    assert render_env.render(params={"LogEvents": "true"})["env"]["LOG_EVENTS"] == "true"

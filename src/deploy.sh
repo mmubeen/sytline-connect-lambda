@@ -170,6 +170,10 @@ fi
 # Job-number workflow: where the PO details are read from (an IDP accelerator stack). IDP_REPO is the checkout whose
 # idp_sdk and idp_common are packaged with the functions (never installed by name: `idp-common` on PyPI is not ours).
 [[ "${SQL_ENCRYPT:-true}" == "true" || "${SQL_ENCRYPT:-true}" == "false" ]] || die "SQL_ENCRYPT must be true or false"
+[[ "${LOG_EVENTS:-false}" == "true" || "${LOG_EVENTS:-false}" == "false" ]] || die "LOG_EVENTS must be true or false"
+if [[ "${LOG_EVENTS:-false}" == "true" ]]; then
+  echo "WARNING: LOG_EVENTS=true: the function logs the WHOLE incoming event, so its logs will hold document and order content (names, addresses, part numbers). Turn it off (LOG_EVENTS=false) and redeploy when you have finished debugging."
+fi
 if [[ "${SQL_ENCRYPT:-true}" == "false" ]]; then
   echo "WARNING: SQL_ENCRYPT=false: the database connection will be UNENCRYPTED; the database login and password cross the network unprotected."
 fi
@@ -256,6 +260,7 @@ overrides=(
   "$(q CustomerIdo "${CUSTOMER_IDO:-database}")"
   "$(q DefaultsIdo "${DEFAULTS_IDO:-database}")"
   "$(q SqlEncrypt "${SQL_ENCRYPT:-true}")"
+  "$(q LogEvents "${LOG_EVENTS:-false}")"
   "$(q SqlVerifyHostname "${SQL_VERIFY_HOSTNAME:-true}")"
   "$(q SqlLoginTimeout "${SQL_LOGIN_TIMEOUT:-5}")"
   "$(q SqlTimeout "${SQL_TIMEOUT:-10}")"

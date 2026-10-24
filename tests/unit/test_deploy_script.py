@@ -477,3 +477,20 @@ def test_a_malformed_kms_key_arn_is_refused_before_any_sam_call(run, bad):
     p, calls = run({**BASE, **NET, "IDP_KMS_KEY_ARNS": bad})
     assert p.returncode != 0 and "IDP_KMS_KEY_ARNS" in p.stderr and "is not a KMS key ARN" in p.stderr and "SAM" not in calls
 
+
+
+# ---- feature 006, FR-016: LOG_EVENTS ----------------------------------------------------------------------------------
+def test_log_events_defaults_to_false_and_is_always_passed(run):
+    p, calls = run({**BASE, **NET})
+    assert p.returncode == 0 and overrides(calls)["LogEvents"] == "false" and "document and order content" not in p.stdout
+
+
+def test_log_events_true_is_passed_with_a_warning_about_what_the_logs_will_hold(run):
+    p, calls = run({**BASE, **NET, "LOG_EVENTS": "true"})
+    assert p.returncode == 0 and overrides(calls)["LogEvents"] == "true"
+    assert "LOG_EVENTS=true" in p.stdout and "document and order content" in p.stdout and "turn it off" in p.stdout.lower()
+
+
+def test_log_events_must_be_true_or_false(run):
+    p, calls = run({**BASE, **NET, "LOG_EVENTS": "maybe"})
+    assert p.returncode != 0 and "LOG_EVENTS must be true or false" in (p.stdout + p.stderr) and not deployed(calls)

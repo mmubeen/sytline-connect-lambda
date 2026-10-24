@@ -112,3 +112,37 @@
 - **Then**: US2 adds the automatic reserve and save (writes to the ERP only with live writes on and `IDP_STATE_MACHINE_ARN` set), US3 and US4 finish the refusal paths.
 - Do not turn on live writes or the event rule until the unconfirmed ERP and IDP names of features 004 and 005 are verified read-only (quickstart.md step 1).
 - **Revision (Phase 8)**: T026 to T033 fold the intake into the direct-invoke Lambda and make it the default action. Do the code (T026 to T030) and the template (T031) first, then the docs. This is a breaking change for anything that calls the health check without an `action`.
+
+---
+
+## Phase 9: Revision 2026-10-24 - log the event on entry to the handler (spec FR-016, SC-006, SC-009; research.md R17 to R21; contracts/entry-log.md)
+
+Phases 1 to 8 (T001 to T033) are done and unchanged. This phase adds the entry log as a fifth story (the spec states it as FR-016 and SC-009, not as a user story, so it is labelled [US5] here).
+
+**Goal**: every invocation writes one JSON `event_entry` line: redacted by default, the whole (capped) event only with `LOG_EVENTS=true`; credentials in headers always masked; never raises, never changes the run.
+**Independent Test**: `pytest tests/unit/test_eventlog.py tests/unit/test_entry_log.py` passes; on a deployment, invoke `../sample_events.json` and find one `event_entry` line with sizes in place of `detail.input` and `detail.output` (quickstart "Entry log").
+
+- [X] T034 [P] [US5] Write failing tests `tests/unit/test_eventlog.py` for `syteline.eventlog` (research R18 to R20): the values of the keys `input`, `output`, `body` and `text` become `{"redacted": true, "chars": n}` at any depth (a test names the exact key set so adding a key is deliberate); `detail.input` of an IDP event also carries `document_id`; `source`, `detail-type`, `status`, ARNs, `httpMethod`, `resource`, `pathParameters`, `action`, `record_type`, `record_key`, `reservation_id` are kept; header values `Authorization`, `X-Amz-Security-Token`, `Cookie`, `X-Api-Key` (any case) are `***` in both modes; whole mode within the cap equals the event except the masked headers; over the cap (default 8000, `LOG_EVENTS_MAX_CHARS` overrides) gives `{"truncated": true, "chars": N, "head": "<first cap characters>"}`; a payload that is `None`, bytes, a non-JSON string, a list or holds non-serialisable values gives `{"payload_type": ..., "chars": n}` or uses `default=str`; a JSON string is parsed and redacted like an object; the input is never modified
+- [X] T035 [US5] Implement `src/syteline/eventlog.py` (`redact(event)`, `render(event, whole, cap)`, `log_entry(event, logger)`; one INFO line `{"type": "event_entry", "mode": ..., "event": ...}`; every exception caught and reduced to one WARNING `event_entry could not be built: <ExceptionType>`) to satisfy T034
+- [X] T036 [P] [US5] Write failing tests `tests/unit/test_entry_log.py` using `tests/fakes.py` and `tests/fixtures/sample_event.json`: for each kind of invocation (IDP event, API Gateway event, `health`, `add_note` with `text`, `sweep`, `work_save`, an unknown action, `{}`, `None`) exactly one `event_entry` line is written, it parses as JSON and comes before every other line of that invocation; the handler's result is identical with `LOG_EVENTS` true, false and unset, and when `eventlog.log_entry` is made to raise (one warning, same result); with the setting off no log line of a full intake run contains `Korean Air`, `PLATFORM-FAN BLADE` or any other document value of the fixture (SC-006); with it on the line contains them (SC-009); the existing `tests/unit/test_logging.py` still passes
+- [X] T037 [US5] Call `eventlog.log_entry(event, log)` as the first statement of `lambda_handler` in `src/lambda_function.py` (before routing; no other change to the handler) to satisfy T036
+- [X] T038 [P] [US5] Write failing tests in `tests/unit/test_template_single.py` then add to `src/template.yaml`: parameter `LogEvents` (`Type: String`, `Default: "false"`, `AllowedValues: ["false", "true"]`, a Description saying that `true` puts document and order content in the logs) and the function environment variable `LOG_EVENTS: !Ref LogEvents`; the template still has exactly one function and no new permission
+- [X] T039 [P] [US5] Write failing tests in `tests/unit/test_deploy_script.py` then update `src/deploy.sh` and `src/deploy.env.example`: optional `LOG_EVENTS` (default `false`), validated as `true` or `false`, always passed as `LogEvents`; with `true` the deploy prints a notice that the logs will hold document and order content and that it should be turned off when finished
+- [X] T040 [US5] Document the entry log in `docs/EVENT_INTAKE.md` (what each mode logs, the redacted key set, the cap, how to turn it on and off, who can read the logs) and the `LOG_EVENTS` setting in `docs/DEPLOYMENT.md` and `src/deploy.env.example`'s comments
+- [X] T041 [P] [US5] Add an assertion to `tests/unit/mock/test_render_env.py` that the rendered function environment has `LOG_EVENTS == "false"` (the mock environment, feature 008, picks the setting up from the template); no other change there
+- [X] T042 [US5] Run the whole suite (`python -m pytest tests -q`): nothing may fail; confirm with `git diff` that `src/lambda_function.py` changed by the one call and one import only
+- [ ] T043 [US5] On a deployment, invoke `../sample_events.json` and an API request, find the `event_entry` lines in the function's log, then redeploy with `LOG_EVENTS=true` and compare; record what was seen in `specs/006-event-document-result/quickstart.md` **NOT RUN: needs the deployment.**
+
+### Phase 9 dependencies and order
+
+- T034 -> T035 -> T036 -> T037. T038, T039 and T041 do not depend on the module and can run in parallel with T034/T035 (T041 needs T038's template change).
+- T040 after T035, T038 and T039 (it describes all three). T042 last before T043.
+
+### Phase 9 parallel example
+
+- Together: T034, T038 and T039 (three different test files); then T035 for T034, and T036 once T035 exists.
+
+### Phase 9 implementation strategy
+
+- MVP is T034 to T037: the redacted entry line with no new setting (default behaviour), which is already the safe default.
+- Then the opt-in: T038 and T039 add the setting and its deployment; T040 documents it. T043 needs a deployment and stays unchecked until it has been run.
