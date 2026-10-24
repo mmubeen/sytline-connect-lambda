@@ -104,6 +104,9 @@ stack, `s3:GetObject` on its output bucket, DynamoDB `GetItem`/`Query`/`BatchGet
 `<stack>-LookupFunction-*` (it runs the IDP's own read-only status lookup). Any other IDP-bound call is refused by the edge and recorded
 (`target: real, allowed: false`); no other real service is ever called.
 
+- **Field names.** The function reads the IDP result with its default field names (unconfirmed, `src/syteline/idp_fields.py`). If your IDP
+  names them differently the document is refused as `DOCUMENT_INCOMPLETE`; pass the same values a deployment would set as
+  `MOCK_IDP_FIELD_MAP='{"po_number":"po_number","lines":"line_items"}'` and `MOCK_IDP_DOCUMENT_CLASS=purchase_order` (they work in both modes).
 - **The outcome is reported, not asserted.** The mock database and ERP start empty, so a real document usually ends `read_only` with
   `CUSTOMER_NOT_FOUND`. That shows the real document was read and parsed; to go further, add the matching customer to the mock data.
 - **Decryption is the real thing:** the real key policy and your own KMS permissions apply, so the production `kms:Decrypt` failure

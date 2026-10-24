@@ -110,13 +110,18 @@ def prepare(run_dir, idp_dir=IDP_DIR, environ=None, runner=subprocess.run):
         mode, creds = _real_settings(environ, runner)
     elif environ.get("MOCK_IDP", "mock") != "mock":
         raise SystemExit("MOCK_IDP must be 'mock' (default) or 'real'")
+    # how the function reads the IDP result (template parameters IdpFieldMap / IdpDocumentClass), as a deployment would set them
+    extra = {name: environ[var] for var, name in (("MOCK_IDP_FIELD_MAP", "IdpFieldMap"), ("MOCK_IDP_DOCUMENT_CLASS", "IdpDocumentClass"))
+             if environ.get(var)}
+    if extra.get("IdpFieldMap"):
+        json.loads(extra["IdpFieldMap"])  # fail here, not in the function, on a malformed value
     if mode["mode"] == "real":
         rendered = render_env.render(account=mode["account"], region=mode["region"], partition=mode["partition"],
                                      params={"IdpStackName": mode["stack"], "IdpOutputBucketName": mode["bucket"],
-                                             "IdpTrackingTableName": mode["table"], "IdpKmsKeyArns": mode["kms_keys"]})
+                                             "IdpTrackingTableName": mode["table"], "IdpKmsKeyArns": mode["kms_keys"], **extra})
         overrides = {**OVERRIDES, "AWS_DEFAULT_REGION": mode["region"], "AWS_REGION": mode["region"], "IDP_REGION": mode["region"]}
     else:
-        rendered, overrides = render_env.render(), OVERRIDES
+        rendered, overrides = render_env.render(params=extra), OVERRIDES
     env = {**rendered["env"], **overrides,
            "AWS_LAMBDA_FUNCTION_NAME": rendered["function_name"],
            "AWS_LAMBDA_FUNCTION_TIMEOUT": str(rendered["timeout"]),

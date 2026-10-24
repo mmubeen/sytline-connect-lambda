@@ -59,3 +59,16 @@ def test_every_address_in_the_env_is_a_mock_address(run):
     assert prepare.foreign_addresses(env) == ["SYTELINE_WSDL"]
     env["AWS_ENDPOINT_URL"] = "https://sts.us-gov-east-1.amazonaws.com"
     assert "AWS_ENDPOINT_URL" in prepare.foreign_addresses(env)
+
+
+def test_the_idp_field_map_and_class_reach_the_function_as_the_template_parameters(tmp_path):
+    fm = '{"po_number":"po_number","lines":"line_items"}'
+    prepare.prepare(str(tmp_path / "r"), idp_dir=str(tmp_path / "i"),
+                    environ={"MOCK_IDP_FIELD_MAP": fm, "MOCK_IDP_DOCUMENT_CLASS": "purchase_order"})
+    env = dict(line.split("=", 1) for line in (tmp_path / "r" / "function.env").read_text().splitlines())
+    assert env["IDP_FIELD_MAP"] == fm and env["IDP_DOCUMENT_CLASS"] == "purchase_order"
+
+
+def test_a_malformed_field_map_stops_prepare(tmp_path):
+    with pytest.raises(ValueError):
+        prepare.prepare(str(tmp_path / "r"), idp_dir=str(tmp_path / "i"), environ={"MOCK_IDP_FIELD_MAP": "{not json"})
