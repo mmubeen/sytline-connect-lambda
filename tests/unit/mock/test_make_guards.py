@@ -53,3 +53,27 @@ def test_prepare_says_how_to_fix_a_python_without_pyyaml(tmp_path):
 def test_a_python_with_pyyaml_is_found_when_the_first_one_has_none(tmp_path):
     r = make(["-n", "deps"], tmp_path, {"python3": "exit 1"})      # a python3 that cannot import anything comes first on PATH
     assert r.returncode == 0 and "lacks PyYAML or requests" not in r.stderr
+
+
+def compose_line(tmp_path, stubs, *extra):
+    r = make(["-n", "up", *extra], tmp_path, stubs)
+    return next((l for l in r.stdout.splitlines() if "compose.yaml" in l and "up -d" in l), r.stdout + r.stderr)
+
+
+def test_the_compose_plugin_is_used_when_it_works(tmp_path):
+    line = compose_line(tmp_path, {"docker": "exit 0", "docker-compose": "exit 0"})
+    assert line.startswith("docker compose -f ")
+
+
+def test_the_older_docker_compose_is_used_when_the_plugin_is_missing(tmp_path):
+    line = compose_line(tmp_path, {"docker": "exit 1", "docker-compose": "exit 0"})
+    assert line.startswith("docker-compose -f ")
+
+
+def test_the_compose_command_can_be_overridden(tmp_path):
+    line = compose_line(tmp_path, {"docker": "exit 1"}, "DOCKER_COMPOSE=podman compose")
+    assert line.startswith("podman compose -f ")
+
+
+def test_without_either_the_plugin_command_is_kept_so_its_error_explains_what_is_missing(tmp_path):
+    assert compose_line(tmp_path, {"docker": "exit 1"}).startswith("docker compose -f ")

@@ -9,9 +9,9 @@ import pytest
 from botocore.exceptions import ClientError
 
 import parity
-from .helpers import EDGE, RUN_DIR
+from .helpers import COMPOSE_FILE, EDGE, RUN_DIR, compose_command
 
-COMPOSE = ["docker", "compose", "-f", os.path.join(os.path.dirname(__file__), "..", "..", "mock", "compose.yaml")]
+COMPOSE = [*compose_command(), "-f", COMPOSE_FILE]
 
 
 def sh(*args):

@@ -22,7 +22,7 @@ real service starts more instances (the function invokes itself for its backgrou
 
 ## Start, test, reset, stop
 
-Prerequisites: Docker with Compose, the AWS SAM CLI, Python 3.9+, `pip install -r mock/requirements.txt -r src/requirements-dev.txt`,
+Prerequisites: Docker with Compose (the `docker compose` plugin or `docker-compose`; see Troubleshooting), the AWS SAM CLI, Python 3.9+, `pip install -r mock/requirements.txt -r src/requirements-dev.txt`,
 and `IDP_REPO` pointing at the IDP accelerator checkout (the package needs its SDK, as in a deployment). On Apple silicon the
 SQL Server image runs emulated and takes minutes to start.
 
@@ -158,5 +158,8 @@ What the mock does differently from production, and what a pass therefore does *
 - Not ready after 420 s - `make -C mock logs`; the health output names the service that is not `up` (SQL Server is the slow one).
   Raise the wait with `make -C mock up WAIT=900`.
 - `refusing to prepare: these settings do not point at a mock service` - a parameter in `mock/render_env.py` names a real address.
+- `unknown shorthand flag: 'f' in -f` / `unknown command: docker compose` - the Compose plugin is missing. The Makefile uses `docker compose` when it works and the older
+  `docker-compose` otherwise; to choose, `make -C mock up DOCKER_COMPOSE="docker-compose"` (or `"podman compose"`). The container tests read the same value from
+  `MOCK_COMPOSE`. The Docker daemon must also be running (`docker info`).
 - Port 4566 busy - `MOCK_EDGE_PORT=4570 make -C mock up` (and `MOCK_EDGE_URL=http://127.0.0.1:4570` for the tests).
 - A test left a fault on - `make -C mock reset` clears it.

@@ -4,9 +4,9 @@ import json
 import os
 import subprocess
 
-from .helpers import RUN_DIR, erp_saves, wait_for
+from .helpers import COMPOSE_FILE, RUN_DIR, compose_command, erp_saves, wait_for
 
-COMPOSE = ["docker", "compose", "-f", os.path.join(os.path.dirname(__file__), "..", "..", "mock", "compose.yaml")]
+COMPOSE = [*compose_command(), "-f", COMPOSE_FILE]
 
 
 def one_run(control):

@@ -7,7 +7,12 @@ RUN ?= $(HERE).run
 # Override: make PY=/path/to/python
 PY ?= $(shell for p in python3 python3.13 python3.12 python3.11 /usr/bin/python3 python; do \
   $$p -c 'import yaml, requests' >/dev/null 2>&1 && { echo $$p; exit 0; }; done; echo python3)
-COMPOSE := docker compose -f $(HERE)compose.yaml
+# The compose command: `docker compose` (the plugin) if it works, else the older `docker-compose`, else `docker compose` (whose error then
+# says what is missing). Override: make DOCKER_COMPOSE="docker-compose"  (or "podman compose", or a full path); the tests read the same
+# value from the MOCK_COMPOSE environment variable.
+DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; \
+  elif command -v docker-compose >/dev/null 2>&1; then echo "docker-compose"; else echo "docker compose"; fi)
+COMPOSE := $(DOCKER_COMPOSE) -f $(HERE)compose.yaml
 EDGE := http://127.0.0.1:$(or $(MOCK_EDGE_PORT),4566)/__mock__
 WAIT ?= 420
 POLL ?= 5
