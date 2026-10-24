@@ -45,7 +45,7 @@ class CallLog:
         with self._lock:
             self._seq += 1
             rec = {"seq": self._seq, "ts": time.time(), "service": service, "operation": operation,
-                   "caller": None, "action": None, "resource": None, "allowed": True, "fault": None, "status": None,
+                   "caller": None, "action": None, "resource": None, "allowed": True, "fault": None, "status": None, "target": "mock",
                    "request_summary": redact(request or {})}
             rec.update(extra)
             self._calls.append(rec)

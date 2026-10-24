@@ -60,6 +60,8 @@ def identify_all(req, partition, region, account):
                                      ("ConditionCheck", "ConditionCheckItem")):
                     if kind in item:
                         found.append((f"dynamodb:{action}", table(item[kind].get("TableName", "*"))))
+        elif req["operation"] == "BatchGetItem":
+            found = [("dynamodb:BatchGetItem", table(name)) for name in p.get("RequestItems", {})]
         elif req["operation"] == "TransactGetItems":
             found = [("dynamodb:GetItem", table(i["Get"].get("TableName", "*"))) for i in p.get("TransactItems", []) if "Get" in i]
         else:  # BatchWriteItem
@@ -70,7 +72,7 @@ def identify_all(req, partition, region, account):
     return [identify(req, partition, region, account)]
 
 
-_DDB_MULTI = ("TransactWriteItems", "TransactGetItems", "BatchWriteItem")
+_DDB_MULTI = ("TransactWriteItems", "TransactGetItems", "BatchWriteItem", "BatchGetItem")
 
 
 def identify(req, partition, region, account):

@@ -114,3 +114,50 @@
 - **MVP**: Phases 1, 2 and 3 (US1). Stop and validate on a Docker machine before US2.
 - **Incremental**: US2 next (it carries most of the troubleshooting value), then US3, then US4, then Polish.
 - **Honesty gate**: in-process unit tests prove the stand-ins' logic; only the **[DOCKER]** tasks prove the stack. Do not mark a **[DOCKER]** task done without running it.
+
+---
+
+## Phase 8: User Story 5 - Real IDP document, mocked everything else (P3, opt-in)
+
+Added after the clarification of 2026-10-24 (FR-017..FR-020, SC-007; design in research R14..R21 and `contracts/real-idp.md`).
+Phases 1-7 above are unchanged. Tasks marked **[REAL]** can only be proven with the developer's own access to a real IDP; **[DOCKER]** as before.
+
+**Goal**: with `MOCK_IDP=real`, the function's IDP reads go to the developer's real IDP using their own temporary credentials, and nothing else leaves the machine.
+**Independent Test**: unit and in-process tests against a stand-in "real AWS" (`tests/unit/mock/test_realidp*.py`, `test_inprocess_real_idp.py`); on a machine with access, `MOCK_ENV=1 MOCK_IDP=real pytest tests/mock_env/test_real_idp.py`.
+
+- [X] T045 [P] [US5] Write failing tests `tests/unit/mock/test_events.py`: `events.build_event("159112.pdf")` has the shape of `tests/fixtures/sample_event.json` (source `aws.states`, detail-type `Step Functions Execution Status Change`, status `SUCCEEDED`), is recognised by `syteline.eventdoc.is_status_change`, `eventdoc.parse` returns that document id, and an id outside `^[A-Za-z0-9._/-]{1,256}$` is refused with `ValueError`; and `scenarios/generate.py` still writes byte-identical scenario files
+- [X] T046 [US5] Implement `mock/edge/events.py` (`build_event(document_id)`, moved from `mock/scenarios/generate.py`, which imports it) to satisfy T045
+- [X] T047 [P] [US5] Write failing tests `tests/unit/mock/test_realidp_creds.py` for the credential reader in `mock/edge/realidp.py`: file missing -> status `credentials missing`; expired `AWS_CREDENTIAL_EXPIRATION` -> `credentials expired at <time>`; valid -> `up`; the file is re-read on every call (a refreshed file takes effect without restart); `repr()` and `str()` of the credentials object and every error message contain none of the key, secret or token
+- [X] T048 [US5] Implement `Credentials` in `mock/edge/realidp.py` (reads `mock/.idp/creds`, mode 0600 expected; refuses a file readable by group or others with a message) to satisfy T047
+- [X] T049 [P] [US5] Write failing tests `tests/unit/mock/test_realidp_routing.py`: IDP-bound classification for the configured stack (`cloudformation` with `StackName`), output bucket (S3 path), tracking table (`TableName`) and `<stack>-LookupFunction-*` (Lambda Invoke); everything else (the jobs table, the credentials secret, the function itself) is not IDP-bound; the read-only allow-list is exactly `cloudformation:DescribeStacks|ListStackResources|DescribeStackResource|DescribeStackResources`, `s3:GetObject`, `dynamodb:GetItem|Query|BatchGetItem`, `lambda:InvokeFunction` on the lookup pattern; `s3:PutObject`, `dynamodb:PutItem` and `dynamodb:DeleteItem` on the IDP table are not
+- [X] T050 [US5] Implement `is_idp_bound` and `READ_ONLY` in `mock/edge/realidp.py` to satisfy T049
+- [X] T051 [P] [US5] Write failing tests `tests/unit/mock/test_realidp_forward.py` against a fake "real AWS" `werkzeug` server: the forwarded request is signed with the developer's key id (not the function's fake one), carries `X-Amz-Security-Token`, keeps `X-Amz-Target`, `Content-Type`, body and invocation-type headers, uses the S3 signer for S3, goes to the endpoint chosen for the service (`https://<service>[-fips].<region>.amazonaws.com`, overridable for tests), and the function's own signature headers are dropped
+- [X] T052 [US5] Implement `RealForward` in `mock/edge/realidp.py` (botocore `SigV4Auth` / `S3SigV4Auth`, endpoint table with FIPS default for `aws-us-gov`, `MOCK_IDP_FIPS=false` to turn off) to satisfy T051
+- [X] T053 [US5] Write failing tests `tests/unit/mock/test_edge_real.py`: in real mode an IDP read reaches the fake real server and its answer is returned; the jobs-table and secret calls still go to the mock; a write against the IDP table or bucket is answered `AccessDenied`, never forwarded, and recorded `target: real, allowed: false`; a call the template does not permit is denied before routing; no mock KMS check is made for a real read; expired or missing credentials answer an AWS-worded `ExpiredToken` and nothing falls back to the mock IDP; every call record has `target` (`mock` or `real`); no secret, key id or token appears in any record, response or log line (capture `caplog`); mock mode behaviour is unchanged
+- [X] T054 [US5] Wire real mode into `mock/edge/app.py` (optional `real` collaborator; `target` field in `mock/edge/models.py` call records) to satisfy T053
+- [X] T055 [P] [US5] Write failing tests in `tests/unit/mock/test_render_env.py` and implement `render_env.render(account=, region=, partition=, ...)`: with the real account, region and identifiers the template's permission resources carry them (`arn:aws-us-gov:lambda:us-gov-east-1:<account>:function:<stack>-LookupFunction-*`, the real bucket, table and key ARNs); defaults are unchanged
+- [X] T056 [US5] Write failing tests `tests/unit/mock/test_prepare_real.py` with a stub `aws` on `PATH`, then implement real mode in `mock/edge/prepare.py`: requires `MOCK_IDP_PROFILE`, `MOCK_IDP_STACK`, `MOCK_IDP_BUCKET`, `MOCK_IDP_TABLE`, `MOCK_IDP_DOCUMENT` (each missing one named in the refusal); calls `aws sts get-caller-identity` and `aws configure export-credentials --profile <p> --format env-no-export`; writes `mock/.idp/creds` (0600) and `mock/.idp/mode.json` (no secrets); refuses already-expired credentials and an invalid document id; the function's env file and `rendered.json` never contain the credentials
+- [X] T057 [US5] Add `mock/.idp/` to `.gitignore`; add the edge-only volume `./.idp:/run/idp:ro` to `mock/compose.yaml`; add `MOCK_IDP*` pass-through to `prepare` and an `idp-creds` target (re-export without restart) to `mock/Makefile`; write `tests/unit/mock/test_compose_static.py` asserting only the `edge` service mounts `.idp` and no `fn*` or `erp` service does **[DOCKER to run the stack]** (static checks pass; the stack itself not started)
+- [X] T058 [US5] Write failing tests then implement real mode in `mock/edge/seed.py` and `mock/edge/control.py`: `GET /scenarios` lists only `real-idp`; `POST /scenario/real-idp` resets and returns `events.build_event(<document>)`; a mock scenario name answers 409 with the reason (modes never mix); `GET /health` has `idp` (`mock`, `up`, or the credential reason) and `ready` is false until it is `up`/`mock`; the status is re-checked every 10 seconds (tests in `tests/unit/mock/test_world_real.py`)
+- [X] T059 [US5] Write `tests/unit/mock/test_inprocess_real_idp.py`: a second Moto server stands in for the real IDP (seeded with `IdpSeeder`), the edge in real mode forwards IDP reads to it with re-signing, and the function runs in-process through `lambda_function.lambda_handler`; the outcome is a known one, every IDP read is `target: real`, everything else is `target: mock`, and the mock ERP shows no unexpected write (skipped without the IDP checkout)
+- [ ] T060 [US5] Wire real mode into `mock/edge/server.py` (read `mock/.idp/mode.json`, build `RealForward`, skip the mock IDP seeder and its stack) **NOT RUN: needs Docker.**  *(code written and importable; the container path never ran)*
+- [ ] T061 [US5] Write `tests/mock_env/test_real_idp.py`, skipped unless `MOCK_ENV=1` and `MOCK_IDP=real`: send `real-idp`; assert only the invariants (outcome known, every `target: real` call is on the allow-list, none denied unless the document is missing, nothing written to the mock ERP unexpectedly); a second test replaces the credentials file with an expired one and asserts `IDP_UNAVAILABLE`, an `ExpiredToken` record and a health reason naming the expiry, then restores it **NOT RUN: needs Docker and real access [REAL].**
+- [X] T062 [US5] Extend `docs/MOCK_ENVIRONMENT.md`: a "Real IDP" section (settings, what leaves the machine, credential refresh, what an empty mock database means for the outcome), new fidelity gaps (re-signing only checked against a stand-in; the real key policy applies; the lookup function runs real code), and `real-idp` in the scenarios table; keep `tests/unit/mock/test_parity_static.py` green
+- [ ] T063 [US5] Run the quickstart step 8 against the developer's real IDP and record the outcome and timings (SC-007: credential problems reported within 30 seconds) in `specs/008-production-like-mock-env/run-notes.md` **NOT RUN: needs Docker and real access [REAL].**
+
+### Phase 8 dependencies and order
+
+- T045 -> T046; T047 -> T048; T049 -> T050; T051 -> T052 (the four pairs are independent of each other).
+- T053/T054 need T048, T050 and T052. T055 is independent. T056 needs T055. T058 needs T046 and T054.
+- T059 needs T054, T055 and T058. T060 needs T054, T056 and T058. T061 and T063 need T060.
+- T057 needs T056 (the settings it passes through).
+
+### Phase 8 parallel example
+
+- Together: T045, T047, T049, T051 and T055 (five different test files); then T046, T048, T050, T052 (one module `realidp.py` for the last three: do those in order).
+
+### Phase 8 implementation strategy
+
+- Build the testable core first (T045-T059): everything there runs in this repository's normal test run and proves routing, the read-only rule, credential handling and the no-leak rule.
+- Only then wire the container entry and run it (T060-T063), which needs Docker and real access.
+- Honesty gate as before: a **[DOCKER]** / **[REAL]** task is not marked done until it has been run.

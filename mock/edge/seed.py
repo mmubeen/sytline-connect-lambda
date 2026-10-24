@@ -11,7 +11,7 @@ import time
 import boto3
 import requests
 
-from . import models
+from . import events, models
 
 LOCK_PK = "LOCK#erp-writes"  # same item the function's ERP-write lock uses (src/syteline/erplock.py)
 
@@ -22,7 +22,8 @@ def secret_name(secret_id):
 
 
 class World:
-    def __init__(self, rendered, moto_url, scenarios_dir, run_dir, erp=None, sql=None, runtime_up=None, idp_seeder=None):
+    def __init__(self, rendered, moto_url, scenarios_dir, run_dir, erp=None, sql=None, runtime_up=None, idp_seeder=None,
+                 mode=None, idp_status=None):
         self.r = rendered
         self.moto_url = moto_url.rstrip("/")
         self.scenarios_dir = scenarios_dir
@@ -30,6 +31,8 @@ class World:
         self.erp, self.sql = erp, sql
         self.runtime_up = runtime_up
         self.idp_seeder = idp_seeder
+        self.mode = mode or {"mode": "mock"}   # mode.json: real-IDP mode names the document to process
+        self.idp_status = idp_status
         self.kms = {}
         self.current = None
         self.table = rendered["env"]["JOBS_TABLE"]
@@ -102,13 +105,39 @@ class World:
             self.sql.reset()
 
     # -- scenarios -------------------------------------------------------------------------
+    @property
+    def real(self):
+        return self.mode.get("mode") == "real"
+
+    def refusal_for(self, name):
+        """Why a scenario name cannot be used in this mode (the two modes are never mixed), or None."""
+        mock_names = self._mock_scenarios()
+        if self.real and name in mock_names:
+            return "real-IDP mode is on: mock scenarios are not available (stop and start without MOCK_IDP=real)"
+        if not self.real and name == "real-idp":
+            return "real-IDP mode is off (start with MOCK_IDP=real and its settings)"
+        return None
+
+    def _mock_scenarios(self):
+        if not os.path.isdir(self.scenarios_dir):
+            return []
+        return sorted(n for n in os.listdir(self.scenarios_dir)
+                      if os.path.exists(os.path.join(self.scenarios_dir, n, "scenario.json")))
+
     def scenario_names(self):
+        if self.real:
+            return ["real-idp"]
         if not os.path.isdir(self.scenarios_dir):
             return []
         return sorted(n for n in os.listdir(self.scenarios_dir)
                       if os.path.exists(os.path.join(self.scenarios_dir, n, "scenario.json")))
 
     def load(self, name):
+        if self.real:
+            if name != "real-idp":
+                raise KeyError(name)
+            self.current = None
+            return events.build_event(self.mode["document"])
         sc = models.load_scenario(os.path.join(self.scenarios_dir, name))
         self.current = sc
         # the secret is rewritten with the scenario's extra settings
@@ -162,6 +191,7 @@ class World:
             out["moto"] = "up"
         except requests.RequestException:
             out["moto"] = "down"
+        out["idp"] = (self.idp_status() if self.idp_status else "up") if self.real else "mock"
         if self.erp:
             out["erp"] = "up" if self.erp.healthy() else "down"
         if self.sql:

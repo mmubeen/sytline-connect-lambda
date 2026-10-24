@@ -11,13 +11,13 @@ from xml.sax.saxutils import escape
 
 from werkzeug.wrappers import Request, Response
 
-from . import actions, control, models, policy, seed
+from . import actions, control, models, policy, realidp, seed
 
 JSON_SERVICES = ("dynamodb", "secretsmanager", "kms")
 
 
 class Edge:
-    def __init__(self, rendered, forward, runtime, backend):
+    def __init__(self, rendered, forward, runtime, backend, real=None):
         self.r = rendered
         self.forward = forward      # callable(method, path, headers, query, body) -> (status, headers, body_bytes)
         self.runtime = runtime      # invoke_sync(event, timeout) / invoke_async(event) of the function under test
@@ -25,6 +25,7 @@ class Edge:
         self.calls = models.CallLog()
         self.faults = models.FaultSet()
         self.partition, self.region, self.account = _scope(rendered)
+        self.real = real            # (RealConfig, RealForward, Credentials) in real-IDP mode, else None
 
     # -- WSGI ------------------------------------------------------------------------------
     def __call__(self, environ, start_response):
@@ -56,6 +57,9 @@ class Edge:
             self.calls.add(allowed=False, fault=fault_id, status=_status(req["service"], 403), **record)
             return self._deny(req["service"], action, resource, reason)
 
+        if self.real and self.real[0].is_idp_bound(req, needs):
+            return self._real(request, req, needs, body, headers)
+
         if req["service"] == "secretsmanager" and self.faults.take("secrets.unavailable"):
             self.calls.add(allowed=True, fault="secrets.unavailable", status=503, **record)
             return _error(req["service"], 503, "ServiceUnavailable", "the service is temporarily unavailable")
@@ -76,6 +80,30 @@ class Edge:
                                                 request.args.to_dict(), body)
         self.calls.add(allowed=True, status=status, **record)
         return Response(out, status, out_headers)
+
+    def _real(self, request, req, needs, body, headers):
+        """An IDP-bound request in real-IDP mode: read-only calls go out re-signed, everything else is refused here.
+        The record keeps the operation and resource only: no header, body or credential of a real request."""
+        config, forward, credentials = self.real
+        action, resource = needs[0]
+        record = dict(service="aws", operation=f"{req['service']}:{req['operation']}", caller=self.r["role_arn"], action=action,
+                      resource=resource, target="real")
+        if not realidp.read_only(needs):
+            self.calls.add(allowed=False, status=403, **record)
+            return self._deny(req["service"], action, resource, "real-IDP mode allows read-only calls to the IDP only")
+        try:
+            status, out_headers, out = forward(request.method, request.full_path.rstrip("?"), headers, request.args.to_dict(),
+                                               body, req["service"])
+        except realidp.CredentialsUnavailable as exc:
+            self.calls.add(allowed=False, status=400, **record)
+            return _error(req["service"], 403, "ExpiredToken" if req["service"] == "s3" else "ExpiredTokenException",
+                          f"the real-IDP credentials cannot be used: {exc}")
+        self.calls.add(allowed=True, status=status, **record)
+        return Response(out, status, out_headers)
+
+    def real_status(self):
+        """'up' or the reason the real IDP cannot be read (shown by /health)."""
+        return self.real[2].status() if self.real else "mock"
 
     def _denial(self, req, action, resource):
         """(fault id or None, reason) when the request must be refused before it is served."""

@@ -13,6 +13,8 @@
 | Makefile guards | yes | `test_make_guards.py` |
 | Real SQL Server (TLS, stand-in routines, `sql.*` faults, proxy) | **no** | `init.sql`, `certs.sh`, `sqlcontrol.py` unit-tested with a fake connection; the engine never ran |
 | Lambda runtime image, three-container pool, compose network, no-egress | **no** | `compose.yaml`, `Dockerfile.tools`, `Makefile` written, never started |
+| Real-IDP mode: routing, read-only list, re-signing, credentials (missing, expired, refreshed), no-leak, mode refusal | yes, against a stand-in service | `test_realidp_*.py`, `test_edge_real.py`, `test_prepare_real.py`, `test_world_real.py`, `test_inprocess_real_idp.py` |
+| Real-IDP mode against real AWS (endpoint names, signature acceptance, real KMS) | **no** | needs your access; `tests/mock_env/test_real_idp.py` is written |
 | `tests/mock_env/*` | **no** | skipped without `MOCK_ENV=1`; never run against a live stack |
 
 ## Expected adjustments on the first Docker run

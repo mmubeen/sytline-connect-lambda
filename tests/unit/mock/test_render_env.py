@@ -102,3 +102,22 @@ def test_a_template_with_an_unsupported_intrinsic_fails_loudly(template):
     t["Resources"]["DirectFunction"]["Properties"]["Environment"]["Variables"]["X"] = {"Fn::ImportValue": "y"}
     with pytest.raises(render_env.Unsupported):
         render_env.render(template=t)
+
+
+def test_real_account_region_and_identifiers_reach_the_permission_resources():
+    r = render_env.render(account="123456789012", region="us-gov-west-1", partition="aws-us-gov",
+                          params={"IdpStackName": "us-ct-idp-stack", "IdpOutputBucketName": "real-out",
+                                  "IdpTrackingTableName": "real-track",
+                                  "IdpKmsKeyArns": "arn:aws-us-gov:kms:us-gov-west-1:123456789012:key/abc-1"})
+    resources = {x for s in r["statements"] for x in s["Resource"]}
+    assert "arn:aws-us-gov:lambda:us-gov-west-1:123456789012:function:us-ct-idp-stack-LookupFunction-*" in resources
+    assert "arn:aws-us-gov:s3:::real-out/*" in resources
+    assert "arn:aws-us-gov:dynamodb:us-gov-west-1:123456789012:table/real-track" in resources
+    assert "arn:aws-us-gov:kms:us-gov-west-1:123456789012:key/abc-1" in resources
+    assert r["function_arn"] == "arn:aws-us-gov:lambda:us-gov-west-1:123456789012:function:sytline-connect-fn"
+    assert "123456789012" in r["role_arn"]
+    assert "000000000000" not in str(r["statements"])
+
+
+def test_defaults_are_unchanged_by_the_new_arguments():
+    assert render_env.render() == render_env.render(account="000000000000", region="us-gov-east-1", partition="aws-us-gov")

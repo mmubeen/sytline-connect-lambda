@@ -8,23 +8,14 @@ Every name, address, part and number below is invented. The documents mimic the 
 
 import json
 import os
+import sys
 
 HERE = os.path.dirname(__file__)
-ACCOUNT, REGION = "000000000000", "us-gov-east-1"
-MACHINE = f"arn:aws-us-gov:states:{REGION}:{ACCOUNT}:stateMachine:mock-idp-workflow"
+sys.path.insert(0, os.path.join(HERE, ".."))
+
+from edge.events import build_event as event  # noqa: E402
 
 CUSTOMER = {"name": "MOCK AEROSPACE LTD", "addr1": "1 Example Way", "city": "Testville", "state": "CT", "zip": "06000"}
-
-
-def event(document_id):
-    name = f"{document_id}-00000000-0000-4000-8000-000000000001"
-    arn = f"arn:aws-us-gov:states:{REGION}:{ACCOUNT}:execution:mock-idp-workflow:{name}"
-    doc = json.dumps({"document": {"id": document_id, "status": "RUNNING"}})
-    out = json.dumps({"document": {"id": document_id, "status": "EVALUATING"}})
-    return {"version": "0", "id": "00000000-0000-4000-8000-000000000002", "detail-type": "Step Functions Execution Status Change",
-            "source": "aws.states", "account": ACCOUNT, "time": "2026-10-22T23:02:29Z", "region": REGION, "resources": [arn],
-            "detail": {"executionArn": arn, "stateMachineArn": MACHINE, "name": name, "status": "SUCCEEDED",
-                       "startDate": 1792710108682, "stopDate": 1792710149297, "input": doc, "output": out}}
 
 
 def lines(n=2):

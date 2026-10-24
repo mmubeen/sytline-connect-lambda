@@ -8,6 +8,10 @@ from werkzeug.wrappers import Response
 from . import models
 
 
+def _ready(services):
+    return all(v in ("up", "mock") for v in services.values())
+
+
 def _json(body, status=200):
     return Response(json.dumps(body, default=str), status, {"Content-Type": "application/json"})
 
@@ -29,7 +33,7 @@ def handle(edge, request):
 
     if (method, path) == ("GET", "/health"):
         services = edge.backend.health()
-        return _json({"ready": all(v == "up" for v in services.values()), "services": services})
+        return _json({"ready": _ready(services), "services": services})
     if (method, path) == ("POST", "/reset"):
         _reset(edge)
         return _json({"reset": True})
@@ -76,9 +80,12 @@ def _reset(edge):
 
 def _scenario(edge, name):
     if name not in edge.backend.scenario_names():
+        reason = edge.backend.refusal_for(name) if hasattr(edge.backend, "refusal_for") else None
+        if reason:
+            return _json({"error": reason}, 409)
         return _json({"error": f"unknown scenario {name!r}"}, 404)
     health = edge.backend.health()
-    if not all(v == "up" for v in health.values()):
+    if not _ready(health):
         return _json({"error": "environment not ready", "services": health}, 409)
     _reset(edge)
     event = edge.backend.load(name)

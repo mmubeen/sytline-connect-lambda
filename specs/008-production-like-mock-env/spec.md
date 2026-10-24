@@ -14,6 +14,8 @@
 
 - Q: Should the SQL Server stand-in be a real engine, an emulation, or both? → A: A real SQL Server engine.
 - Q: Where does mock data come from? → A: Synthetic only.
+- Q: When the mock uses the real IDP, how does the function get permission to read it? → A: The developer's own temporary AWS credentials (for example an SSO profile), given to the function only for the IDP reads; everything else stays mocked.
+- Q: In real-IDP mode, how is the real document picked? → A: The developer names a document ID at start-up; the mock builds the processing-complete event for it, and the run reports the outcome instead of asserting a fixed one.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -80,6 +82,22 @@ A developer or a build pipeline can reset the mock environment to a known starti
 
 ---
 
+### User Story 5 - Try a real IDP document without touching a real ERP (Priority: P3)
+
+A developer who has finished documents in their real IDP turns on the opt-in real-IDP mode, supplies temporary credentials and the ID of one finished document. The function reads that real document and its confidence results exactly as it would in production, then reserves and saves against the mock ERP and the mock database. The developer sees the real document's outcome (accepted, needs review, incomplete) without any real ERP write.
+
+**Why this priority**: Synthetic documents cannot show how the function copes with the shapes, field names and confidence values of real IDP output. It is optional and needs the developer's own access, so it follows the four core stories.
+
+**Independent Test**: Start in real-IDP mode with a known finished document ID and valid credentials, send the event, and confirm the outcome is one of the known outcomes, the call records show the IDP reads went to the real IDP and nothing else left the machine, and the mock ERP shows what would have been written.
+
+**Acceptance Scenarios**:
+
+1. **Given** real-IDP mode, valid temporary credentials and a finished document ID, **When** the event is sent, **Then** the function reads the real document and returns a known outcome, and every call outside the IDP reads stayed on the mock.
+2. **Given** real-IDP mode and expired credentials, **When** the event is sent, **Then** the function reports the IDP as unavailable with the access-denied cause, and no mock IDP data is substituted.
+3. **Given** real-IDP mode is not requested, **When** the environment starts, **Then** no credentials are read and no connection to a real service is possible.
+
+---
+
 ### Edge Cases
 
 - A mock service is slow to start: the suite waits up to a stated limit, then stops with a message naming the service that was not ready.
@@ -87,6 +105,8 @@ A developer or a build pipeline can reset the mock environment to a known starti
 - The mock and production drift apart (a new setting, a new action, a changed ERP method): the suite flags the difference instead of passing silently.
 - The mock is pointed at a real address by mistake: the suite refuses to run.
 - A fault is left switched on after a failed test: the next reset clears it.
+- Real-IDP mode is requested but no credentials are supplied, or they have expired: start-up (or the next read) stops with a message saying which, and nothing falls back silently to the mock IDP.
+- Real-IDP mode and a mock IDP scenario are chosen together: refused with a message; the two modes are never mixed.
 
 ## Requirements *(mandatory)*
 
@@ -102,11 +122,15 @@ A developer or a build pipeline can reset the mock environment to a known starti
 - **FR-008**: The mock MUST apply the same settings names, time limit and memory limit as the deployment template, and deny any service call the template does not permit.
 - **FR-009**: The mock MUST ship with named data scenarios (for example a document that passes review, one that needs review, one already processed) that tests can select.
 - **FR-010**: Resetting the mock MUST return all of its state, including jobs, locks, reservations and injected faults, to a known starting state.
-- **FR-011**: The integration suite MUST refuse to run if any address it is given is not a mock address, and MUST never perform a live ERP write.
+- **FR-011**: The integration suite MUST refuse to run if any address it is given is not a mock address, and MUST never perform a live ERP write. The one exception is the opt-in real-IDP mode (FR-017), which may reach the real IDP and nothing else.
 - **FR-012**: The suite MUST report when the mock and the deployment template or the function's list of actions no longer agree.
 - **FR-013**: The suite MUST run unattended, produce a clear pass/fail result and exit code, and finish within a stated time.
 - **FR-014**: The mock SQL Server stand-in MUST be a real SQL Server engine, so login, encryption, driver and query dialect are exercised as in production. Starting it may take longer than the other mocks (see the start-up edge case).
 - **FR-015**: Mock data MUST be synthetic only. No production document, ERP record or database row, sanitized or not, may be stored in the mock or the repository.
+- **FR-017**: The mock environment MUST offer an opt-in real-IDP mode, off by default. In it, the function's IDP reads (stack lookup, document result files, tracking table, the IDP lookup function and decryption of its data) go to the developer's real IDP stack; every other service stays mocked, including the ERP and the database, so nothing is written to a real ERP.
+- **FR-018**: In real-IDP mode the IDP reads MUST use the developer's own temporary AWS credentials (for example an SSO profile) that the developer supplies at start-up. The credentials MUST be held only for the IDP reads, MUST NOT be stored in the repository, the run directory's committed files or any log, and MUST NOT be visible to the function's other calls.
+- **FR-019**: In real-IDP mode the edge MUST still apply the template's permissions and MUST allow only read actions against the real IDP; any write or any call to a real service other than the IDP's own is refused and recorded.
+- **FR-020**: In real-IDP mode the developer MUST name one document ID at start-up; the mock MUST build the processing-complete event for it from the same shape as the sample event. The run reports the outcome; tests in this mode assert only the invariants (a known outcome, no write to any real service, no call outside the IDP reads), not a fixed outcome.
 - **FR-016**: Documentation MUST explain what the mock does and does not reproduce, so a pass is not read as proof of production behaviour.
 
 ### Key Entities
@@ -126,6 +150,7 @@ A developer or a build pipeline can reset the mock environment to a known starti
 - **SC-003**: Every failure class seen in production so far (IDP read denied, module missing, encryption key denied, document needs review, ERP unreachable) can be reproduced on demand and gives the same operator-facing message as production.
 - **SC-004**: Two consecutive runs from a reset state give identical results 100% of the time.
 - **SC-005**: Zero calls reach a real ERP, IDP, database or cloud account during a suite run, verified with outside network access blocked.
+- **SC-007**: In real-IDP mode, 100% of calls that reach a real service are IDP reads, and a run with expired or missing credentials stops with a message naming the problem within 30 seconds.
 - **SC-006**: A setting or action added to the deployment is caught by the suite before release in 100% of cases, rather than first failing after deployment.
 
 ## Assumptions
@@ -135,4 +160,5 @@ A developer or a build pipeline can reset the mock environment to a known starti
 - The sample event and the example document used so far are the first scenario.
 - Live ERP writes stay off, and the standing rule that credentials are never printed or logged applies to the mock as well.
 - The mock reproduces behaviour the function can observe (responses, errors, timing limits). It does not reproduce the private internals of the ERP, the IDP or the cloud provider, and that gap is documented (FR-016).
+- Real-IDP mode needs the developer's own AWS access to the IDP stack, a finished document in it, and a route to the IDP's services from the developer's machine; none of these are provided by the mock.
 - Real-network checks against the actual worker network remain the existing opt-in read-only checks; this feature does not replace them.

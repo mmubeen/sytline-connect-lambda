@@ -13,6 +13,11 @@ policy-checking proxy), a stub IDP lookup function, a schedule driver and an API
 (`make mock-up`), one resets it, and a pytest suite drives it through a control API. Settings, time limit, memory limit
 and permissions are **read from `src/template.yaml`**, so the mock cannot drift silently (FR-008, FR-012).
 
+**Real-IDP mode (added by the clarification of 2026-10-24, FR-017..FR-020, US5):** an opt-in mode in which only the function's IDP reads
+leave the mock. The edge re-signs those requests with the developer's own temporary credentials (exported from a profile into a file
+only the edge can read) and sends them to the real IDP services; everything else, including the ERP and the database, stays mocked.
+See research R14..R21 and `contracts/real-idp.md`.
+
 ## Technical Context
 
 **Language/Version**: Python 3.13 in the function container; host tooling runs on the developer's Python (3.9+ for the mock tools and pytest, as the existing suite does)
@@ -43,6 +48,8 @@ and permissions are **read from `src/template.yaml`**, so the mock cannot drift 
 | Credentials/secrets never printed or logged | Pass: test secrets are generated per run, kept out of logs; control API redacts values |
 | One function, one entry point, no network resources in the template | Pass: template unchanged |
 | Tests first, fakes layer kept | Pass: unit layer unchanged; this is additive |
+| Real-IDP mode: credentials never printed, logged, committed, or visible to the function | Pass by design: file mode 0600 under git-ignored `mock/.idp/`, mounted into the edge only, redacted from call records (R16) |
+| Real-IDP mode: nothing is written to any real service | Pass by design: read-only allow-list on the real side, everything else refused and recorded (R18) |
 
 Re-check after Phase 1: no violations.
 
@@ -92,6 +99,13 @@ tests/mock_env/
 └── test_isolation.py       # repeatability, no-egress, live writes off
 
 docs/MOCK_ENVIRONMENT.md    # usage + fidelity-gap list (FR-016)
+
+# added for real-IDP mode
+mock/edge/realidp.py        # routing of IDP requests to the real services, re-signing, read-only allow-list, credential file reader
+mock/edge/events.py         # builds the processing-complete event for a document id (shared with scenarios/generate.py)
+mock/.idp/                  # git-ignored: creds (0600), mode.json; mounted into the edge container only
+tests/unit/mock/test_realidp.py     # against a fake "real AWS" HTTP server
+tests/mock_env/test_real_idp.py     # opt-in (MOCK_IDP=real), needs the developer's own access
 ```
 
 **Structure Decision**: a top-level `mock/` directory for the stand-ins (they are tools, not function code and must not be packaged into the Lambda), `tests/mock_env/` for the suite. The build output is mounted into the runtime image, never copied from a different source.

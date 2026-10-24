@@ -15,7 +15,7 @@ ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 
 @pytest.fixture
 def run(tmp_path):
-    prepare.prepare(str(tmp_path))
+    prepare.prepare(str(tmp_path), idp_dir=str(tmp_path) + "-idp")
     return str(tmp_path)
 
 

@@ -12,7 +12,7 @@ from edge import prepare
 @pytest.fixture
 def run(tmp_path):
     d = tmp_path / "run"
-    prepare.prepare(str(d))
+    prepare.prepare(str(d), idp_dir=str(d) + "-idp")
     return d
 
 
@@ -46,9 +46,9 @@ def test_secret_files_are_private_and_not_in_the_env_files(run):
 
 
 def test_preparing_again_keeps_the_passwords(tmp_path):
-    prepare.prepare(str(tmp_path))
+    prepare.prepare(str(tmp_path), idp_dir=str(tmp_path) + "-idp")
     first = (tmp_path / "passwords.json").read_text()
-    prepare.prepare(str(tmp_path))
+    prepare.prepare(str(tmp_path), idp_dir=str(tmp_path) + "-idp")
     assert (tmp_path / "passwords.json").read_text() == first
 
 

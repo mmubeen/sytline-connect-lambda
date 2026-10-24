@@ -57,6 +57,7 @@ All data is synthetic (nothing from production, sanitized or not). Regenerate wi
 | `needs-review` | `cust_po` below its threshold | `refused` / `DOCUMENT_NEEDS_REVIEW`, nothing written |
 | `incomplete` | no PO number and no lines | `refused` / `DOCUMENT_INCOMPLETE` |
 | `not-found` | the IDP has no record | `refused` / `DOCUMENT_NOT_READY` |
+| `real-idp` | real-IDP mode only: your own finished document | a known outcome, reported (see Real IDP) |
 
 ## Faults
 
@@ -78,6 +79,39 @@ All data is synthetic (nothing from production, sanitized or not). Regenerate wi
 | `secrets.unavailable` | Secrets Manager answers 503 |
 | `lock.held` | another save holds the ERP-write lock (a live lease) |
 | `lambda.invoke_denied` | the function may not invoke itself |
+
+## Real IDP (opt-in)
+
+By default the IDP is mocked with synthetic documents. To check how the function copes with **your real IDP's** output, turn on real-IDP
+mode: only the function's IDP reads leave the mock; the ERP, the database, Secrets Manager, the jobs table and the function's self-start stay
+mocked, so nothing is written to a real ERP.
+
+```bash
+aws sso login --profile idp-dev
+make -C mock up MOCK_IDP=real MOCK_IDP_PROFILE=idp-dev \
+     MOCK_IDP_STACK=us-ct-idp-stack MOCK_IDP_BUCKET=<output bucket> MOCK_IDP_TABLE=<tracking table> \
+     MOCK_IDP_DOCUMENT=159112.pdf [MOCK_IDP_KMS_KEYS=<key arn,key arn>] [MOCK_IDP_REGION=us-gov-east-1] [MOCK_IDP_FIPS=false]
+curl -X POST localhost:4566/__mock__/scenario/real-idp      # returns the event for MOCK_IDP_DOCUMENT; then POST it to /__mock__/invoke
+make -C mock idp-creds                                       # credentials expired: re-export them, no restart
+MOCK_ENV=1 MOCK_IDP=real pytest tests/mock_env/test_real_idp.py
+```
+
+How it works: the edge re-signs the function's IDP requests with temporary credentials exported from your profile
+(`aws configure export-credentials`) into `mock/.idp/creds` (mode 0600, git-ignored, mounted into the edge container only; the function
+never sees them) and sends them to the real service (FIPS endpoints by default for GovCloud). The template's permissions are still applied
+first. **Only these calls leave the machine:** CloudFormation `DescribeStacks`/`ListStackResources`/`DescribeStackResource(s)` on the IDP
+stack, `s3:GetObject` on its output bucket, DynamoDB `GetItem`/`Query`/`BatchGetItem` on its tracking table, and `lambda:InvokeFunction` on
+`<stack>-LookupFunction-*` (it runs the IDP's own read-only status lookup). Any other IDP-bound call is refused by the edge and recorded
+(`target: real, allowed: false`); no other real service is ever called.
+
+- **The outcome is reported, not asserted.** The mock database and ERP start empty, so a real document usually ends `read_only` with
+  `CUSTOMER_NOT_FOUND`. That shows the real document was read and parsed; to go further, add the matching customer to the mock data.
+- **Decryption is the real thing:** the real key policy and your own KMS permissions apply, so the production `kms:Decrypt` failure
+  reproduces for real, including key-policy denials the mock cannot model.
+- **Credentials:** if they are missing or expired, `GET /__mock__/health` shows `"idp": "credentials expired at <time>"` (within 10 seconds)
+  and the function's IDP reads fail with `IDP_UNAVAILABLE`; nothing falls back to the mock IDP. Mock scenarios answer 409 in this mode.
+- **Not checked here:** the re-signing and the GovCloud endpoint names have only been tested against a stand-in service; the first run
+  against real AWS may need a fix.
 
 ## Actions the function accepts
 
@@ -107,6 +141,7 @@ What the mock does differently from production, and what a pass therefore does *
 - **Runtime.** Python 3.13 and x86_64 as in the template; the emulator enforces the timeout but not memory beyond the container limit.
 - **Live writes** are ON inside the mock (`SYTELINE_LIVE_WRITES=true`) so a save can be exercised. They can only reach the mock ERP and
   database: `make -C mock up` refuses to prepare, and the suite refuses to run, if the function's ERP or AWS address is not a mock address.
+- **Real-IDP mode** is the one place anything leaves the machine, read-only and only to the IDP (see Real IDP); the no-egress guarantee of the function container still holds, because only the edge has a route out.
 - **Not covered at all:** the IDP's own processing, the state machine and the EventBridge rule (the event is sent by the suite).
 
 ## Findings made while building this

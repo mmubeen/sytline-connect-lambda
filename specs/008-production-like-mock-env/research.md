@@ -67,3 +67,53 @@ Docker is **not installed in the authoring environment**, so the container stack
 - **DynamoDB transactions** are checked per item (`actions.identify_all`), as IAM does.
 - **Findings in the function** surfaced by the mock: unaliased `ttl` in update expressions (fixed, `#ttl`), and the zeep list behaviour
   for an `ArrayOfString` parameter (documented, not changed).
+
+## Real-IDP mode (FR-017..FR-020)
+
+### R14 Where the real/mock decision is made
+**Decision**: in the edge, per request, after the permission check. A request is "IDP-bound" when it names the configured IDP stack
+(`cloudformation:*` with `StackName`), the output bucket (`s3` path), the tracking table (`dynamodb` `TableName`) or a function named
+`<stack>-LookupFunction-*` (`lambda:Invoke`). Those go to the real service in real mode; all else is served by the mock as before.
+**Rationale**: one decision point that already records calls and applies the template's permissions (FR-019); the function is unchanged.
+**Alternatives**: giving the function real endpoints for the IDP services (it would hold the credentials, FR-018); a second proxy (duplicate logging).
+
+### R15 Re-signing
+**Decision**: the edge drops the function's (fake) signature headers and signs the request with the developer's credentials using
+botocore's `SigV4Auth` (`S3SigV4Auth` for S3), then sends it to the service's real endpoint:
+`https://<service>[-fips].<region>.amazonaws.com` (FIPS by default for `aws-us-gov`, `MOCK_IDP_FIPS=false` to turn off).
+**Rationale**: the function never sees the credentials; the edge already has egress on the `outside` network.
+**Risk**: re-signing correctness is only verifiable against real AWS (unit tests use a fake endpoint that checks the key id and token).
+
+### R16 Credentials
+**Decision**: `make -C mock up MOCK_IDP=real MOCK_IDP_PROFILE=<profile> ...` runs `aws configure export-credentials --profile <p> --format env-no-export`
+(works for SSO and assumed roles) and writes `mock/.idp/creds` (mode 0600) with the key, secret, token and expiry. Only the edge mounts
+`mock/.idp`. The edge re-reads the file on every real request, so `make -C mock idp-creds` refreshes without a restart. Values are never
+printed; call records hold no header or body of real requests beyond the operation and resource.
+**Alternatives**: environment variables on the edge (visible in `docker inspect`); mounting `~/.aws` (exposes every profile).
+
+### R17 Account, region and the template's permissions
+**Decision**: the template's permission resources contain `${AWS::AccountId}`; in real mode `edge.prepare` calls `aws sts get-caller-identity`
+with the profile, then renders with that account id, the IDP region and partition (`MOCK_IDP_REGION`, default `us-gov-east-1`), and the
+real stack, bucket, table and key ARNs (`MOCK_IDP_STACK`, `MOCK_IDP_BUCKET`, `MOCK_IDP_TABLE`, `MOCK_IDP_KMS_KEYS`). `render_env.render()` takes these as
+parameters, so the policy check still comes from the template.
+
+### R18 Read-only allow-list on the real side
+**Decision**: only these go out: `cloudformation:DescribeStacks|ListStackResources|DescribeStackResource|DescribeStackResources`,
+`s3:GetObject`, `dynamodb:GetItem|Query|BatchGetItem`, `lambda:InvokeFunction` on `<stack>-LookupFunction-*`. Anything else IDP-bound is refused with
+an AWS-worded denial and recorded with `target: real, allowed: false`. Calls to any other real service are never made.
+**Note**: invoking the lookup function runs the IDP's own read-only status lookup; this is the only call that executes code on the real side.
+
+### R19 Decryption
+**Decision**: no mock KMS check in real mode. The real S3 and DynamoDB decrypt server-side, so the real key policy and the developer's
+own KMS permissions apply: the production `kms:Decrypt` failure reproduces for real, including key-policy denials the mock cannot model.
+
+### R20 Picking the document and the scenario
+**Decision**: `MOCK_IDP_DOCUMENT=<id>` is required in real mode. `edge/events.py` builds the processing-complete event from the sample
+event's shape. The mode exposes one scenario, `real-idp` (`GET /scenarios` lists only it; mock scenarios are refused with a message, so the modes
+never mix). The mock database and ERP start empty, so a real document usually ends `refused` at the customer step: that is a reported outcome, not
+a failure. Seeding a matching customer is a follow-up (`MOCK_IDP_SEED_CUSTOMER`), out of scope here.
+
+### R21 Credential problems
+**Decision**: `/__mock__/health` reports `idp` as `up`, or the reason (`credentials missing`, `credentials expired at <time>`, `profile could not
+export credentials`). The edge checks the file every 10 seconds, so the readiness wait and `make -C mock up` stop within 30 seconds with that
+reason (SC-007). A real request with expired credentials answers an AWS-worded `ExpiredToken` error and is recorded; nothing falls back to the mock IDP.

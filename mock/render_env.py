@@ -20,23 +20,27 @@ ACCOUNT = "000000000000"
 REGION = "us-gov-east-1"
 PARTITION = "aws-us-gov"
 
-# Parameters the template requires; a developer's own values are never read from the host environment.
-MOCK_PARAMS = {
-    "SytelineWsdl": "http://erp:8080/IDORequestService/IDOWebService.asmx?wsdl",
-    "SytelineUser": "mock-user",
-    "SytelineSecretArn": f"arn:{PARTITION}:secretsmanager:{REGION}:{ACCOUNT}:secret:mock/sytline-AbCdEf",
-    "WorkerVpcId": "vpc-0a1b2c3d",
-    "WorkerSubnetIds": "subnet-0a1b2c3d,subnet-0e4f5a6b",
-    "WorkerSecurityGroupIds": "sg-0a1b2c3d",
-    "ApiVpcEndpointId": "vpce-0a1b2c3d",
-    "IdpStackName": "mock-idp",
-    "IdpOutputBucketName": "mock-idp-output",
-    "IdpTrackingTableName": "mock-idp-tracking",
-    "IdpKmsKeyArns": f"arn:{PARTITION}:kms:{REGION}:{ACCOUNT}:key/00000000-0000-4000-8000-000000000001",
-    "IdpStateMachineArn": f"arn:{PARTITION}:states:{REGION}:{ACCOUNT}:stateMachine:mock-idp-workflow",
-    "DefaultWhse": "MAIN",
-    "DefaultOrdType": "R",
-}
+def mock_params(account=ACCOUNT, region=REGION, partition=PARTITION):
+    """Parameters the template requires; a developer's own values are never read from the host environment."""
+    return {
+        "SytelineWsdl": "http://erp:8080/IDORequestService/IDOWebService.asmx?wsdl",
+        "SytelineUser": "mock-user",
+        "SytelineSecretArn": f"arn:{partition}:secretsmanager:{region}:{account}:secret:mock/sytline-AbCdEf",
+        "WorkerVpcId": "vpc-0a1b2c3d",
+        "WorkerSubnetIds": "subnet-0a1b2c3d,subnet-0e4f5a6b",
+        "WorkerSecurityGroupIds": "sg-0a1b2c3d",
+        "ApiVpcEndpointId": "vpce-0a1b2c3d",
+        "IdpStackName": "mock-idp",
+        "IdpOutputBucketName": "mock-idp-output",
+        "IdpTrackingTableName": "mock-idp-tracking",
+        "IdpKmsKeyArns": f"arn:{partition}:kms:{region}:{account}:key/00000000-0000-4000-8000-000000000001",
+        "IdpStateMachineArn": f"arn:{partition}:states:{region}:{account}:stateMachine:mock-idp-workflow",
+        "DefaultWhse": "MAIN",
+        "DefaultOrdType": "R",
+    }
+
+
+MOCK_PARAMS = mock_params()
 
 # SAM policy templates the function uses, expanded the way SAM expands them
 DYNAMO_CRUD = ["dynamodb:GetItem", "dynamodb:DeleteItem", "dynamodb:PutItem", "dynamodb:Scan", "dynamodb:Query",
@@ -49,12 +53,13 @@ class Unsupported(Exception):
 
 
 class _Resolver:
-    def __init__(self, template, params, stack):
+    def __init__(self, template, params, stack, account=ACCOUNT, region=REGION, partition=PARTITION):
         self.t = template
         self.ev = Evaluator(template, **params)
         self.stack = stack
-        self.pseudo = {"AWS::StackName": stack, "AWS::Region": REGION, "AWS::AccountId": ACCOUNT,
-                       "AWS::Partition": PARTITION}
+        self.account, self.region, self.partition = account, region, partition
+        self.pseudo = {"AWS::StackName": stack, "AWS::Region": region, "AWS::AccountId": account,
+                       "AWS::Partition": partition}
 
     # physical names / attributes of the resources the function refers to
     def physical(self, name):
@@ -63,9 +68,9 @@ class _Resolver:
 
     def attr(self, name, attribute):
         if name == "DirectFunction" and attribute == "Arn":
-            return f"arn:{PARTITION}:lambda:{REGION}:{ACCOUNT}:function:{self.stack}-fn"
+            return f"arn:{self.partition}:lambda:{self.region}:{self.account}:function:{self.stack}-fn"
         if attribute == "Arn":
-            return f"arn:{PARTITION}:mock:{REGION}:{ACCOUNT}:{name}"
+            return f"arn:{self.partition}:mock:{self.region}:{self.account}:{name}"
         raise Unsupported(f"GetAtt {name}.{attribute}")
 
     def ref(self, name):
@@ -123,13 +128,14 @@ _NOVALUE = object()
 
 
 def _statements(policies, r):
+    partition, region, account = r.partition, r.region, r.account
     out = []
     for p in policies:
         if "Statement" in p:
             for s in p["Statement"]:
                 out.append({"Effect": s["Effect"], "Action": _listed(s["Action"]), "Resource": _listed(s["Resource"])})
         elif "DynamoDBCrudPolicy" in p:
-            table = f"arn:{PARTITION}:dynamodb:{REGION}:{ACCOUNT}:table/{p['DynamoDBCrudPolicy']['TableName']}"
+            table = f"arn:{partition}:dynamodb:{region}:{account}:table/{p['DynamoDBCrudPolicy']['TableName']}"
             out.append({"Effect": "Allow", "Action": list(DYNAMO_CRUD), "Resource": [table, table + "/index/*"]})
         else:
             raise Unsupported(f"policy {sorted(p)}")
@@ -140,15 +146,15 @@ def _listed(x):
     return list(x) if isinstance(x, list) else [x]
 
 
-def render(params=None, template=None, stack=STACK):
+def render(params=None, template=None, stack=STACK, account=ACCOUNT, region=REGION, partition=PARTITION):
     """The function as the template deploys it, with mock parameter values (overridable)."""
     t = template or load_template()
-    values = dict(MOCK_PARAMS)
+    values = mock_params(account, region, partition)
     values.update(params or {})
     for name in values:
         if name not in t["Parameters"]:
             raise KeyError(f"unknown parameter {name}")
-    r = _Resolver(t, values, stack)
+    r = _Resolver(t, values, stack, account, region, partition)
     fn = t["Resources"]["DirectFunction"]["Properties"]
     glob = t.get("Globals", {}).get("Function", {})
     env = {}
@@ -173,7 +179,7 @@ def render(params=None, template=None, stack=STACK):
         "routes": sorted(routes),
         "statements": statements,
         "schedule": {"expression": sweep["Schedule"], "input": json.loads(sweep["Input"])},
-        "role_arn": f"arn:{PARTITION}:sts::{ACCOUNT}:assumed-role/{stack}-DirectFunctionRole/{stack}-fn",
+        "role_arn": f"arn:{partition}:sts::{account}:assumed-role/{stack}-DirectFunctionRole/{stack}-fn",
         "stack": stack,
         "parameters": values,
     }

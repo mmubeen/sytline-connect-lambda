@@ -28,6 +28,7 @@ services:
       MOCK_SCENARIOS: /mock/scenarios
     volumes:
       - ./.run:/run/mock
+      - ./.idp:/run/idp:ro          # real-IDP mode only: the developer's temporary credentials; mounted nowhere else
     ports:
       - "127.0.0.1:${MOCK_EDGE_PORT:-4566}:4566"
     networks:

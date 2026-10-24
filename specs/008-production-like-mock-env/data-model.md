@@ -28,3 +28,19 @@ State: `active -> cleared` (explicitly, on exhaustion, or by reset).
 
 ## Mock environment state
 `idle -> starting -> ready -> (scenario loaded) -> running tests -> reset -> ready`; `ready` requires every service health check to pass.
+
+## Real-IDP configuration (`mock/.idp/mode.json`, git-ignored)
+| Field | Meaning |
+|-------|---------|
+| `mode` | `mock` (default) or `real` |
+| `profile` | AWS profile the credentials were exported from (a name, not a secret) |
+| `stack`, `bucket`, `table`, `kms_keys`, `region`, `account` | the real IDP identifiers used to route requests and render the permissions |
+| `document` | the document id to process (required in real mode) |
+| `fips` | use FIPS endpoints (default true for `aws-us-gov`) |
+
+## Real-IDP credentials (`mock/.idp/creds`, mode 0600)
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_CREDENTIAL_EXPIRATION`. Mounted read-only into the edge only; never in an
+environment variable, a call record, a log line or a response. State: `missing -> valid -> expired -> (refreshed) valid`.
+
+## Call record (extended)
+Adds `target`: `mock` or `real`. A `real` record carries only `service`, `operation`, `action`, `resource`, `allowed`, `status`.

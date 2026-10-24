@@ -9,7 +9,7 @@ EDGE := http://127.0.0.1:$(or $(MOCK_EDGE_PORT),4566)/__mock__
 WAIT ?= 420
 POLL ?= 5
 
-.PHONY: up down reset test logs clean build prepare wait
+.PHONY: up down reset test logs clean build prepare wait idp-creds
 
 prepare:
 	@mkdir -p "$(RUN)"
@@ -52,5 +52,9 @@ test:
 logs:
 	$(COMPOSE) logs --tail=100
 
+# real-IDP mode: re-export the developer's temporary credentials from the recorded profile (no restart needed)
+idp-creds:
+	@cd "$(HERE)" && PYTHONPATH="$(HERE)" $(PY) -m edge.prepare --creds-only && echo "credentials refreshed"
+
 clean: down
-	rm -rf "$(RUN)"
+	rm -rf "$(RUN)" "$(HERE).idp"

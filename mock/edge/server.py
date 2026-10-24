@@ -14,7 +14,7 @@ import time
 from moto.server import ThreadedMotoServer
 from werkzeug.serving import run_simple
 
-from . import app, erpcontrol, forward, runtime, seed, sqlcontrol, sqlproxy
+from . import app, erpcontrol, forward, realidp, runtime, seed, sqlcontrol, sqlproxy
 from idp.seeder import IdpSeeder
 
 log = logging.getLogger("mock.edge")
@@ -40,9 +40,20 @@ def main():
     erp = erpcontrol.ErpControl(os.environ.get("ERP_CONTROL_URL", "http://erp:8080"))
     urls = [u for u in os.environ["MOCK_FN_URLS"].split(",") if u]
     rt = runtime.Runtime(urls, default_timeout=rendered["timeout"])
+    idp_dir = os.environ.get("MOCK_IDP_DIR", "/run/idp")
+    with open(os.path.join(idp_dir, "mode.json")) as f:
+        mode = json.load(f)
+    real = None
+    if mode["mode"] == "real":
+        # real-IDP mode: the IDP's data lives in the developer's real account, so nothing is seeded for it here; the IDP reads are
+        # re-signed with the credentials file (readable by this container only) and sent on, read-only
+        cfg = realidp.RealConfig(mode["stack"], mode["bucket"], mode["table"], mode["region"], mode["partition"], fips=mode["fips"])
+        creds = realidp.Credentials(os.path.join(idp_dir, "creds"))
+        real = (cfg, realidp.RealForward(cfg, creds), creds)
     world = seed.World(rendered, moto_url, os.environ.get("MOCK_SCENARIOS", "/mock/scenarios"), run_dir, erp=erp, sql=sql,
-                       runtime_up=rt.healthy, idp_seeder=IdpSeeder(rendered))
-    edge = app.Edge(rendered, forward.MotoForward(moto_url), rt, world)
+                       runtime_up=rt.healthy, idp_seeder=None if real else IdpSeeder(rendered), mode=mode)
+    edge = app.Edge(rendered, forward.MotoForward(moto_url), rt, world, real=real)
+    world.idp_status = edge.real_status
 
     ready = threading.Event()
     world.ready = ready.is_set
