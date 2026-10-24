@@ -77,3 +77,15 @@ def test_the_compose_command_can_be_overridden(tmp_path):
 
 def test_without_either_the_plugin_command_is_kept_so_its_error_explains_what_is_missing(tmp_path):
     assert compose_line(tmp_path, {"docker": "exit 1"}).startswith("docker compose -f ")
+
+
+def test_up_stops_early_with_the_fix_when_compose_is_missing(tmp_path):
+    r = make(["up"], tmp_path, {"docker": "exit 1"})
+    assert r.returncode != 0 and "the Compose tool is missing" in r.stderr and "brew install docker-compose" in r.stderr
+    assert "sam build" not in r.stdout          # nothing slow ran first
+
+
+def test_up_stops_early_when_the_daemon_is_not_running(tmp_path):
+    stub = 'case "$1" in compose) exit 0;; info) exit 1;; esac; exit 0'
+    r = make(["up"], tmp_path, {"docker": stub})
+    assert r.returncode != 0 and "Docker daemon is not running" in r.stderr and "colima start" in r.stderr

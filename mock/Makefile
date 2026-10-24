@@ -17,7 +17,12 @@ EDGE := http://127.0.0.1:$(or $(MOCK_EDGE_PORT),4566)/__mock__
 WAIT ?= 420
 POLL ?= 5
 
-.PHONY: up down reset test logs clean build prepare wait idp-creds deps
+.PHONY: up down reset test logs clean build prepare wait idp-creds deps containers
+
+# stop early, with the fix, when containers cannot be started (before the slow build)
+containers:
+	@$(DOCKER_COMPOSE) version >/dev/null 2>&1 || { echo "ERROR: '$(DOCKER_COMPOSE)' does not work: the Compose tool is missing. Install it, e.g. Docker Desktop (includes it), or with Homebrew: brew install docker-compose, then link it as a Docker plugin: mkdir -p ~/.docker/cli-plugins && ln -sfn \"\$$(brew --prefix)/opt/docker-compose/bin/docker-compose\" ~/.docker/cli-plugins/docker-compose   (or just use the standalone one: make DOCKER_COMPOSE=docker-compose ...)" >&2; exit 2; }
+	@docker info >/dev/null 2>&1 || { echo "ERROR: the Docker daemon is not running (docker info fails): start Docker Desktop, or your runtime (for example: colima start)" >&2; exit 2; }
 
 deps:
 	@$(PY) -c 'import yaml, requests' 2>/dev/null || { echo "ERROR: $(PY) lacks PyYAML or requests. Install the host tools into the Python you use:  $(PY) -m pip install -r $(HERE)requirements.txt   (or pick another interpreter: make PY=/path/to/python)" >&2; exit 2; }
@@ -31,7 +36,7 @@ build:
 	@test -n "$(IDP_REPO)" || { echo "ERROR: set IDP_REPO to the IDP accelerator checkout (the function package needs its SDK)" >&2; exit 2; }
 	cd "$(HERE).." && cd src && IDP_REPO="$(IDP_REPO)" sam build
 
-up: prepare
+up: containers prepare
 	@if curl -fsS "$(EDGE)/health" >/dev/null 2>&1; then echo "the mock environment is already running (make -C mock down to stop it)"; exit 0; fi
 	@test -d "$(HERE)../src/.aws-sam/build/DirectFunction" || $(MAKE) -C "$(HERE)" build
 	$(COMPOSE) up -d --build
