@@ -170,6 +170,11 @@ class FakeSoap:
         return [c for c in self.calls if c[0] in ("insert", "invoke", "update")]
 
 
+# a few of DynamoDB's reserved words (the full list is long): an expression must alias them with #names
+DYNAMO_RESERVED = {"TTL", "STATE", "STATUS", "NAME", "DATA", "KEY", "VALUE", "VALUES", "TYPE", "TIMESTAMP", "COUNT", "USER",
+                   "ROLE", "SESSION"}
+
+
 class FakeClientError(Exception):
     def __init__(self, code):
         super().__init__(code)
@@ -207,6 +212,8 @@ class FakeJobsTable:
             raise FakeClientError("ConditionalCheckFailedException")
         for a in UpdateExpression[len("SET "):].split(", "):
             lhs, rhs = (x.strip() for x in a.split("=", 1))
+            if not lhs.startswith("#") and lhs.upper() in DYNAMO_RESERVED:  # DynamoDB refuses these unaliased (specs/008)
+                raise FakeClientError("ValidationException")
             if rhs.startswith(lhs + " +"):  # attempts = attempts + :one
                 item[lhs] = item.get(lhs, 0) + vals[":one"]
             else:

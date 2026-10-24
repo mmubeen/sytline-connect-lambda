@@ -121,7 +121,8 @@ class JobStore:
             expr.append(f"#{k} = :{k}")
         if new_state in TERMINAL:  # ttl only once the job is finished
             vals[":ttl"] = self._now() + TTL_AFTER_TERMINAL
-            expr.append("ttl = :ttl")
+            names["#ttl"] = "ttl"  # TTL is a DynamoDB reserved word: it cannot appear in an expression unaliased
+            expr.append("#ttl = :ttl")
         try:
             self._t.update_item(Key={"pk": f"UPLOAD#{upload_id}"}, UpdateExpression="SET " + ", ".join(expr),
                                 ConditionExpression="#s = :old", ExpressionAttributeNames=names,

@@ -91,7 +91,8 @@ class ReservationStore:
             expr.append(f"#{k} = :{k}")
         if new_state in TERMINAL:  # ttl only once the reservation is finished
             vals[":ttl"] = self._now() + TTL_AFTER_TERMINAL
-            expr.append("ttl = :ttl")
+            names["#ttl"] = "ttl"  # TTL is a DynamoDB reserved word: it cannot appear in an expression unaliased
+            expr.append("#ttl = :ttl")
         try:
             self._t.update_item(Key={"pk": f"{PK}{reservation_id}"}, UpdateExpression="SET " + ", ".join(expr),
                                 ConditionExpression="#s = :old", ExpressionAttributeNames=names,
