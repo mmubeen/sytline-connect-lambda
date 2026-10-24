@@ -3,15 +3,21 @@
 
 HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 RUN ?= $(HERE).run
-PY ?= python3
+# The interpreter for the host-side tools: the first of these that has PyYAML and requests (mock/requirements.txt), else python3.
+# Override: make PY=/path/to/python
+PY ?= $(shell for p in python3 python3.13 python3.12 python3.11 /usr/bin/python3 python; do \
+  $$p -c 'import yaml, requests' >/dev/null 2>&1 && { echo $$p; exit 0; }; done; echo python3)
 COMPOSE := docker compose -f $(HERE)compose.yaml
 EDGE := http://127.0.0.1:$(or $(MOCK_EDGE_PORT),4566)/__mock__
 WAIT ?= 420
 POLL ?= 5
 
-.PHONY: up down reset test logs clean build prepare wait idp-creds
+.PHONY: up down reset test logs clean build prepare wait idp-creds deps
 
-prepare:
+deps:
+	@$(PY) -c 'import yaml, requests' 2>/dev/null || { echo "ERROR: $(PY) lacks PyYAML or requests. Install the host tools into the Python you use:  $(PY) -m pip install -r $(HERE)requirements.txt   (or pick another interpreter: make PY=/path/to/python)" >&2; exit 2; }
+
+prepare: deps
 	@mkdir -p "$(RUN)"
 	@bash "$(HERE)sqlserver/certs.sh" "$(RUN)"
 	@cd "$(HERE)" && PYTHONPATH="$(HERE)" $(PY) -m edge.prepare "$(RUN)"

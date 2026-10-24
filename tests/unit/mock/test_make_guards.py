@@ -43,3 +43,13 @@ def test_wait_succeeds_when_the_environment_reports_ready(tmp_path):
 def test_build_needs_the_idp_checkout(tmp_path):
     r = make(["build"], tmp_path)
     assert r.returncode != 0 and "IDP_REPO" in r.stderr
+
+
+def test_prepare_says_how_to_fix_a_python_without_pyyaml(tmp_path):
+    r = make(["prepare", "PY=false"], tmp_path)
+    assert r.returncode != 0 and "lacks PyYAML or requests" in r.stderr and "requirements.txt" in r.stderr and "PY=" in r.stderr
+
+
+def test_a_python_with_pyyaml_is_found_when_the_first_one_has_none(tmp_path):
+    r = make(["-n", "deps"], tmp_path, {"python3": "exit 1"})      # a python3 that cannot import anything comes first on PATH
+    assert r.returncode == 0 and "lacks PyYAML or requests" not in r.stderr
