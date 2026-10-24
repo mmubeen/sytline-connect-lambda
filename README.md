@@ -57,6 +57,9 @@ All tests use fakes and never touch the ERP. `tests/integration/` is skipped by 
 `SYTELINE_READONLY_CHECKS=1` runs read-only network and web-service checks from the worker network; the live tests
 additionally need `SYTELINE_LIVE=1` **and** `LIVE_APPROVAL_REF` (the ERP owner's approval).
 
+A second, slower layer runs the built function against production-like stand-ins (mock ERP, real SQL Server, mock AWS) in containers,
+before any deployment: `make -C mock test`, see [docs/MOCK_ENVIRONMENT.md](docs/MOCK_ENVIRONMENT.md) (and its fidelity gaps).
+
 ## Deploy (SAM)
 One stack (`sytline-connect`) in **us-gov-east-1**, one configuration (`default` in `src/samconfig.toml`).
 

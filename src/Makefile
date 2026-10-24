@@ -29,3 +29,9 @@ $(addprefix build-,$(FUNCTIONS)):
 	cp lambda_function.py "$(ARTIFACTS_DIR)/"
 	cp -R syteline handlers "$(ARTIFACTS_DIR)/"
 	find "$(ARTIFACTS_DIR)" -name __pycache__ -prune -exec rm -rf {} +
+
+# Production-like mock environment (specs/008, docs/MOCK_ENVIRONMENT.md): these only delegate to mock/Makefile. They are not
+# part of `sam build`: nothing under mock/ is packaged into the function.
+.PHONY: mock-up mock-down mock-test
+mock-up mock-down mock-test:
+	$(MAKE) -C ../mock $(patsubst mock-%,%,$@)

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mock of the SyteLine IDO web service (specs/008): only the four operations src/syteline/client.py uses.
+     Names and shapes follow the assumptions in client.py; confirm against the real WSDL during discovery (T013 of feature 001).
+     `parameters` is a repeated string element on purpose: with a wrapper type (ArrayOfString) zeep silently sends NO
+     parameters when handed a plain list, which would hide a real problem if the production WSDL has that shape
+     (docs/MOCK_ENVIRONMENT.md, fidelity gaps). -->
+<wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+                  xmlns:s="http://www.w3.org/2001/XMLSchema" xmlns:tns="http://tempuri.org/"
+                  targetNamespace="http://tempuri.org/">
+  <wsdl:types>
+    <s:schema elementFormDefault="qualified" targetNamespace="http://tempuri.org/">
+      <s:element name="CreateSessionToken"><s:complexType><s:sequence>
+        <s:element minOccurs="0" name="userId" type="s:string"/>
+        <s:element minOccurs="0" name="password" type="s:string"/>
+        <s:element minOccurs="0" name="configName" type="s:string"/>
+      </s:sequence></s:complexType></s:element>
+      <s:element name="CreateSessionTokenResponse"><s:complexType><s:sequence>
+        <s:element minOccurs="0" name="CreateSessionTokenResult" type="s:string"/>
+      </s:sequence></s:complexType></s:element>
+
+      <s:element name="LoadDataSet"><s:complexType><s:sequence>
+        <s:element minOccurs="0" name="sessionToken" type="s:string"/>
+        <s:element minOccurs="0" name="ido" type="s:string"/>
+        <s:element minOccurs="0" name="properties" type="s:string"/>
+        <s:element minOccurs="0" name="filter" type="s:string"/>
+        <s:element minOccurs="0" name="orderBy" type="s:string"/>
+        <s:element minOccurs="0" name="postQueryMethod" type="s:string"/>
+        <s:element name="recordCap" type="s:int"/>
+      </s:sequence></s:complexType></s:element>
+      <s:element name="LoadDataSetResponse"><s:complexType><s:sequence>
+        <s:element minOccurs="0" name="LoadDataSetResult" type="s:string"/>
+      </s:sequence></s:complexType></s:element>
+
+      <s:element name="SaveDataSet"><s:complexType><s:sequence>
+        <s:element minOccurs="0" name="sessionToken" type="s:string"/>
+        <s:element minOccurs="0" name="changes" type="s:string"/>
+      </s:sequence></s:complexType></s:element>
+      <s:element name="SaveDataSetResponse"><s:complexType><s:sequence>
+        <s:element minOccurs="0" name="SaveDataSetResult" type="s:string"/>
+      </s:sequence></s:complexType></s:element>
+
+      <s:complexType name="ArrayOfString"><s:sequence>
+        <s:element minOccurs="0" maxOccurs="unbounded" name="string" nillable="true" type="s:string"/>
+      </s:sequence></s:complexType>
+      <s:element name="CallMethod"><s:complexType><s:sequence>
+        <s:element minOccurs="0" name="sessionToken" type="s:string"/>
+        <s:element minOccurs="0" name="ido" type="s:string"/>
+        <s:element minOccurs="0" name="method" type="s:string"/>
+        <s:element minOccurs="0" maxOccurs="unbounded" name="parameters" type="s:string"/>
+      </s:sequence></s:complexType></s:element>
+      <s:element name="CallMethodResponse"><s:complexType><s:sequence>
+        <s:element minOccurs="0" name="CallMethodResult" type="tns:ArrayOfString"/>
+      </s:sequence></s:complexType></s:element>
+    </s:schema>
+  </wsdl:types>
+
+  <wsdl:message name="CreateSessionTokenIn"><wsdl:part name="parameters" element="tns:CreateSessionToken"/></wsdl:message>
+  <wsdl:message name="CreateSessionTokenOut"><wsdl:part name="parameters" element="tns:CreateSessionTokenResponse"/></wsdl:message>
+  <wsdl:message name="LoadDataSetIn"><wsdl:part name="parameters" element="tns:LoadDataSet"/></wsdl:message>
+  <wsdl:message name="LoadDataSetOut"><wsdl:part name="parameters" element="tns:LoadDataSetResponse"/></wsdl:message>
+  <wsdl:message name="SaveDataSetIn"><wsdl:part name="parameters" element="tns:SaveDataSet"/></wsdl:message>
+  <wsdl:message name="SaveDataSetOut"><wsdl:part name="parameters" element="tns:SaveDataSetResponse"/></wsdl:message>
+  <wsdl:message name="CallMethodIn"><wsdl:part name="parameters" element="tns:CallMethod"/></wsdl:message>
+  <wsdl:message name="CallMethodOut"><wsdl:part name="parameters" element="tns:CallMethodResponse"/></wsdl:message>
+
+  <wsdl:portType name="IDOWebServiceSoap">
+    <wsdl:operation name="CreateSessionToken"><wsdl:input message="tns:CreateSessionTokenIn"/><wsdl:output message="tns:CreateSessionTokenOut"/></wsdl:operation>
+    <wsdl:operation name="LoadDataSet"><wsdl:input message="tns:LoadDataSetIn"/><wsdl:output message="tns:LoadDataSetOut"/></wsdl:operation>
+    <wsdl:operation name="SaveDataSet"><wsdl:input message="tns:SaveDataSetIn"/><wsdl:output message="tns:SaveDataSetOut"/></wsdl:operation>
+    <wsdl:operation name="CallMethod"><wsdl:input message="tns:CallMethodIn"/><wsdl:output message="tns:CallMethodOut"/></wsdl:operation>
+  </wsdl:portType>
+
+  <wsdl:binding name="IDOWebServiceSoap" type="tns:IDOWebServiceSoap">
+    <soap:binding transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="CreateSessionToken"><soap:operation soapAction="http://tempuri.org/CreateSessionToken" style="document"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input><wsdl:output><soap:body use="literal"/></wsdl:output></wsdl:operation>
+    <wsdl:operation name="LoadDataSet"><soap:operation soapAction="http://tempuri.org/LoadDataSet" style="document"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input><wsdl:output><soap:body use="literal"/></wsdl:output></wsdl:operation>
+    <wsdl:operation name="SaveDataSet"><soap:operation soapAction="http://tempuri.org/SaveDataSet" style="document"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input><wsdl:output><soap:body use="literal"/></wsdl:output></wsdl:operation>
+    <wsdl:operation name="CallMethod"><soap:operation soapAction="http://tempuri.org/CallMethod" style="document"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input><wsdl:output><soap:body use="literal"/></wsdl:output></wsdl:operation>
+  </wsdl:binding>
+
+  <wsdl:service name="IDOWebService">
+    <wsdl:port name="IDOWebServiceSoap" binding="tns:IDOWebServiceSoap">
+      <soap:address location="@LOCATION@"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>

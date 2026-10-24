@@ -1,0 +1,71 @@
+{
+  "document_id": "mock-twice-001.pdf",
+  "present": true,
+  "status": "COMPLETED",
+  "class": "purchase_order",
+  "pages": 2,
+  "fields": {
+    "customer_name": "MOCK AEROSPACE LTD",
+    "ship_to_address": "1 Example Way",
+    "ship_to_city": "Testville",
+    "ship_to_state": "CT",
+    "ship_to_postal_code": "06000",
+    "cust_po": "MOCK-PO-0001",
+    "lines": [
+      {
+        "part_number": "MOCK-PART-001",
+        "quantity": 1,
+        "uom": "EA"
+      },
+      {
+        "part_number": "MOCK-PART-002",
+        "quantity": 2,
+        "uom": "EA"
+      }
+    ]
+  },
+  "confidence": {
+    "cust_po": {
+      "confidence": 0.97,
+      "confidence_threshold": 0.8,
+      "meets_threshold": true,
+      "reason": ""
+    },
+    "customer_name": {
+      "confidence": 0.97,
+      "confidence_threshold": 0.8,
+      "meets_threshold": true,
+      "reason": ""
+    },
+    "lines": {
+      "confidence": 0.97,
+      "confidence_threshold": 0.8,
+      "meets_threshold": true,
+      "reason": ""
+    },
+    "ship_to_address": {
+      "confidence": 0.97,
+      "confidence_threshold": 0.8,
+      "meets_threshold": true,
+      "reason": ""
+    },
+    "ship_to_city": {
+      "confidence": 0.97,
+      "confidence_threshold": 0.8,
+      "meets_threshold": true,
+      "reason": ""
+    },
+    "ship_to_postal_code": {
+      "confidence": 0.97,
+      "confidence_threshold": 0.8,
+      "meets_threshold": true,
+      "reason": ""
+    },
+    "ship_to_state": {
+      "confidence": 0.97,
+      "confidence_threshold": 0.8,
+      "meets_threshold": true,
+      "reason": ""
+    }
+  }
+}

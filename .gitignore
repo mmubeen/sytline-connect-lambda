@@ -53,3 +53,6 @@ htmlcov/
 src/.aws-sam/
 src/deploy.env
 src/sam-installation
+
+# Mock environment: generated CA, keys and passwords (specs/008)
+mock/.run/

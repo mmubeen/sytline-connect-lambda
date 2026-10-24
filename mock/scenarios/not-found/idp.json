@@ -1,0 +1,9 @@
+{
+  "document_id": "mock-missing-001.pdf",
+  "present": false,
+  "status": "NOT_FOUND",
+  "class": "purchase_order",
+  "pages": 2,
+  "fields": {},
+  "confidence": {}
+}

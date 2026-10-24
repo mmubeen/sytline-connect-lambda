@@ -5,6 +5,11 @@ A sequence that goes from no risk to live writes. Steps 1 to 6 change nothing in
 > The commands below have not been run against a real account: treat them as a checklist and adjust names. Names marked UNCONFIRMED in [DATABASE.md](DATABASE.md) and [RESERVATIONS.md](RESERVATIONS.md) must be verified read-only (step 5) before any live write.
 
 ## Step 0: Local checks (no AWS)
+
+Before deploying you can also rehearse the whole intake, and the failures seen in production, against a production-like mock
+environment on your machine (containers, no AWS account): [MOCK_ENVIRONMENT.md](MOCK_ENVIRONMENT.md). A pass there is not proof of
+production behaviour.
+
 ```
 pip install -r src/requirements-dev.txt pytest        # pytest and rapidfuzz
 python -m pytest tests -q

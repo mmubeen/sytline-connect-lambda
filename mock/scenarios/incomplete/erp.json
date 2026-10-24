@@ -1,0 +1,28 @@
+{
+  "collections": {
+    "SLCustAddrs": [
+      {
+        "CustNum": "C000001",
+        "CustSeq": "0",
+        "Name": "MOCK AEROSPACE LTD",
+        "Addr_1": "1 Example Way",
+        "City": "Testville",
+        "State": "CT",
+        "Zip": "06000"
+      }
+    ],
+    "SLCos": [
+      {
+        "CoNum": "MOCK-OLD-1",
+        "CustNum": "C000001",
+        "CustSeq": "0",
+        "TermsCode": "N30",
+        "ShipCode": "FOB"
+      }
+    ]
+  },
+  "counters": {
+    "co": 700,
+    "job": 9000
+  }
+}

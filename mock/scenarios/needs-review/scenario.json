@@ -1,0 +1,33 @@
+{
+  "name": "needs-review",
+  "description": "A field the save needs is below its confidence threshold: nothing is written.",
+  "event": {
+    "version": "0",
+    "id": "00000000-0000-4000-8000-000000000002",
+    "detail-type": "Step Functions Execution Status Change",
+    "source": "aws.states",
+    "account": "000000000000",
+    "time": "2026-10-22T23:02:29Z",
+    "region": "us-gov-east-1",
+    "resources": [
+      "arn:aws-us-gov:states:us-gov-east-1:000000000000:execution:mock-idp-workflow:mock-review-001.pdf-00000000-0000-4000-8000-000000000001"
+    ],
+    "detail": {
+      "executionArn": "arn:aws-us-gov:states:us-gov-east-1:000000000000:execution:mock-idp-workflow:mock-review-001.pdf-00000000-0000-4000-8000-000000000001",
+      "stateMachineArn": "arn:aws-us-gov:states:us-gov-east-1:000000000000:stateMachine:mock-idp-workflow",
+      "name": "mock-review-001.pdf-00000000-0000-4000-8000-000000000001",
+      "status": "SUCCEEDED",
+      "startDate": 1792710108682,
+      "stopDate": 1792710149297,
+      "input": "{\"document\": {\"id\": \"mock-review-001.pdf\", \"status\": \"RUNNING\"}}",
+      "output": "{\"document\": {\"id\": \"mock-review-001.pdf\", \"status\": \"EVALUATING\"}}"
+    }
+  },
+  "expect": {
+    "outcome": "refused",
+    "codes": [
+      "DOCUMENT_NEEDS_REVIEW"
+    ]
+  },
+  "send_twice": false
+}

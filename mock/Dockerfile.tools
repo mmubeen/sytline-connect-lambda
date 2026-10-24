@@ -1,0 +1,13 @@
+# Image of the mock services written in Python (edge + Moto, ERP mock, schedule driver). The function itself does NOT run in
+# this image: it runs in the AWS Lambda runtime image (compose.yaml, fn1..fn3).
+FROM python:3.12-slim
+WORKDIR /mock
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt python-tds lxml
+COPY edge /mock/edge
+COPY erp /mock/erp
+COPY idp /mock/idp
+COPY driver /mock/driver
+COPY sqlserver /mock/sqlserver
+COPY scenarios /mock/scenarios
+ENV PYTHONPATH=/mock PYTHONUNBUFFERED=1

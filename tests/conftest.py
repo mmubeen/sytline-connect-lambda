@@ -36,3 +36,7 @@ def template():
     from cfn_template import load_template
 
     return load_template()
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "mockenv: needs the production-like mock environment (MOCK_ENV=1, specs/008)")

@@ -1,0 +1,75 @@
+# Production-like mock environment (specs/008). Start with `make -C mock up`, which first runs `edge.prepare` (the run directory
+# with the function's environment and generated passwords) and builds the function with `sam build`.
+#
+# Network: every service is on `inside`, which has no route out (internal: true), so nothing here can reach a real system. Only the
+# edge is also on `outside`, solely to publish its control port on 127.0.0.1.
+name: sytline-mock
+
+x-function: &function
+  image: public.ecr.aws/lambda/python:3.13
+  command: ["lambda_function.lambda_handler"]
+  env_file: [.run/function.env]
+  mem_limit: 256m
+  volumes:
+    - ../src/.aws-sam/build/DirectFunction:/var/task:ro
+    - ../src/.aws-sam/build/DepsLayer:/opt:ro
+  networks: [inside]
+  depends_on: [edge, erp]
+
+services:
+  edge:
+    build: {context: ., dockerfile: Dockerfile.tools}
+    command: ["python", "-m", "edge.server"]
+    environment:
+      MOCK_RUN_DIR: /run/mock
+      MOCK_FN_URLS: "http://fn1:8080/2015-03-31/functions/function/invocations,http://fn2:8080/2015-03-31/functions/function/invocations,http://fn3:8080/2015-03-31/functions/function/invocations"
+      ERP_CONTROL_URL: http://erp:8080
+      SQL_HOST: sqlserver-real
+      MOCK_SCENARIOS: /mock/scenarios
+    volumes:
+      - ./.run:/run/mock
+    ports:
+      - "127.0.0.1:${MOCK_EDGE_PORT:-4566}:4566"
+    networks:
+      inside:
+        aliases: [sqlserver]      # the function's SQL_SERVER; the edge fronts the real engine (sql.* faults)
+      outside: {}
+    depends_on: [sqlserver-real]
+
+  erp:
+    build: {context: ., dockerfile: Dockerfile.tools}
+    command: ["python", "-m", "erp.app"]
+    environment:
+      MOCK_RUN_DIR: /run/mock
+      ERP_USER: mock-user
+      ERP_PORT: "8080"
+    volumes:
+      - ./.run:/run/mock:ro
+    networks: [inside]
+
+  sqlserver-real:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64           # emulated on Apple silicon (slow to start: the suite waits up to MOCK_SQL_WAIT seconds)
+    env_file: [.run/sql.env]
+    volumes:
+      - ./.run:/certs:ro
+      - ./sqlserver/mssql.conf:/var/opt/mssql/mssql.conf:ro
+    networks: [inside]
+
+  fn1: {<<: *function, hostname: fn1}
+  fn2: {<<: *function, hostname: fn2}
+  fn3: {<<: *function, hostname: fn3}
+
+  driver:                           # optional: the five-minute schedule, compressed (docker compose --profile schedule up)
+    profiles: [schedule]
+    build: {context: ., dockerfile: Dockerfile.tools}
+    command: ["python", "-m", "driver.loop"]
+    environment:
+      MOCK_EDGE_URL: http://edge:4566
+      MOCK_SWEEP_SECONDS: "${MOCK_SWEEP_SECONDS:-20}"
+    networks: [inside]
+
+networks:
+  inside:
+    internal: true
+  outside: {}

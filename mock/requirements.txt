@@ -1,0 +1,5 @@
+moto[server]
+werkzeug
+pyyaml
+requests
+boto3

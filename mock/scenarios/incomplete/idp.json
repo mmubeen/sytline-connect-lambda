@@ -1,0 +1,18 @@
+{
+  "document_id": "mock-incomplete-001.pdf",
+  "present": true,
+  "status": "COMPLETED",
+  "class": "purchase_order",
+  "pages": 2,
+  "fields": {
+    "customer_name": "MOCK AEROSPACE LTD"
+  },
+  "confidence": {
+    "customer_name": {
+      "confidence": 0.97,
+      "confidence_threshold": 0.8,
+      "meets_threshold": true,
+      "reason": ""
+    }
+  }
+}
