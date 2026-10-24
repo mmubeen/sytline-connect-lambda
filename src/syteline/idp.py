@@ -33,6 +33,10 @@ def _client():
     return IDPClient(stack_name=os.environ["IDP_STACK_NAME"], region=os.environ.get("IDP_REGION") or None)
 
 
+# how much of an SDK message the log and a debug response carry: long enough for a full "User ... is not authorized to perform ... on
+# resource: <key ARN>" sentence
+MESSAGE_LIMIT = 700
+
 # what the exception type of a failed client creation usually means (the type name is all that is ever reported)
 _HINTS = {
     "ModuleNotFoundError": "the IDP SDK is not in the deployed package: build with IDP_REPO set to the accelerator checkout",
@@ -82,7 +86,7 @@ def _idp_errors(document_id):
             raise _refuse(errors.DOCUMENT_NOT_FOUND, f"no such document in IDP: {document_id}") from None
         # the function's own log (not the response) gets the SDK's message, shortened: it is how a denied permission or a
         # missing record is told apart; it carries no credentials
-        detail = " ".join(str(exc).split())[:300]
+        detail = " ".join(str(exc).split())[:MESSAGE_LIMIT]
         log.warning("IDP read failed: %s: %s", type(exc).__name__, detail)
         refusal = _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be read", cause=type(exc).__name__)
         refusal.debug_detail = detail
@@ -122,7 +126,7 @@ def read_document(document_id):
         refusal = _refuse(errors.IDP_UNAVAILABLE, "the IDP source could not be reached", cause=type(exc).__name__,
                           hint=_HINTS.get(type(exc).__name__, "see the function log line 'IDP client could not be created'"),
                           **extra)
-        refusal.debug_detail = " ".join(str(exc).split())[:300]
+        refusal.debug_detail = " ".join(str(exc).split())[:MESSAGE_LIMIT]
         raise refusal from None
     with _idp_errors(document_id):
         status = client.document.get_status(document_id=document_id)

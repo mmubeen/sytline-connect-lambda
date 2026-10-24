@@ -299,8 +299,8 @@ def test_an_idp_failure_shows_its_message_only_when_debug_is_asked_for(world):
 
 
 def test_the_debug_detail_is_shortened_and_exists_only_for_idp_failures(world):
-    _failing_idp(world, "x" * 900)
-    assert len(ei.process(ev(), None, debug=True)["detail"]) == 300
+    _failing_idp(world, "x" * 1500)
+    assert len(ei.process(ev(), None, debug=True)["detail"]) == idp.MESSAGE_LIMIT == 700
     world.idp.raise_for.clear()
     world.idp.update(DOC, low={"cust_po"})  # a normal refusal has no underlying message to show
     assert "detail" not in ei.process(ev(), None, debug=True)

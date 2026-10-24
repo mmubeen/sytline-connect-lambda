@@ -246,11 +246,30 @@ def test_the_log_gets_the_sdk_message_shortened_but_the_response_never_does(fake
         pass
 
     fake.add(DOC, po_fields())
-    fake.raise_for[DOC] = IDPProcessingError("Error querying document status for X:\n  AccessDenied " + "y" * 600)
+    fake.raise_for[DOC] = IDPProcessingError("Error querying document status for X:\n  AccessDenied " + "y" * 1500)
     caplog.set_level(logging.WARNING)
     with pytest.raises(IntegrationError) as ei:
         idp.read_document(DOC)
     line = next(r.getMessage() for r in caplog.records if "IDP read failed" in r.getMessage())
     assert line.startswith("IDP read failed: IDPProcessingError: Error querying document status for X: AccessDenied")
-    assert len(line) < len("IDP read failed: IDPProcessingError: ") + 301 and "\n" not in line
+    assert len(line) <= len("IDP read failed: IDPProcessingError: ") + idp.MESSAGE_LIMIT and "\n" not in line
     assert ei.value.extra == {"cause": "IDPProcessingError"} and "AccessDenied" not in repr(ei.value.extra)
+
+
+def test_a_full_authorization_sentence_with_a_key_arn_fits_the_log_message(fake, caplog):
+    import logging
+
+    class IDPProcessingError(Exception):
+        pass
+
+    key = "arn:aws-us-gov:kms:us-gov-east-1:108375521309:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+    message = ("Failed to get metadata: An error occurred (AccessDenied) when calling the GetObject operation: User: "
+               "arn:aws-us-gov:sts::108375521309:assumed-role/sytline-connect-DirectFunctionRole-hJb015ErGOdW/sytline-connect-fn "
+               "is not authorized to perform: kms:Decrypt on resource: " + key + " because no identity-based policy allows the "
+               "kms:Decrypt action")
+    fake.add(DOC, po_fields())
+    fake.raise_for[DOC] = IDPProcessingError(message)
+    caplog.set_level(logging.WARNING)
+    with pytest.raises(IntegrationError):
+        idp.read_document(DOC)
+    assert key in caplog.text and "kms:Decrypt action" in caplog.text
