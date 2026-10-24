@@ -1,0 +1,105 @@
+{
+    "outcome": "refused",
+    "document_id": "7171606.pdf",
+    "errors": [
+        {
+            "code": "DOCUMENT_INCOMPLETE",
+            "message": "the document result is missing or has unreadable fields the save needs: po_number, lines",
+            "step": "document"
+        }
+    ],
+    "fields": [
+        "po_number",
+        "lines"
+    ],
+    "summary": {
+        "document_id": "7171606.pdf",
+        "state": "COMPLETED",
+        "class": "purchase_order",
+        "pages": null,
+        "issues": null,
+        "fields": [
+            {
+                "path": "billing_information",
+                "value": "E-mail all invoices in .PDF, .JPG, .TIF, or .BMP to: apinvoices@united.com. These 3 numbers must appear on all invoices: M&E #: 31-7238-3-0001, M&E S/N#: (blank), Tracking Tag #: (blank). Charges will be accepted only if quoted and approved. SUP NUM: 0310442 001.",
+                "confidence": 0.8,
+                "meets_threshold": null
+            },
+            {
+                "path": "customer_name",
+                "value": "UNITED AIRLINES, INC.",
+                "confidence": 0.85,
+                "meets_threshold": null
+            },
+            {
+                "path": "customer_requests",
+                "value": "Verification of work performed must be furnished with the unit on an Authorized Release Certificate and Form 337 if required. Refer to thesupplier guidelines accessible in the TechOps Portal for additional details.",
+                "confidence": 0.75,
+                "meets_threshold": null
+            },
+            {
+                "path": "deliver_to_address",
+                "value": "UNITED AIRLINES, INC. SFOJE BUILDING 84, DOOR 9 SAN FRANCISCO INTL AIRPORT 800 S. AIRPORT BLVD SAN FRANCISCO, CA 94128",
+                "confidence": 0.95,
+                "meets_threshold": null
+            },
+            {
+                "path": "erp_notes_summary",
+                "value": "Customer Requests: Verification of work performed must be furnished with the unit on an Authorized Release Certificate and Form 337 if required; refer to supplier guidelines on TechOps Portal. Regulatory Compliance: RTS per contractual agreement and latest manufacturer manual revision as supplemented by UAL; non-licensed PMA parts only with UAL Engineering Approval; deviations require UAL approval; UAL Engineering documents must be referenced in Authorized Release Certificate (EC 7231-01683 E); access via http://techops.ual.com. Shipping Information: Ship to UNITED AIRLINES, INC., SFOJE, Building 84, Door 9, San Francisco Intl Airport, 800 S. Airport Blvd, San Francisco, CA 94128; Supplier ship to Chromalloy Connecticut, 601 Marshall Phelps Road, Windsor, CT 06095 USA; Special instructions: *** REPRINTED ***. Billing Information: Invoices emailed in .PDF/.JPG/.TIF/.BMP to apinvoices@united.com; M&E# 31-7238-3-0001 must appear on all invoices; charges accepted only if quoted and approved; SUP NUM 0310442 001. Work To Be Performed: OVERHAUL of Cone, Assy, Inlet (P/N5A1733, S/N JIAC735A), RTS per contractual agreement and manufacturer manual requirements as supplemented by UAL.",
+                "confidence": 0.85,
+                "meets_threshold": null
+            },
+            {
+                "path": "esn",
+                "value": "JIAC735A",
+                "confidence": 0.5,
+                "meets_threshold": null
+            },
+            {
+                "path": "po_number",
+                "value": "7171606 88",
+                "confidence": 0.95,
+                "meets_threshold": null
+            },
+            {
+                "path": "regulatory_compliance",
+                "value": "Return to service in accordance with contractual agreement and latest revision of manufacturer's manual requirements in effect at time of order as supplemented by United Airlines (UAL). Non-licensed PMA parts are allowed only if authorized by UAL Engineering Approval document. Any deviation to parts or procedures must be approved by UAL. Accomplishment of United Airlines Engineering documents must be referenced in an Authorized Release Certificate by United document number, revision level and accomplished operation number(s). The following list of EA's/ECRA's must be accomplished: EC 7231-01683 E. EA's/ECRA's can be accessed through the United TechOps Portal. http://techops.ual.com. Contact the repair buyer if you do not have access.",
+                "confidence": 0.92,
+                "meets_threshold": null
+            },
+            {
+                "path": "shipping_information",
+                "value": "Ship to address: UNITED AIRLINES, INC. SFOJE BUILDING 84, DOOR 9 SAN FRANCISCO INTL AIRPORT 800 S. AIRPORT BLVD SAN FRANCISCO, CA 94128. Supplier ship to address: CHROMALLOY CONNECTICUT 601 MARSHALL PHELPS ROAD WINDSOR, CT 06095 USA. Special instructions: *** REPRINTED ***. Method of shipment: not specified.",
+                "confidence": 0.85,
+                "meets_threshold": null
+            },
+            {
+                "path": "work_to_be_performed",
+                "value": "Work requested: OVERHAUL. Return to service in accordance with contractual agreement and latest revision of manufacturer's manual requirements in effect at time of order as supplemented by United Airlines (UAL).",
+                "confidence": 0.9,
+                "meets_threshold": null
+            },
+            {
+                "path": "line_items",
+                "value": [
+                    {
+                        "line_number": null,
+                        "part_number": "5A1733",
+                        "description": "CONE, ASSY, INLET *REPAIR",
+                        "serial_number": "JIAC735A",
+                        "quantity": 1,
+                        "unit_of_measure": "EA",
+                        "condition": "OVERHAUL",
+                        "unit_price": null,
+                        "material_code": null
+                    }
+                ],
+                "confidence": null,
+                "meets_threshold": null
+            }
+        ],
+        "below_threshold": []
+    },
+    "action": "document_event",
+    "ok": false
+}
