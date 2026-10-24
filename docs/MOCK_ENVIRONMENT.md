@@ -161,5 +161,10 @@ What the mock does differently from production, and what a pass therefore does *
 - `unknown shorthand flag: 'f' in -f` / `unknown command: docker compose` - the Compose plugin is missing. The Makefile uses `docker compose` when it works and the older
   `docker-compose` otherwise; to choose, `make -C mock up DOCKER_COMPOSE="docker-compose"` (or `"podman compose"`). The container tests read the same value from
   `MOCK_COMPOSE`. The Docker daemon must also be running (`docker info`).
+- `sqlservr: Invalid mapping of address ... in reserved address space` / `jemalloc ... QEMU` (Apple silicon) - SQL Server only ships for x86 and
+  cannot run under QEMU emulation. Use Rosetta instead: Docker Desktop > Settings > General > "Use Rosetta for x86_64/amd64 emulation on Apple
+  Silicon" (and turn off "Use containerd for pulling and storing images" if it still fails); with Colima,
+  `colima stop && colima start --arch aarch64 --vm-type vz --vz-rosetta --cpu 4 --memory 8`. Give the VM at least 4 GB of memory for SQL Server.
+  Then `make -C mock down && make -C mock up`.
 - Port 4566 busy - `MOCK_EDGE_PORT=4570 make -C mock up` (and `MOCK_EDGE_URL=http://127.0.0.1:4570` for the tests).
 - A test left a fault on - `make -C mock reset` clears it.
