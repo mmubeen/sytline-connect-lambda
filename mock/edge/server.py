@@ -36,7 +36,8 @@ def main():
     proxy = sqlproxy.SqlProxy("0.0.0.0", 1433, os.environ.get("SQL_HOST", "sqlserver-real"), 1433)
     proxy.start()
     sql = sqlcontrol.SqlControl(os.environ.get("SQL_HOST", "sqlserver-real"), 1433, sa["MSSQL_SA_PASSWORD"], "sytline_mock",
-                                passwords["SQL_PASS"], "SyteLine_Mock", proxy=proxy)
+                                passwords["SQL_PASS"], "SyteLine_Mock", proxy=proxy,
+                                cafile=os.path.join(run_dir, "ca.pem"))
     erp = erpcontrol.ErpControl(os.environ.get("ERP_CONTROL_URL", "http://erp:8080"))
     urls = [u for u in os.environ["MOCK_FN_URLS"].split(",") if u]
     rt = runtime.Runtime(urls, default_timeout=rendered["timeout"])

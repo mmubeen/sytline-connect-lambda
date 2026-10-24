@@ -175,7 +175,9 @@ class ErpMock:
                         else:
                             self.log.add("erp", op, summary, fault=fid, status=500)
                             return _fault("Session token expired or invalid")
+                self._row_fault = None
                 result = self._dispatch(op, values, summary)
+                fault = fault or self._row_fault
         except SoapFault as exc:
             self.log.add("erp", op, summary, fault=fault, status=500)
             return _fault(str(exc))
@@ -249,7 +251,7 @@ class ErpMock:
 
     def _save(self, changes):
         if self.faults.take("erp.row_rejected"):
-            self.log.add("erp", "SaveDataSet", {"note": "rejected by fault"}, fault="erp.row_rejected", status=200)
+            self._row_fault = "erp.row_rejected"  # _soap records the one call with this fault
             return '<IDOChanges><Row Error="Row rejected by the mock ERP (erp.row_rejected)"/></IDOChanges>'
         out = []
         for el in etree.fromstring(changes.encode("utf-8")):

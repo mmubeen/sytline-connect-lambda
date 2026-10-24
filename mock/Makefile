@@ -13,6 +13,16 @@ PY ?= $(shell for p in python3 python3.13 python3.12 python3.11 /usr/bin/python3
 DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; \
   elif command -v docker-compose >/dev/null 2>&1; then echo "docker-compose"; else echo "docker compose"; fi)
 COMPOSE := $(DOCKER_COMPOSE) -f $(HERE)compose.yaml
+# The database engine: SQL Server 2022 (x86 only; needs Rosetta on Apple silicon) or Azure SQL Edge (native on ARM, the default there).
+# Override: make MOCK_SQL=server|edge, or set MOCK_SQL_IMAGE / MOCK_SQL_PLATFORM directly.
+MOCK_SQL ?= $(if $(filter arm64 aarch64,$(shell uname -m)),edge,server)
+ifeq ($(MOCK_SQL),edge)
+export MOCK_SQL_IMAGE ?= mcr.microsoft.com/azure-sql-edge:latest
+export MOCK_SQL_PLATFORM ?= linux/arm64
+else
+export MOCK_SQL_IMAGE ?= mcr.microsoft.com/mssql/server:2022-latest
+export MOCK_SQL_PLATFORM ?= linux/amd64
+endif
 EDGE := http://127.0.0.1:$(or $(MOCK_EDGE_PORT),4566)/__mock__
 WAIT ?= 420
 POLL ?= 5

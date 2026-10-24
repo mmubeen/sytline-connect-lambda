@@ -14,7 +14,7 @@ It is a **preliminary** check. A pass is not proof of production behaviour; read
 | `fn1`..`fn3` | the Lambda function | the AWS Lambda Python 3.13 image with the `sam build` output; settings, timeout and memory come from `src/template.yaml` |
 | `edge` | AWS (DynamoDB, Secrets Manager, S3, KMS, CloudFormation, Lambda Invoke) | Moto behind a proxy that records every call, checks it against the function role's permissions **from the template**, applies faults, and answers Lambda `Invoke` (the function's own background start, the IDP lookup function) |
 | `erp` | the SyteLine web service | a SOAP mock with a WSDL; the function's real client and zeep talk to it |
-| `sqlserver-real` | the SyteLine database | a **real SQL Server 2022**, TLS required, a per-run certificate authority; the credentials secret carries the CA as `SQL_CA_PEM` |
+| `sqlserver-real` | the SyteLine database | a **real SQL Server 2022** (on Apple silicon: **Azure SQL Edge**, native arm64; `make MOCK_SQL=server\|edge` chooses), TLS required, a per-run certificate authority; the credentials secret carries the CA as `SQL_CA_PEM` |
 | `driver` (optional) | the five-minute schedule | `--profile schedule`; ticks the sweep every 20 s |
 
 Three function containers run side by side because the Lambda runtime emulator handles one invocation at a time, while the
@@ -123,6 +123,8 @@ listed here.
 
 What the mock does differently from production, and what a pass therefore does **not** show:
 
+- **Database engine.** On Apple silicon the mock database is Azure SQL Edge, not SQL Server (same T-SQL and TLS for what the function uses; it is
+  an older engine build and not what production runs).
 - **Numbering routines.** `NextCoSp` / `NextWOSp` in the mock database are stand-ins that hand out increasing numbers. SyteLine's own
   routines (site rules, number formats, locking) are not reproduced.
 - **Web-service shapes.** The WSDL and the SOAP shapes are the ones assumed in `src/syteline/client.py`, still unconfirmed against the real
@@ -161,6 +163,9 @@ What the mock does differently from production, and what a pass therefore does *
 - `unknown shorthand flag: 'f' in -f` / `unknown command: docker compose` - the Compose plugin is missing. The Makefile uses `docker compose` when it works and the older
   `docker-compose` otherwise; to choose, `make -C mock up DOCKER_COMPOSE="docker-compose"` (or `"podman compose"`). The container tests read the same value from
   `MOCK_COMPOSE`. The Docker daemon must also be running (`docker info`).
+- Apple silicon needs **Rosetta** for the function containers: the package is built for x86_64 (as the template says) and the Lambda runtime
+  emulator crashes under QEMU. Install it (`softwareupdate --install-rosetta --agree-to-license`) and start Colima with `--vz-rosetta`
+  (or enable it in Docker Desktop), as below.
 - `sqlservr: Invalid mapping of address ... in reserved address space` / `jemalloc ... QEMU` (Apple silicon) - SQL Server only ships for x86 and
   cannot run under QEMU emulation. Use Rosetta instead: Docker Desktop > Settings > General > "Use Rosetta for x86_64/amd64 emulation on Apple
   Silicon" (and turn off "Use containerd for pulling and storing images" if it still fails); with Colima,

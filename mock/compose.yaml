@@ -7,6 +7,7 @@ name: sytline-mock
 
 x-function: &function
   image: public.ecr.aws/lambda/python:3.13
+  platform: linux/amd64             # the package is built for x86_64 as the template says (emulated on Apple silicon)
   command: ["lambda_function.lambda_handler"]
   env_file: [.run/function.env]
   mem_limit: 256m
@@ -49,8 +50,8 @@ services:
     networks: [inside]
 
   sqlserver-real:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    platform: linux/amd64           # emulated on Apple silicon (slow to start: the suite waits up to MOCK_SQL_WAIT seconds)
+    image: ${MOCK_SQL_IMAGE:-mcr.microsoft.com/mssql/server:2022-latest}
+    platform: ${MOCK_SQL_PLATFORM:-linux/amd64}   # the Makefile picks Azure SQL Edge (arm64, native) on Apple silicon: SQL Server itself cannot run under QEMU
     env_file: [.run/sql.env]
     volumes:
       - ./.run:/certs:ro

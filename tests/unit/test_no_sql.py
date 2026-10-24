@@ -19,9 +19,8 @@ ALLOWED_IMPORTER = os.path.join("src", "syteline", "sqlserver.py")
 
 
 def py_files():
-    for base, _dirs, files in os.walk(SCR):
-        if "__pycache__" in base:
-            continue
+    for base, dirs, files in os.walk(SCR):
+        dirs[:] = [d for d in dirs if d not in (".aws-sam", "__pycache__")]  # build output holds the dependencies themselves
         for f in files:
             if f.endswith(".py"):
                 yield os.path.join(base, f)

@@ -22,8 +22,9 @@ def wait_for(predicate, timeout=60, interval=1.0):
 
 
 def erp_saves(control, since=0):
-    """The SaveDataSet calls the ERP mock answered successfully."""
-    return [c for c in control.calls(service="erp", since=since) if c["operation"] == "SaveDataSet" and c["status"] == 200]
+    """The SaveDataSet calls the ERP mock stored (a row rejected by a fault answers 200 but stores nothing)."""
+    return [c for c in control.calls(service="erp", since=since)
+            if c["operation"] == "SaveDataSet" and c["status"] == 200 and c.get("fault") != "erp.row_rejected"]
 
 
 def compose_command():

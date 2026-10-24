@@ -45,4 +45,6 @@ def test_refused_documents_write_nothing(control, name, code):
 def test_the_health_action_reports_each_stage(control):
     control.scenario("passes-review")
     out = outcome(control.invoke({"action": "health"}))
-    assert out["action"] == "health"
+    assert out["ok"] is True
+    stages = {st["stage"]: st["ok"] for st in out["stages"]}
+    assert stages and all(stages.values()) and {"wsdl", "token", "db_login"} <= set(stages)

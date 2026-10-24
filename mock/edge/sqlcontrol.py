@@ -32,12 +32,15 @@ def _connect(**kw):
 
 
 class SqlControl:
-    def __init__(self, host, port, sa_password, user, password, database, proxy=None, connect=None):
+    def __init__(self, host, port, sa_password, user, password, database, proxy=None, connect=None, cafile=None):
         for name in (user, database):
             if not _NAME.match(name):
                 raise ValueError("database and login names may only contain letters, digits and _")
         self._kw = dict(server=host, port=int(port), user="sa", password=sa_password, autocommit=True, login_timeout=5,
                         timeout=60)
+        if cafile:  # the engine requires encryption (forceencryption): verify it against this run's CA
+            self._kw["cafile"] = cafile
+            self._kw["validate_host"] = False  # python-tds' host check needs an older pyOpenSSL; the CA is still verified
         self._connect = connect or _connect
         self.user, self.password, self.database = user, password, database
         self.proxy = proxy
