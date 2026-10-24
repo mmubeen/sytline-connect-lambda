@@ -3,16 +3,21 @@
 
 FUNCTIONS = DirectFunction
 
+# The interpreter that runs pip. `python3` first, but an active virtual environment may have none with pip (created with
+# --without-pip, or by uv without --seed), so the first of these that has pip is used. Override: make PYTHON=/path/to/python
+PYTHON ?= $(shell for p in python3 python3.13 python3.12 python3.11 /usr/bin/python3 python; do \
+  $$p -m pip --version >/dev/null 2>&1 && { echo $$p; exit 0; }; done; echo python3)
+
 .PHONY: build-DepsLayer $(addprefix build-,$(FUNCTIONS))
 
 build-DepsLayer:
 	mkdir -p "$(ARTIFACTS_DIR)/python"
-	python3 -m pip install -r requirements.txt -t "$(ARTIFACTS_DIR)/python" \
+	$(PYTHON) -m pip install -r requirements.txt -t "$(ARTIFACTS_DIR)/python" \
 		--platform manylinux2014_x86_64 --platform manylinux_2_28_x86_64 --implementation cp --python-version 3.13 \
 		--only-binary=:all: --ignore-requires-python --upgrade
 	@# --ignore-requires-python: an old host pip checks Requires-Python against the host interpreter, not 3.13, and
 	@# then backtracks for minutes; the pinned versions are the ones the SDK was checked against on 3.13
-	python3 -m pip install -r requirements-idp.txt -t "$(ARTIFACTS_DIR)/python" \
+	$(PYTHON) -m pip install -r requirements-idp.txt -t "$(ARTIFACTS_DIR)/python" \
 		--platform manylinux2014_x86_64 --implementation cp --python-version 3.13 \
 		--only-binary=:all: --ignore-requires-python --upgrade
 	@# The IDP SDK and idp_common are first-party packages of the IDP accelerator, NOT on PyPI (the name idp-common
