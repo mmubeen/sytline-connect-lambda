@@ -10,7 +10,7 @@ feature 001): stop at the first problem, record a row as possibly written BEFORE
 never retry. Outcome states: saved | partly_saved | failed | needs_reconciliation (research.md R7, R8).
 """
 
-from . import config, defaults, errors, idos
+from . import config, defaults, errors, idos, preflight
 from .errors import ErpError, ErpRejected, LiveWritesDisabled
 from .pipeline import CO_IDO, JOB_IDO, LINE_IDO, Upload, _q, _Stop
 from .validation import today
@@ -122,6 +122,14 @@ class SaveRun(Upload):
             if not config.live_writes_enabled():
                 raise _Stop(self._failed(errors.LIVE_WRITES_DISABLED,
                                          "live ERP writes are disabled; nothing was written", "live_writes_check"))
+            if preflight.enabled():  # nothing is written for a save the ERP would refuse halfway
+                try:
+                    missing = preflight.check(self.soap, req["lines"])
+                except ErpError as exc:
+                    raise _Stop(self._failed(errors.ERP_UNREACHABLE, f"could not check the ERP's property names: {exc}",
+                                             "check_properties"))
+                if missing:
+                    raise _Stop(self._failed(errors.ERP_PROPERTIES_UNKNOWN, preflight.message(missing), "check_properties"))
             header = {"CoNum": self.co_num, "CustNum": idos.erp_cust_num(self.customer["cust_num"]), "CustSeq": self.customer["cust_seq"],
                       "OrderDate": req.get("order_date") or today(), "Stat": "O",
                       idos.CO_HEADER_PROPS["cust_po"]: req["po_number"]}

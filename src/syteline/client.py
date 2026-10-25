@@ -52,6 +52,7 @@ class SoapIdoClient:
         self._verify = verify
         self._zeep = zeep_client
         self._token = None
+        self._with_schema = False  # `columns` asks for the DataSet's schema part to be kept
 
     # -- session -------------------------------------------------------------------------
     def _service(self):
@@ -109,16 +110,42 @@ class SoapIdoClient:
             # the responses hold a DataSet (schema + any) or an anyType: read them ourselves, zeep cannot parse them reliably
             with self._zeep.settings(raw_response=True):
                 response = getattr(service, OPS[op])(self._token, *args)
-            return _method_result(response) if op == "call" else _dataset_result(response)
+            return _method_result(response) if op == "call" else _dataset_result(response, keep_schema=self._with_schema)
         return getattr(service, OPS[op])(self._token, *args)
 
     # -- operations ----------------------------------------------------------------------
     def load(self, ido, properties, filter_="", record_cap=0):
         """Return rows (list of dicts) from an IDO. Read-only. record_cap 0 = all rows."""
         raw = self._call("load", ido, ",".join(properties), filter_, "", "", record_cap)
+        err = row_error(raw)  # an error reported inside a 200 answer (for example an unknown property) is a rejection
+        if err:
+            raise ErpRejected(err)
         return parse_rows(raw)
 
     read_back = load
+
+    def columns(self, ido):
+        """(property list used, [property names]) of an IDO, from the schema of a one-row read (names only, no values).
+
+        Read-only. Tries the property list "*" and then an empty one; raises ErpRejected when the service refuses both."""
+        last = None
+        for plist in ("*", ""):
+            self._with_schema = True
+            try:
+                raw = self._call("load", ido, plist, "", "", "", 1)
+            except ErpRejected as exc:
+                last = exc
+                continue
+            finally:
+                self._with_schema = False
+            err = row_error(raw)
+            names = _schema_columns(raw) or sorted({k for row in parse_rows(raw) for k in row})
+            if names and not err:
+                return plist, names
+            last = ErpRejected(err) if err else last
+        if last:
+            raise last
+        return None, []
 
     def insert(self, ido, values):
         """Insert one row; return the stored row. Row-level rejections raise ErpRejected."""
@@ -245,15 +272,29 @@ def _soap_response(response):
     return body[0] if len(body) else []
 
 
-def _dataset_result(response):
-    """The rows of a raw SOAP response holding a DataSet result, as one XML string (the schema part is dropped)."""
+def _dataset_result(response, keep_schema=False):
+    """The rows of a raw SOAP response holding a DataSet result, as one XML string (the schema part is dropped unless kept)."""
     from lxml import etree
 
     result = _soap_response(response)
     result = result[0] if len(result) else []
     parts = [etree.tostring(c, encoding="unicode") for c in result
-             if isinstance(c.tag, str) and etree.QName(c).localname != "schema"]
+             if isinstance(c.tag, str) and (keep_schema or etree.QName(c).localname != "schema")]
     return "<DataSet>" + "".join(parts) + "</DataSet>"
+
+
+def _schema_columns(raw):
+    """The column names a DataSet's schema declares for its rows (the leaf `xs:element` names), in schema order."""
+    if not isinstance(raw, (str, bytes)):
+        return []
+    from lxml import etree
+
+    names = []
+    for el in _root(raw).iter("{http://www.w3.org/2001/XMLSchema}element"):
+        name = el.get("name")
+        if name and not any(etree.QName(c).localname == "complexType" for c in el) and name not in names:
+            names.append(name)
+    return names
 
 
 def _params_xml(params):

@@ -8,7 +8,7 @@ step fails (SyteLine's own behavior), so failures report the numbers already obt
 
 import logging
 
-from . import config, errors, idp, numbers, resolver, validation
+from . import config, errors, idp, numbers, preflight, resolver, validation
 from .errors import ErpError, ErpRejected, ErpUncertain, IntegrationError, LiveWritesDisabled
 from .pipeline import MIN_REMAINING_MS
 
@@ -81,6 +81,14 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source
             raise _Stop(errors.LIVE_WRITES_DISABLED, "live ERP writes are disabled; no number was reserved",
                         "live_writes_check")
 
+        if preflight.enabled():  # no number is consumed for a save the ERP would refuse halfway
+            try:
+                missing = preflight.check(soap, details["lines"])
+            except ErpError as exc:
+                raise _Stop(errors.ERP_UNREACHABLE, f"could not check the ERP's property names: {exc}", "check_properties")
+            if missing:
+                raise _Stop(errors.ERP_PROPERTIES_UNKNOWN, preflight.message(missing), "check_properties", {"missing": missing})
+
         co_num = config.fixed_co_number()  # CO_NUMBER (a test setting): a number already consumed, reused, none allocated
         if not co_num:
             co_num = allocate("next_co", "CO", "number_co")
@@ -110,6 +118,8 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source
             out["consumed_unused"] = consumed
         if stop.extra.get("candidates"):
             out["candidates"] = stop.extra["candidates"]
+        if stop.extra.get("missing"):
+            out["missing_properties"] = stop.extra["missing"]
         return out
     finally:
         source_numbers.close()

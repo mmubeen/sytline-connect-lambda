@@ -170,4 +170,14 @@ When the service refuses a property ("error property [X] does not exist in [IDO]
 ./invoke.sh '{"action": "probe_properties", "ido": "CCT_Coitems", "properties": ["CoNum", "CoNumber", "OrdNum"]}'
 ```
 
-Each name is requested alone in a one-row read; the answer lists `exists` and `missing` (with the service's message) and never a value. `CCT_Coitems`, `CCTJobs` and `SLCos` have a default list of the names the save uses plus likely alternatives. Nothing is written, so live writes need not be on.
+To list the names an IDO declares instead of guessing (names only, from the schema of a one-row read; the payload goes in a file, `./invoke.sh FILE`):
+
+```
+{"action": "probe_properties", "ido": "CCT_Coitems", "list": true}
+```
+
+Each name below is requested alone in a one-row read; the answer lists `exists` and `missing` (with the service's message) and never a value. `CCT_Coitems`, `CCTJobs` and `SLCos` have a default list of the names the save uses plus likely alternatives. Nothing is written, so live writes need not be on.
+
+## The property pre-check
+
+Before a reservation takes any number (and before a save writes the order header), the function asks the ERP, in single-property one-row reads, whether it has every property the save will write on `SLCos`, `CCT_Coitems` and `CCTJobs`. If any is refused, the reservation fails with `ERP_PROPERTIES_UNKNOWN` (step `check_properties`) and a message listing **every** missing name per IDO; nothing is reserved or written, so no number is burned and no order header without lines is left behind. Names that passed are remembered for the life of the container. The teardown date is not checked (a refused one is only a warning). Fix the names in `src/syteline/idos.py` (use `probe_properties` to find them) and send the document again. `SYTELINE_CHECK_PROPERTIES=false` on the function switches the check off.

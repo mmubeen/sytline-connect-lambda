@@ -2,6 +2,7 @@
 
 Each name is asked for on its own in a one-row read; the service refuses a name the IDO does not have. Only the
 verdict per name is returned, never a value, and nothing is written. Used with {"action": "probe_properties", "ido": ...}.
+With "list": true it instead returns the property names the IDO declares (read from the schema of a one-row read; names only).
 """
 
 import re
@@ -39,7 +40,26 @@ def _valid(event):
     return ido, props, problems
 
 
+def _columns(soap, event):
+    """{"list": true}: the property names the IDO declares (names only), instead of testing candidate names."""
+    ido = event.get("ido")
+    if not isinstance(ido, str) or not _NAME.match(ido):
+        return failure("probe_properties", errors.error(errors.VALIDATION, "ido must be the name of an IDO (letters, digits, _ . -)",
+                                                        step="ido"))
+    if not hasattr(soap, "columns"):
+        return failure("probe_properties", errors.error(errors.NOT_IMPLEMENTED, "this client cannot list columns", step="list"))
+    try:
+        plist, names = soap.columns(ido)
+    except ErpRejected as exc:
+        return failure("probe_properties", errors.error(errors.ERP_REJECTED, str(exc)[:240], step="list"), ido=ido)
+    except (ErpUnreachable, ErpUncertain) as exc:
+        return failure("probe_properties", errors.error(errors.ERP_UNREACHABLE, str(exc)[:240], step="list"), ido=ido)
+    return {"ok": True, "action": "probe_properties", "ido": ido, "property_list": plist, "columns": names}
+
+
 def probe(soap, event):
+    if event.get("list") is True:
+        return _columns(soap, event)
     ido, props, problems = _valid(event)
     if problems:
         return failure("probe_properties", *problems)

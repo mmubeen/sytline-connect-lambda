@@ -12,6 +12,7 @@ from lxml import etree  # noqa: E402
 from zeep import Client  # noqa: E402
 
 from syteline import client as sc  # noqa: E402
+from syteline.client import SoapIdoClient  # noqa: E402
 
 WSDL = os.path.join(os.path.dirname(__file__), "data", "ido_web_service_save.wsdl")
 NS = {"s": "http://frontstep.com/IDOWebService", "d": sc.DIFFGR, "x": sc.XS, "m": sc.MSDATA}
@@ -46,3 +47,59 @@ def test_update_carries_the_key_in_a_before_row():
 def test_method_parameters_are_one_string():
     assert sc._params_xml(["a&b", 0]) == "<Parameters><Parameter>a&amp;b</Parameter><Parameter>0</Parameter></Parameters>"
     assert sc._params_xml([]) == "<Parameters></Parameters>"
+
+
+# ---- columns(): the property names an IDO declares, read from the schema of a one-row read -------------------------------
+def _soap_response(inner):
+    body = ('<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><LoadDataSetResponse xmlns="http://x/">'
+            f"<LoadDataSetResult>{inner}</LoadDataSetResult></LoadDataSetResponse></s:Body></s:Envelope>")
+
+    class R:
+        content = body.encode()
+
+        def raise_for_status(self):
+            pass
+
+    return R()
+
+
+SCHEMA = ('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" id="CCT_Coitems"><xs:element name="CCT_Coitems">'
+          '<xs:complexType><xs:choice><xs:element name="IDO"><xs:complexType><xs:sequence>'
+          '<xs:element name="co_num" type="xs:string"/><xs:element name="item" type="xs:string"/>'
+          '</xs:sequence></xs:complexType></xs:element></xs:choice></xs:complexType></xs:element></xs:schema>')
+
+
+def test_columns_come_from_the_schema_even_when_there_are_no_rows():
+    assert sc._schema_columns("<DataSet>" + SCHEMA + "</DataSet>") == ["co_num", "item"]
+    kept = sc._dataset_result(_soap_response(SCHEMA + "<diffgram/>"), keep_schema=True)
+    dropped = sc._dataset_result(_soap_response(SCHEMA + "<diffgram/>"))
+    assert "co_num" in kept and "co_num" not in dropped
+
+
+def test_columns_asks_with_star_then_empty_and_never_returns_a_value():
+    asked = []
+
+    class Z:
+        class settings:  # noqa: N801
+            def __init__(self, **kw):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        class service:  # noqa: N801
+            @staticmethod
+            def CreateSessionToken(*a):
+                return "tok"
+
+            @staticmethod
+            def LoadDataSet(token, ido, plist, *rest):
+                asked.append(plist)
+                return _soap_response(SCHEMA + ('<diffgram><CCT_Coitems><IDO><co_num>SECRET</co_num></IDO></CCT_Coitems></diffgram>'
+                                                if plist == "*" else ""))
+
+    c = SoapIdoClient({"SYTELINE_USER": "u", "SYTELINE_PASS": "p", "SYTELINE_CONFIG": "C"}, zeep_client=Z())
+    assert c.columns("CCT_Coitems") == ("*", ["co_num", "item"]) and asked == ["*"]

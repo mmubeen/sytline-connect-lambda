@@ -14,6 +14,7 @@ def _live_writes_off(monkeypatch):
               "SYTELINE_USER", "SYTELINE_PASS", "SYTELINE_DEFAULT_WHSE", "SYTELINE_DEFAULT_ORDTYPE",
               "SYTELINE_CUSTOMER_IDO", "SYTELINE_NEXT_CO_IDO", "SYTELINE_NEXT_JOB_IDO", "SYTELINE_NOTE_METHOD_IDO"):
         monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("SYTELINE_CHECK_PROPERTIES", "false")  # the property pre-check has its own tests (test_preflight.py)
 
 
 @pytest.fixture(autouse=True)
