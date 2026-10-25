@@ -79,7 +79,7 @@ Everything else is kept: `source`, `detail-type`, `status`, ARNs, names, times, 
 **Open edge**: query-string values and other action fields are kept (they are identifiers today); a new action carrying free text must add its key to the set (a test lists the set).
 
 ## R19. Opt-in whole event and the credentials rule
-**Decision**: `LOG_EVENTS=true` logs the whole event, except that header values named `Authorization`, `X-Amz-Security-Token`, `Cookie` and `X-Api-Key` (any case) are always masked as `***`, in both modes. Over the cap (default 8000 characters, `LOG_EVENTS_MAX_CHARS` to change, not exposed in the template) the line carries `{"truncated": true, "chars": N, "head": "<first cap characters>"}` instead of the event so every line stays one valid JSON object under CloudWatch's limit.
+**Decision**: `LOG_EVENTS=true` logs the whole event, except that header values named `Authorization`, `X-Amz-Security-Token`, `Cookie` and `X-Api-Key` (any case) are always masked as `***`, in both modes. [Superseded by R27: there is no cap any more.] Over the cap (default 8000 characters, `LOG_EVENTS_MAX_CHARS` to change, not exposed in the template) the line carried `{"truncated": true, "chars": N, "head": "<first cap characters>"}` instead of the event so every line stays one valid JSON object under CloudWatch's limit.
 **Rationale**: the project's standing rule (credentials and secrets are never logged) outranks the opt-in; a signed request's `Authorization` header is a credential-equivalent.
 
 ## R20. It must never change the run
@@ -113,3 +113,30 @@ Everything else is kept: `source`, `detail-type`, `status`, ARNs, names, times, 
 ## R26. Reporting
 **Decision**: each entry of `job_numbers` gets `"source": "document" | "allocated"` (entries stored before this change are read as `allocated`). `numbers_report` copies it to every `jobs[]` item (reserve, status, event outcome) and, for a supplied number whose line was not saved, reports `usage: supplied_not_saved` instead of `consumed_unused`.
 **Rationale**: FR-006e requires the response to show per line which it was; the old usage value would claim this service consumed a number it did not.
+
+## R27. No cap; the one limit is the log service's
+**Decision**: remove the 8000-character cap and `LOG_EVENTS_MAX_CHARS`. With `LOG_EVENTS=true` the line holds the whole event (header credentials masked as before). The only limit is what one log entry can hold: CloudWatch accepts 256 KB per entry, so the code uses `MAX_LINE_BYTES = 200,000` (UTF-8 bytes of the finished line, leaving room for the platform's own prefix and for JSON escaping).
+**Rationale**: the clarified requirement (session 2026-10-25, "log the raw event"): no truncation in the normal case. Typical events are tens of KB (the example is about 20 KB), far below the limit.
+**Alternatives**: keeping a configurable cap (rejected: it is the behaviour being removed); splitting into numbered lines (offered, not chosen).
+
+## R28. An event over the line limit: a head in the log, the whole event in S3
+**Decision**: if the finished line is over `MAX_LINE_BYTES`, the line becomes `{"type": "event_entry", "mode": "whole", "event": {"truncated": true, "chars": N, "head": "<the start of the event JSON, cut by halving until the line fits>", "copy": {"bucket": "...", "key": "..."}}}`. The copy is the same masked JSON text, written with `put_object` (key `events/YYYY/MM/DD/<HHMMSS>-<uuid4>.json`, `ContentType` application/json, `ServerSideEncryption` AES256). It is tried only in `whole` mode (a redacted line is always small) and only when the bucket setting is present. If the write fails, `copy_error` holds the exception type; if there is no bucket (a run outside the deployment), `copy_error` is `not_configured`. The client uses short timeouts (connect 3 s, read 5 s, no retries) so a missing route adds at most about 8 s, once.
+**Rationale**: the clarified answer (S3 copy with the location in the line) while keeping the rule that logging never changes the run (R20): every failure is swallowed and shown in the line.
+**Alternatives**: a second Lambda or queue for the copy (more parts, no benefit); writing every whole event to S3 (needless data at rest; the line suffices below the limit).
+
+## R29. The bucket (a supporting resource)
+**Decision**: `EventCopyBucket`, `AWS::S3::Bucket`, created only when `LogEvents` is `"true"` (condition `LogsEventsToS3`); no fixed name; `DeletionPolicy` and `UpdateReplacePolicy` Retain (as for the jobs table); server-side encryption SSE-S3 (AES256); all four public-access-block settings on; a lifecycle rule expiring objects after `EventCopyRetentionDays` (Number parameter, default 30, 1 to 365); no versioning (so expiry really removes the data); a bucket policy denying requests without TLS; an Output with the bucket name. The function's role gets `s3:PutObject` on `<bucket>/events/*` only, under the same condition (no read, list or delete).
+**Rationale**: the clarified answer (the stack creates it); feature 007 FR-003 allows supporting non-network resources. The copy holds customer and order data, so it is encrypted, closed to the public, short-lived and write-only for the function. Retain protects the data from a stack deletion surprise, as the jobs table is.
+**Consequences** (documented): setting `LogEvents` back to `false` removes the bucket from the stack but keeps the bucket and its objects until they expire; setting it to `true` again creates a new bucket. Reading the copies needs permissions the deployer grants separately.
+**Alternatives**: SSE-KMS with a stack key (adds a key policy to maintain; SSE-S3 is enough here); a fixed bucket name (collides across stacks and accounts).
+
+## R30. The network path to S3
+**Decision**: the function runs in the existing VPC, so the subnets need a route to S3 (a gateway endpoint or the existing outbound path). It is documented as an optional requirement of `LOG_EVENTS=true`; without it the copy fails quickly (R28) and the line says so. No endpoint is created (feature 007: no network resources).
+**Rationale**: the stack cannot create network resources; failing visibly and harmlessly is the safe behaviour.
+
+## R31. The settings
+**Decision**: `deploy.env` gains optional `EVENT_COPY_RETENTION_DAYS` (default 30, integer 1 to 365, validated by `deploy.sh`, always passed as `EventCopyRetentionDays`). The `LOG_EVENTS=true` notice also says that a retained bucket holding full event copies exists and when they expire. The function reads `EVENT_COPY_BUCKET` (set by the template to the bucket name when the condition holds, else empty).
+**Rationale**: one switch (`LOG_EVENTS`) still decides everything; the retention is the only new knob.
+
+## R32. The mock environment
+**Decision**: the mock renders the template with `LogEvents` true when asked; `render_env` maps `EventCopyBucket` to a valid lowercase name and the S3 statement is written with `Fn::Sub` on the bucket reference (not `GetAtt`, which the mock cannot resolve); the edge seeds the bucket in Moto when `EVENT_COPY_BUCKET` is set, so an oversized event can be exercised end to end.

@@ -39,6 +39,12 @@ Two facts shape the work:
 - Q: Where should the optional job number come from, so that no new job number is allocated for a line when it is set? → A: Per line, from the document: an optional job-number field on each line item, mapped like the other document fields. Present and non-empty means that line keeps it and no new job number is allocated for it; other lines still get new numbers. Callers do not send one.
 - Q: When a line's supplied job number already exists in the ERP, or appears twice in the same document, what should the function do? → A: Nothing special: no check is made. The save tries to create the job with that number and the ERP's own rejection decides. The existing rules then apply unchanged: a rejection after earlier rows were written leaves the order needing manual reconciliation, and it is never retried or replayed.
 
+### Session 2026-10-25 (log the raw event)
+
+- Q: When the whole event is logged, should credentials in request headers still be masked? → A: Yes. The size cap goes away (the whole event is logged, not cut); header credentials (`Authorization`, `X-Amz-Security-Token`, `Cookie`, `X-Api-Key`) stay masked as `***` in both modes.
+- Q: If a whole event is too large for one log line (256 KB per CloudWatch entry), what should the function do with the part beyond it? → A: Log the event up to the limit and write the full event to S3, with the S3 location in the log line.
+- Q: Which S3 bucket should receive the full copy of an oversized event? → A: A bucket the stack creates, only when the whole-event setting is on: encrypted, public access blocked, objects expire after a retention period, retained when the stack is deleted (like the jobs table). The function may write only to it. If the write fails (for example no network path to S3), the line still carries the cut event and a note that the copy could not be stored.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Read the scan result of the document named in the event (Priority: P1)
@@ -119,7 +125,7 @@ If the document does not exist, has not finished, or the document-processing ser
 - A document ID with characters outside the usual file-name set, or an empty one: refused as not a document ID, nothing contacted.
 - The result is very large (many pages and fields): the summary lists fields and counts but not page images, raw text or other bulk content.
 - Event bodies contain customer data (names, addresses, part numbers): by default the logs keep only the document ID, counts and the redacted entry line (FR-016); the whole event is logged only when the opt-in setting is on.
-- The event is larger than the log cap, or is not JSON-serialisable (bytes, a string, `None`): the entry line says so and shows what it can; it never raises and never changes the run.
+- The event is larger than one log entry can hold (256 KB; the line carries the first part and, with the bucket, a pointer to the full copy), or is not JSON-serialisable (bytes, a string, `None`): the entry line says so and shows what it can; it never raises and never changes the run.
 
 ## Requirements *(mandatory)*
 
@@ -145,7 +151,7 @@ If the document does not exist, has not finished, or the document-processing ser
 - **FR-012**: When the payload has no `action`, the action MUST be `document_event`. An explicit `action` MUST always win; an unknown `action` MUST be refused as today. The event MUST be accepted as the payload itself or under an `event` key.
 - **FR-013**: A payload with no `action` that is not an IDP processing status change event MUST be refused with `EVENT_INVALID` and a message that names `"action": "health"`; it MUST NOT run a health check or contact anything. A health check MUST always require `"action": "health"` (with its existing `dry_run` and `diagnose` options).
 - **FR-015**: The one Lambda MUST carry the permissions and settings of both roles (the connectivity actions and the intake) in the plant deployment, and the connectivity actions MUST behave exactly as before when asked for with their `action`.
-- **FR-016**: On entry to the handler, for every invocation (IDP event, API request, direct action, scheduled sweep, the function's own background actions), the function MUST write one log line holding the event as JSON. By default that line is the redacted form: `detail.input`, `detail.output` and an API request body are replaced by their size (and the document ID for an IDP event) and everything else is kept; no field value, customer name or address appears in it. When the opt-in setting is on (off by default; set through the deployment settings) the line holds the whole event, cut to a size cap. Writing the line MUST NOT change the outcome of the run, and any failure to build it MUST be swallowed with a short note.
+- **FR-016**: On entry to the handler, for every invocation (IDP event, API request, direct action, scheduled sweep, the function's own background actions), the function MUST write one log line holding the event as JSON. By default that line is the redacted form: `detail.input`, `detail.output` and an API request body are replaced by their size (and the document ID for an IDP event) and everything else is kept; no field value, customer name or address appears in it. When the opt-in setting is on (off by default; set through the deployment settings) the line holds the whole event as received, with no size cap (header credentials stay masked as `***`). When the line would exceed the log service's per-entry limit (256 KB), the line holds the event up to that limit with a marker, and the full event is written to an S3 bucket created by the stack (only when the whole-event setting is on; encrypted, public access blocked, objects expiring after a retention period, retained on stack deletion) with its location in the line. If that write fails, the line says the copy could not be stored; the run is not affected. Writing the line MUST NOT change the outcome of the run, and any failure to build it MUST be swallowed with a short note.
 
 ### Key Entities
 
@@ -166,7 +172,7 @@ If the document does not exist, has not finished, or the document-processing ser
 - **SC-007**: With a fully confident document, live writes on and a simulated ERP, an event results in a saved order with the reserved numbers reported in under 60 seconds for a 25-line PO, with no person involved.
 - **SC-008**: With live writes off, or a field below threshold, 100% of tests reserve and write nothing in the ERP.
 - **SC-006**: With the event-log setting off (the default), no log line of any test run, including the entry line, contains a field value, customer name or address from the example document.
-- **SC-009**: Every invocation test produces exactly one entry line that parses as JSON; with the setting on, the line equals the event (up to the size cap), and with it off the line differs from the event only in the redacted parts.
+- **SC-009**: Every invocation test produces exactly one entry line that parses as JSON; with the setting on, the line equals the event (apart from the masked header credentials), and with it off the line differs from the event only in the redacted parts.
 
 ## Assumptions
 

@@ -100,3 +100,19 @@ def test_lock_held_writes_a_live_lease_and_clearing_releases_it(world, aws):
 def test_health_reports_unreachable_moto_as_down(tmp_path):
     w = seed.World(R, "http://127.0.0.1:9", scenarios_dir=str(tmp_path), run_dir=str(tmp_path))
     assert w.health()["moto"] == "down"
+
+
+def test_the_event_copy_bucket_is_created_empty_only_when_it_is_rendered(moto_url, tmp_path, aws):
+    run = tmp_path / "run2"
+    run.mkdir()
+    on = render_env.render(params={"LogEvents": "true"})
+    world = seed.World(on, moto_url, scenarios_dir=os.path.join(os.path.dirname(__file__), "scen"), run_dir=str(run))
+    world.reset()
+    s3 = aws("s3")
+    bucket = on["env"]["EVENT_COPY_BUCKET"]
+    assert bucket in [b["Name"] for b in s3.list_buckets()["Buckets"]]
+    s3.put_object(Bucket=bucket, Key="events/x.json", Body=b"{}")
+    world.reset()
+    assert s3.list_objects_v2(Bucket=bucket).get("KeyCount", 0) == 0
+    seed.World(R, moto_url, scenarios_dir=os.path.join(os.path.dirname(__file__), "scen"), run_dir=str(run)).reset()
+    assert bucket not in [b["Name"] for b in s3.list_buckets()["Buckets"]]

@@ -64,7 +64,8 @@ class _Resolver:
     # physical names / attributes of the resources the function refers to
     def physical(self, name):
         return {"JobsTable": f"{self.stack}-JobsTable", "DirectFunction": f"{self.stack}-fn",
-                "OrderApi": "mockapi0001"}.get(name, f"{self.stack}-{name}")
+                "OrderApi": "mockapi0001",
+                "EventCopyBucket": f"{self.stack.lower()}-event-copy"}.get(name, f"{self.stack}-{name}")  # S3 names are lowercase
 
     def attr(self, name, attribute):
         if name == "DirectFunction" and attribute == "Arn":

@@ -44,7 +44,8 @@ def test_the_stack_creates_exactly_one_function_and_no_network_resource(template
     assert of_type(template, "AWS::EC2::") == {}  # no VPC, subnet, route table, gateway, endpoint, group or rule
     types = {r["Type"] for r in template["Resources"].values()}
     assert types == {"AWS::Serverless::LayerVersion", "AWS::DynamoDB::Table", "AWS::Serverless::Api",
-                     "AWS::Serverless::Function", "AWS::Events::Rule", "AWS::Lambda::Permission"}
+                     "AWS::Serverless::Function", "AWS::Events::Rule", "AWS::Lambda::Permission",
+                     "AWS::S3::Bucket", "AWS::S3::BucketPolicy"}
 
 
 def test_the_network_is_supplied_not_created_and_is_required(template):
@@ -82,7 +83,7 @@ def test_the_settings_of_the_old_shapes_are_gone(template):
     for name in REMOVED_PARAMETERS:
         assert name not in template["Parameters"], name
     assert set(template.get("Rules", {})) == {"IdpAllOrNothing"}
-    assert set(template["Conditions"]) == {"HasIdp", "IdpRegionGiven", "HasIdpEvents", "HasApi", "HasIdpKeys"}
+    assert set(template["Conditions"]) == {"HasIdp", "IdpRegionGiven", "HasIdpEvents", "HasApi", "HasIdpKeys", "LogsEventsToS3"}
 
 
 # ---- US2: the one function carries every entry point ---------------------------------------------------------------------
@@ -239,7 +240,7 @@ def test_the_erp_secret_and_live_writes_settings_are_unchanged(template):
 
 
 def test_the_outputs_name_the_one_function_the_api_and_the_table(template):
-    assert set(template["Outputs"]) == {"DirectFunctionName", "FunctionArn", "ApiId", "JobsTableName", "AttachedVpcId"}
+    assert set(template["Outputs"]) == {"DirectFunctionName", "FunctionArn", "ApiId", "JobsTableName", "AttachedVpcId", "EventCopyBucketName"}
 
 
 def test_the_function_has_a_makefile_build_target_and_the_idp_sdk_is_packaged_from_a_checkout(template):
@@ -284,3 +285,50 @@ def test_co_number_is_an_empty_by_default_test_parameter_that_reaches_the_functi
     assert p["Default"] == "" and "TEST" in p["Description"]
     assert re.match(p["AllowedPattern"], "") and re.match(p["AllowedPattern"], "129548") and not re.match(p["AllowedPattern"], "a b")
     assert env(template)["CO_NUMBER"] == {"Ref": "CoNumber"}
+
+
+# ---- feature 006 FR-016 revised: the bucket for oversized logged events (research R29) -------------------------------------
+def test_the_event_copy_bucket_exists_only_while_the_whole_event_is_logged(template):
+    assert template["Conditions"]["LogsEventsToS3"] == {"Fn::Equals": [{"Ref": "LogEvents"}, "true"]}
+    assert Evaluator(template, **NET).condition("LogsEventsToS3") is False
+    assert Evaluator(template, LogEvents="true", **NET).condition("LogsEventsToS3") is True
+    for name in ("EventCopyBucket", "EventCopyBucketPolicy"):
+        assert template["Resources"][name]["Condition"] == "LogsEventsToS3"
+    assert env(template)["EVENT_COPY_BUCKET"] == {"Fn::If": ["LogsEventsToS3", {"Ref": "EventCopyBucket"}, ""]}
+
+
+def test_the_event_copy_bucket_is_private_encrypted_expiring_and_retained(template):
+    b = template["Resources"]["EventCopyBucket"]
+    assert b["Type"] == "AWS::S3::Bucket" and b["DeletionPolicy"] == "Retain" and b["UpdateReplacePolicy"] == "Retain"
+    props = b["Properties"]
+    assert props["BucketEncryption"]["ServerSideEncryptionConfiguration"][0]["ServerSideEncryptionByDefault"]["SSEAlgorithm"] == "AES256"
+    assert props["PublicAccessBlockConfiguration"] == {"BlockPublicAcls": True, "BlockPublicPolicy": True,
+                                                       "IgnorePublicAcls": True, "RestrictPublicBuckets": True}
+    (rule,) = props["LifecycleConfiguration"]["Rules"]
+    assert rule["Status"] == "Enabled" and rule["ExpirationInDays"] == {"Ref": "EventCopyRetentionDays"}
+    assert "VersioningConfiguration" not in props and "BucketName" not in props  # expiry must really delete; no fixed name
+
+
+def test_the_event_copy_bucket_refuses_requests_without_tls(template):
+    pol = template["Resources"]["EventCopyBucketPolicy"]["Properties"]
+    (st,) = pol["PolicyDocument"]["Statement"]
+    assert st["Effect"] == "Deny" and st["Action"] == "s3:*" and st["Condition"] == {"Bool": {"aws:SecureTransport": "false"}}
+
+
+def test_the_retention_is_a_bounded_number_defaulting_to_30_days(template):
+    p = template["Parameters"]["EventCopyRetentionDays"]
+    assert (p["Type"], p["Default"], p["MinValue"], p["MaxValue"]) == ("Number", 30, 1, 365)
+
+
+def test_the_function_may_only_put_objects_under_events_in_that_bucket(template):
+    cond = [p for p in fn(template)["Policies"] if isinstance(p, dict) and "Fn::If" in p and p["Fn::If"][0] == "LogsEventsToS3"]
+    assert len(cond) == 1 and cond[0]["Fn::If"][2] == {"Ref": "AWS::NoValue"}
+    (st,) = cond[0]["Fn::If"][1]["Statement"]
+    assert st["Effect"] == "Allow" and st["Action"] == "s3:PutObject"
+    assert st["Resource"] == {"Fn::Sub": "arn:${AWS::Partition}:s3:::${EventCopyBucket}/events/*"}
+
+
+def test_the_bucket_name_is_an_output_only_when_it_exists(template):
+    assert template["Outputs"]["EventCopyBucketName"] == {
+        "Condition": "LogsEventsToS3", "Value": {"Ref": "EventCopyBucket"},
+        "Description": template["Outputs"]["EventCopyBucketName"]["Description"]}

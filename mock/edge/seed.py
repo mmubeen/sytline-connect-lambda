@@ -77,6 +77,13 @@ class World:
         ddb.update_time_to_live(TableName=self.table,
                                 TimeToLiveSpecification={"Enabled": True, "AttributeName": "ttl"})
 
+    def _create_bucket(self):
+        """The oversized-event bucket, only while the rendered function has one (LogEvents true)."""
+        bucket = self.r["env"].get("EVENT_COPY_BUCKET")
+        if bucket:
+            kw = {} if self.region == "us-east-1" else {"CreateBucketConfiguration": {"LocationConstraint": self.region}}
+            self.client("s3").create_bucket(Bucket=bucket, **kw)
+
     def _create_secret(self):
         self.client("secretsmanager").create_secret(Name=secret_name(self.r["env"]["SYTELINE_SECRET_ARN"]),
                                                     SecretString=json.dumps(self.secret_values()))
@@ -96,6 +103,7 @@ class World:
         self.current = None
         self._default_kms()
         self._create_table()
+        self._create_bucket()
         self._create_secret()
         if self.idp_seeder:
             self.idp_seeder.base(self)

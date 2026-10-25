@@ -66,6 +66,16 @@ Parameters:
       "false" (default): on entry the function logs a redacted copy of the event (the bodies that can hold document or order
       content are replaced by their size). "true": the whole event is logged (cut at 8000 characters), so the logs then hold
       document and order content; use it to debug a payload and turn it off again. Credentials in headers are never logged.
+      With "true" the whole event is logged, uncut; an event too large for one log entry (256 KB) is also stored in a bucket this
+      stack creates (EventCopyBucket, retained when the stack is deleted).
+
+  EventCopyRetentionDays:
+    Type: Number
+    Default: 30
+    MinValue: 1
+    MaxValue: 365
+    Description: >-
+      Days an oversized event's stored copy is kept (only used while LogEvents is "true"; the copies hold document and order content).
 
   CoNumber:
     Type: String
@@ -232,6 +242,8 @@ Conditions:
   # the private API (and its permission) exists only when an existing execute-api endpoint is supplied
   HasApi: !Not [!Equals [!Ref ApiVpcEndpointId, ""]]
   HasIdpKeys: !Not [!Equals [!Ref IdpKmsKeyArns, ""]]
+  # the oversized-event bucket exists only while the whole event is being logged
+  LogsEventsToS3: !Equals [!Ref LogEvents, "true"]
 
 Globals:
   Function:
@@ -368,6 +380,7 @@ Resources:
           SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
           SYTELINE_LIVE_WRITES: !Ref LiveWrites
           LOG_EVENTS: !Ref LogEvents
+          EVENT_COPY_BUCKET: !If [LogsEventsToS3, !Ref EventCopyBucket, ""]
           JOB_NUMBER: !Ref JobNumber
           CO_NUMBER: !Ref CoNumber
           SYTELINE_NEXT_CO_IDO: !Ref NextCoIdo
@@ -438,12 +451,62 @@ Resources:
                 Action: kms:Decrypt
                 Resource: !Split [",", !Ref IdpKmsKeyArns]
           - !Ref AWS::NoValue
+        # write-only access to the oversized-event bucket (nothing else: no read, list or delete)
+        - !If
+          - LogsEventsToS3
+          - Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${EventCopyBucket}/events/*
+          - !Ref AWS::NoValue
       Events:
         Sweep:
           Type: Schedule
           Properties:
             Schedule: rate(5 minutes)
             Input: '{"action":"sweep"}'
+
+  # Full copies of events too large for one log entry (feature 006 FR-016). Exists only while LogEvents is "true"; encrypted, closed to
+  # the public, objects expire after EventCopyRetentionDays, retained if the stack is deleted (like the jobs table).
+  EventCopyBucket:
+    Type: AWS::S3::Bucket
+    Condition: LogsEventsToS3
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-event-copies
+            Status: Enabled
+            ExpirationInDays: !Ref EventCopyRetentionDays
+
+  EventCopyBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: LogsEventsToS3
+    Properties:
+      Bucket: !Ref EventCopyBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${EventCopyBucket}
+              - !Sub arn:${AWS::Partition}:s3:::${EventCopyBucket}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
 
   # Starts DirectFunction (action `document_event`, the default) from the IDP state machine's SUCCEEDED events; exists only
   # when IdpStateMachineArn is given
@@ -485,3 +548,7 @@ Outputs:
     Value: !Ref JobsTable
   AttachedVpcId:
     Value: !Ref WorkerVpcId
+  EventCopyBucketName:
+    Condition: LogsEventsToS3
+    Description: Where the full copy of an oversized logged event is stored (retained when the stack is deleted).
+    Value: !Ref EventCopyBucket

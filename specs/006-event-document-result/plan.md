@@ -15,6 +15,8 @@ default, the whole event (size-capped) only when `LOG_EVENTS=true`. See research
 
 **Addendum 2026-10-25 (FR-006e; feature 004 FR-023): optional job number.** A line item of the document may carry a job number; the reserve step uses it for that line instead of allocating one. See research R22..R26, `data-model.md`, and the changes to both contracts.
 
+**Addendum 2026-10-25 (FR-016 revised): whole event, no cap.** With `LOG_EVENTS=true` the line holds the whole event (header credentials still masked); an event too large for one CloudWatch entry (256 KB) is also written to an S3 bucket the stack creates (only when the setting is on). See research R27..R32; this supersedes the 8000-character cap of R19/R21.
+
 ## Technical Context
 
 **Language/Version**: Python 3.13 (Lambda; existing code), SAM/CloudFormation YAML
@@ -121,3 +123,21 @@ docs/EVENT_INTAKE.md            # the optional field, the IDP_FIELD_MAP key `lin
 ```
 
 No template, permission, deploy-script or storage-key change: the supplied number is one more attribute of the existing reservation entries.
+
+## Addendum: files for the uncapped entry log (FR-016 revised, research R27 to R32)
+
+```text
+src/syteline/eventlog.py        # no cap, no LOG_EVENTS_MAX_CHARS; MAX_LINE_BYTES (200,000); oversized event -> head that fits + copy to S3 (put_event_copy()) ; failures swallowed
+src/template.yaml               # + Number parameter EventCopyRetentionDays (30, 1..365); + condition LogsEventsToS3 (LogEvents == "true");
+                                #   + AWS::S3::Bucket EventCopyBucket (condition; Retain; SSE-S3; public access blocked; lifecycle expiry; TLS-only policy);
+                                #   + env EVENT_COPY_BUCKET; + s3:PutObject on <bucket>/events/* in the function's policies (condition); + Output (condition)
+src/deploy.sh, deploy.env.example   # + EVENT_COPY_RETENTION_DAYS (default 30, 1..365) always passed; the LOG_EVENTS=true notice also names the retained bucket
+mock/render_env.py              # physical name of EventCopyBucket (a valid, lowercase S3 name)
+mock/edge/seed.py               # create the bucket in Moto when EVENT_COPY_BUCKET is set (reset empties it)
+tests/unit/test_eventlog.py     # the cap tests become no-cap + oversize tests; copy ok / copy failed / no bucket
+tests/unit/test_entry_log.py    # the oversized event still gives exactly one valid JSON line and never changes the run
+tests/unit/test_template_single.py, test_deploy_script.py, mock/test_render_env.py   # the bucket and its conditions, the parameter, the policy statement
+docs/EVENT_INTAKE.md, docs/DEPLOYMENT.md   # no cap; the bucket (retention, retained on delete, who can read it); the S3 route the subnets need
+```
+
+Constitution check: still no ratified gates. The standing rule that credentials are never logged is kept (masking applies to the log line and to the S3 copy). Feature 007 FR-003 allows the bucket as a supporting, non-network resource.

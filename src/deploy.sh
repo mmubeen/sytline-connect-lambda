@@ -170,8 +170,11 @@ fi
 # idp_sdk and idp_common are packaged with the functions (never installed by name: `idp-common` on PyPI is not ours).
 [[ "${SQL_ENCRYPT:-true}" == "true" || "${SQL_ENCRYPT:-true}" == "false" ]] || die "SQL_ENCRYPT must be true or false"
 [[ "${LOG_EVENTS:-false}" == "true" || "${LOG_EVENTS:-false}" == "false" ]] || die "LOG_EVENTS must be true or false"
+event_copy_days="${EVENT_COPY_RETENTION_DAYS:-30}"
+[[ "$event_copy_days" =~ ^[0-9]+$ ]] && (( event_copy_days >= 1 && event_copy_days <= 365 )) \
+  || die "EVENT_COPY_RETENTION_DAYS must be a whole number of days from 1 to 365"
 if [[ "${LOG_EVENTS:-false}" == "true" ]]; then
-  echo "WARNING: LOG_EVENTS=true: the function logs the WHOLE incoming event, so its logs will hold document and order content (names, addresses, part numbers). Turn it off (LOG_EVENTS=false) and redeploy when you have finished debugging."
+  echo "WARNING: LOG_EVENTS=true: the function logs the WHOLE incoming event, so its logs will hold document and order content (names, addresses, part numbers). An event too large for one log entry (256 KB) is also stored in a bucket this stack creates; it is encrypted, kept $event_copy_days days, and RETAINED when the stack is deleted or LOG_EVENTS goes back to false. Turn it off (LOG_EVENTS=false) and redeploy when you have finished debugging."
 fi
 [[ "${JOB_NUMBER:-}" =~ ^[A-Za-z0-9_-]{0,20}$ ]] || die "JOB_NUMBER must be empty or up to 20 letters, digits, - or _"
 [[ "${CO_NUMBER:-}" =~ ^[A-Za-z0-9_-]{0,10}$ ]] || die "CO_NUMBER must be empty or up to 10 letters, digits, - or _"
@@ -268,6 +271,7 @@ overrides=(
   "$(q DefaultsIdo "${DEFAULTS_IDO:-database}")"
   "$(q SqlEncrypt "${SQL_ENCRYPT:-true}")"
   "$(q LogEvents "${LOG_EVENTS:-false}")"
+  "$(q EventCopyRetentionDays "$event_copy_days")"
   "$(q JobNumber "${JOB_NUMBER:-}")"
   "$(q CoNumber "${CO_NUMBER:-}")"
   "$(q SqlVerifyHostname "${SQL_VERIFY_HOSTNAME:-true}")"

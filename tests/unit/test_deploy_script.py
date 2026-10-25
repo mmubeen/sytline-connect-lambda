@@ -521,3 +521,27 @@ def test_co_number_is_passed_with_a_warning(run):
 def test_co_number_must_be_a_plain_identifier(run):
     p, calls = run({**BASE, **NET, "CO_NUMBER": "a b"})
     assert p.returncode != 0 and "CO_NUMBER must be empty or" in (p.stdout + p.stderr) and not deployed(calls)
+
+
+# ---- feature 006 FR-016 revised: the oversized-event bucket's retention --------------------------------------------------------
+def test_the_event_copy_retention_defaults_to_30_days_and_is_always_passed(run):
+    p, calls = run({**BASE, **NET})
+    assert p.returncode == 0 and overrides(calls)["EventCopyRetentionDays"] == "30"
+    assert "RETAINED" not in p.stdout
+
+
+def test_the_event_copy_retention_is_passed_through(run):
+    p, calls = run({**BASE, **NET, "EVENT_COPY_RETENTION_DAYS": "45"})
+    assert p.returncode == 0 and overrides(calls)["EventCopyRetentionDays"] == "45"
+
+
+@pytest.mark.parametrize("bad", ["0", "366", "abc", "4.5", "-3"])
+def test_a_bad_event_copy_retention_is_refused_before_deploying(run, bad):
+    p, calls = run({**BASE, **NET, "EVENT_COPY_RETENTION_DAYS": bad})
+    assert p.returncode != 0 and "EVENT_COPY_RETENTION_DAYS" in (p.stdout + p.stderr) and not deployed(calls)
+
+
+def test_logging_the_whole_event_warns_about_the_retained_bucket_and_the_days(run):
+    p, calls = run({**BASE, **NET, "LOG_EVENTS": "true", "EVENT_COPY_RETENTION_DAYS": "7"})
+    assert p.returncode == 0
+    assert "256 KB" in p.stdout and "RETAINED" in p.stdout and "7 days" in p.stdout

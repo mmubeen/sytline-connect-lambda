@@ -105,11 +105,12 @@ JSON line first, before anything runs, so a payload that is refused or misrouted
 | Setting `LOG_EVENTS` | `mode` | The line holds |
 |---|---|---|
 | `false` (default) | `redacted` | the event with the values of `input`, `output`, `body` and `text` replaced by `{"redacted": true, "chars": n}` (an IDP event's `input` also shows the document ID); everything else as received |
-| `true` | `whole` | the whole event, cut at 8000 characters (`{"truncated": true, "chars": N, "head": "..."}` beyond that) |
+| `true` | `whole` | the whole event, uncut (no size cap). Only an event too large for one log entry (the line would pass 200,000 bytes; CloudWatch accepts 256 KB) becomes `{"truncated": true, "chars": N, "head": "<start of the event>", "copy": {"bucket": "...", "key": "events/..."}}`; the full event is in that S3 object |
 
 - Header values `Authorization`, `X-Amz-Security-Token`, `Cookie` and `X-Api-Key` are `***` in both modes.
-- The example IDP event is about 20,000 characters, so with `LOG_EVENTS=true` the line shows its first 8000 characters (the envelope and the start of
-  `detail.input`). The cap is `LOG_EVENTS_MAX_CHARS` on the function if you need more; it is not a template parameter.
+- The example IDP event is about 20,000 characters, so with `LOG_EVENTS=true` the line holds all of it. `LOG_EVENTS_MAX_CHARS` no longer exists.
+- **The oversized-event copy.** While `LOG_EVENTS` is `true` the stack has a bucket (`EventCopyBucketName` in the stack outputs). An event that does not fit one log entry is written there as `events/YYYY/MM/DD/<time>-<id>.json` (the same JSON as the line would have held, header credentials still `***`). The bucket is encrypted, closed to the public, refuses non-TLS requests, expires objects after `EVENT_COPY_RETENTION_DAYS` (default 30) and is **retained when the stack is deleted**; the function can only add objects to it. Who may read the copies is for you to grant.
+  If the copy cannot be stored (for example the subnets have no route to S3) the line has `"copy_error": "<ExceptionType>"` instead of `copy`, after at most about 8 seconds, and the run is unaffected. Outside a deployment (no `EVENT_COPY_BUCKET`) it says `"copy_error": "not_configured"`.
 - With `true` the logs hold document and order content (names, addresses, part numbers) and are readable by whoever can read the function's log group:
   turn it off again when you have finished debugging. The default keeps the promise of this feature that no field value, customer name or address is logged.
 - Building the line never changes the run: any problem leaves one `event_entry could not be built: <ExceptionType>` warning.

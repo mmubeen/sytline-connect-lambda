@@ -33,10 +33,10 @@ State transitions: `processing` -> `reserved` (numbers obtained) -> `save_accept
 |-------|------|------|
 | `type` | string | always `event_entry` |
 | `mode` | string | `redacted` (default) or `whole` (`LOG_EVENTS=true`) |
-| `event` | any JSON | the event as received after redaction (R18/R19); for a non-object payload `{"payload_type": "str", "chars": n}`; when over the cap in whole mode `{"truncated": true, "chars": N, "head": "..."}` |
+| `event` | any JSON | the event as received after redaction (R18/R19); for a non-object payload `{"payload_type": "str", "chars": n}`; when the finished line would be over 200,000 bytes in whole mode `{"truncated": true, "chars": N, "head": "...", "copy": {"bucket", "key"} | "copy_error": "<ExceptionType>|not_configured"}` |
 | redacted value | object | `{"redacted": true, "chars": n}` (+ `document_id` for an IDP event's `detail.input`) |
 
-Constraints: one JSON object per line; line length at most the cap plus a fixed envelope; header values `Authorization`, `X-Amz-Security-Token`, `Cookie`, `X-Api-Key` are `***` in both modes; no state, no persistence.
+Constraints: one JSON object per line; line length at most 200,000 bytes (R27); header values `Authorization`, `X-Amz-Security-Token`, `Cookie`, `X-Api-Key` are `***` in both modes; no state, no persistence.
 
 ## Document line item: optional job number (FR-006e)
 | Field | Rule |
@@ -52,3 +52,12 @@ Constraints: one JSON object per line; line length at most the cap plus a fixed 
 
 Reservation `fingerprint`: unchanged unless a number was supplied; then it also covers the pairs `line=job`.
 Report `usage` gains `supplied_not_saved` (a supplied number whose line was not saved).
+
+## Event copy object (S3, only when the line was over the limit)
+| Part | Rule |
+|---|---|
+| bucket | `EventCopyBucket` of the stack (exists only while `LogEvents` is `true`); encrypted (SSE-S3), public access blocked |
+| key | `events/YYYY/MM/DD/<HHMMSS>-<uuid4>.json` |
+| body | the entry's event as JSON text, header credentials masked, not truncated; content type `application/json` |
+| lifetime | expires after `EventCopyRetentionDays` (default 30, 1 to 365); the bucket itself is retained when the stack is deleted |
+| writer | the function only, `s3:PutObject` on `events/*`; failures never affect the run |

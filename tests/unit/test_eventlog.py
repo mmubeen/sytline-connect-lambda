@@ -1,8 +1,9 @@
-"""T034 (feature 006, FR-016): the entry log line: redaction, masking, cap, odd payloads."""
+"""T034/T059 (feature 006, FR-016): the entry log line: redaction, masking, no cap, the oversized line and its S3 copy, odd payloads."""
 
 import copy
 import json
 import logging
+import re
 
 import pytest
 
@@ -78,15 +79,15 @@ def test_the_non_string_value_of_a_redacted_key_is_measured_as_json():
     assert line_of({"body": {"k": "v"}})["event"]["body"] == {"redacted": True, "chars": len(json.dumps({"k": "v"}))}
 
 
-def test_whole_mode_logs_the_event_as_received():
-    # the example event is far larger than the default cap, so the cap is raised here; the default cut is tested below
-    out = json.loads(eventlog.render(SAMPLE, {"LOG_EVENTS": "true", "LOG_EVENTS_MAX_CHARS": "1000000"}))
-    assert out["mode"] == "whole" and out["event"]["detail"]["input"] == SAMPLE["detail"]["input"]
-
-
-def test_the_example_event_in_whole_mode_is_cut_at_the_default_cap():
+def test_whole_mode_logs_the_event_as_received_with_no_cap():
     out = json.loads(eventlog.render(SAMPLE, {"LOG_EVENTS": "true"}))
-    assert out["event"]["truncated"] is True and len(out["event"]["head"]) == 8000
+    assert out["mode"] == "whole" and out["event"] == SAMPLE and "truncated" not in out["event"]
+    assert len(json.dumps(SAMPLE)) > 8000  # the old cut would have applied
+
+
+def test_the_old_cap_setting_is_ignored():
+    out = json.loads(eventlog.render(SAMPLE, {"LOG_EVENTS": "true", "LOG_EVENTS_MAX_CHARS": "100"}))
+    assert out["event"] == SAMPLE
 
 
 @pytest.mark.parametrize("value", ["TRUE", " true ", "True"])
@@ -99,21 +100,96 @@ def test_anything_but_true_is_the_default(value):
     assert json.loads(eventlog.render({"a": 1}, {"LOG_EVENTS": value}))["mode"] == "redacted"
 
 
-def test_over_the_cap_the_line_says_so_and_stays_one_valid_object():
-    big = {"action": "x", "note": "y" * 20000}
-    out = json.loads(eventlog.render(big, {"LOG_EVENTS": "true"}))
-    assert out["event"]["truncated"] is True and out["event"]["chars"] > 20000 and len(out["event"]["head"]) == 8000
+# ---- an event too large for one log entry: the head in the log, the whole event in S3 (research R27, R28) -----------------
+BUCKET = "stack-event-copy"
+KEY = re.compile(r"^events/\d{4}/\d{2}/\d{2}/\d{6}-[0-9a-f-]{36}\.json$")
+WHOLE = {"LOG_EVENTS": "true", "EVENT_COPY_BUCKET": BUCKET}
 
 
-def test_the_cap_can_be_changed_and_a_bad_value_falls_back():
-    big = {"note": "y" * 500}
-    assert len(json.loads(eventlog.render(big, {"LOG_EVENTS": "true", "LOG_EVENTS_MAX_CHARS": "100"}))["event"]["head"]) == 100
-    assert "truncated" not in json.loads(eventlog.render(big, {"LOG_EVENTS": "true", "LOG_EVENTS_MAX_CHARS": "lots"}))["event"]
+class FakeS3:
+    def __init__(self, error=None):
+        self.puts, self.error = [], error
+
+    def put_object(self, **kw):
+        if self.error:
+            raise self.error
+        self.puts.append(kw)
 
 
-def test_the_default_form_is_capped_too():
-    out = json.loads(eventlog.render({"resources": ["r" * 20000]}, {}))
-    assert out["event"]["truncated"] is True
+@pytest.fixture
+def s3(monkeypatch):
+    fake = FakeS3()
+    monkeypatch.setattr(eventlog, "_s3_factory", lambda: fake)
+    return fake
+
+
+def huge(n=300_000, **extra):
+    return {"action": "add_note", "text": "y" * n, "headers": {"Authorization": "AWS4-HMAC-SHA256 Credential=AKIASECRET"}, **extra}
+
+
+def test_an_oversized_line_has_a_head_that_fits_and_a_pointer_to_the_s3_copy(s3):
+    line = eventlog.render(huge(), WHOLE)
+    out = json.loads(line)
+    assert len(line.encode("utf-8")) <= eventlog.MAX_LINE_BYTES and out["mode"] == "whole"
+    ev = out["event"]
+    assert ev["truncated"] is True and ev["chars"] > 300_000 and ev["head"].startswith('{"action": "add_note"')
+    assert ev["copy"] == {"bucket": BUCKET, "key": s3.puts[0]["Key"]} and KEY.match(ev["copy"]["key"]) and "copy_error" not in ev
+
+
+def test_the_copy_is_the_whole_masked_event_stored_encrypted(s3):
+    eventlog.render(huge(), WHOLE)
+    (put,) = s3.puts
+    assert put["Bucket"] == BUCKET and put["ContentType"] == "application/json" and put["ServerSideEncryption"] == "AES256"
+    body = json.loads(put["Body"])
+    assert body["text"] == "y" * 300_000 and body["headers"]["Authorization"] == "***" and "AKIASECRET" not in put["Body"].decode()
+
+
+def test_multibyte_text_still_gives_a_line_within_the_limit(s3):
+    line = eventlog.render({"action": "x", "text": "é€𝄞" * 100_000}, WHOLE)
+    assert len(line.encode("utf-8")) <= eventlog.MAX_LINE_BYTES and json.loads(line)["event"]["copy"]["bucket"] == BUCKET
+    assert json.loads(s3.puts[0]["Body"])["text"] == "é€𝄞" * 100_000
+
+
+def test_a_failed_copy_is_shown_in_the_line_and_never_raised(monkeypatch):
+    monkeypatch.setattr(eventlog, "_s3_factory", lambda: FakeS3(error=TimeoutError("no route")))
+    ev = json.loads(eventlog.render(huge(), WHOLE))["event"]
+    assert ev["truncated"] is True and ev["copy_error"] == "TimeoutError" and "copy" not in ev
+
+
+def test_without_a_bucket_the_line_says_not_configured_and_no_client_is_made(monkeypatch):
+    def boom():
+        raise AssertionError("no S3 client may be created")
+
+    monkeypatch.setattr(eventlog, "_s3_factory", boom)
+    ev = json.loads(eventlog.render(huge(), {"LOG_EVENTS": "true"}))["event"]
+    assert ev["truncated"] is True and ev["copy_error"] == "not_configured"
+
+
+def test_the_default_form_never_writes_a_copy(s3):
+    ev = json.loads(eventlog.render({"resources": ["r" * 300_000]}, {"EVENT_COPY_BUCKET": BUCKET}))["event"]
+    assert ev["truncated"] is True and "copy" not in ev and "copy_error" not in ev and s3.puts == []
+
+
+def test_a_small_event_never_touches_s3(s3):
+    json.loads(eventlog.render(SAMPLE, WHOLE))
+    assert s3.puts == []
+
+
+def test_the_real_client_has_short_timeouts_and_no_retries(monkeypatch):
+    seen = {}
+
+    class Boto:
+        @staticmethod
+        def client(name, config=None):
+            seen["name"], seen["config"] = name, config
+            return FakeS3()
+
+    import sys
+    monkeypatch.setitem(sys.modules, "boto3", Boto)
+    monkeypatch.setattr(eventlog, "_s3_factory", None)
+    eventlog.render(huge(), WHOLE)
+    cfg = seen["config"]
+    assert seen["name"] == "s3" and cfg.connect_timeout == 3 and cfg.read_timeout == 5 and cfg.retries["max_attempts"] == 1
 
 
 @pytest.mark.parametrize("payload,expected", [

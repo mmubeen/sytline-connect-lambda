@@ -126,3 +126,14 @@ def test_defaults_are_unchanged_by_the_new_arguments():
 def test_the_entry_log_setting_reaches_the_rendered_function_environment():
     assert render_env.render()["env"]["LOG_EVENTS"] == "false"
     assert render_env.render(params={"LogEvents": "true"})["env"]["LOG_EVENTS"] == "true"
+
+
+def test_the_event_copy_bucket_is_rendered_only_while_the_whole_event_is_logged():
+    off = render_env.render()
+    assert off["env"]["EVENT_COPY_BUCKET"] == "" and not [s for s in off["statements"] if "s3:PutObject" in s["Action"]]
+    on = render_env.render(params={"LogEvents": "true"})
+    name = on["env"]["EVENT_COPY_BUCKET"]
+    import re
+    assert re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", name)
+    (stmt,) = [s for s in on["statements"] if "s3:PutObject" in s["Action"]]
+    assert stmt == {"Effect": "Allow", "Action": ["s3:PutObject"], "Resource": [f"arn:{render_env.PARTITION}:s3:::{name}/events/*"]}

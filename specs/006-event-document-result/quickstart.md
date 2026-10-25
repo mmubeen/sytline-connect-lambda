@@ -41,3 +41,10 @@ Set `IDP_STATE_MACHINE_ARN` in `deploy.env`, redeploy, upload a document to the 
 2. Mock environment: set `MOCK_IDP_FIELD_MAP` to include `"line.job": "<field>"` for a real document, or use a seeded document with the field, run the intake with live writes on, and read the job numbers from the response: the supplied one appears as given, and the mock ERP's job counter did not move for that line.
 3. Rejection: seed the mock ERP with a job of the same number (or supply the same number on two lines) and run the intake: the save ends `needs_reconciliation` after the earlier rows (this is the specified behaviour, not a defect); follow `docs/reconciliation-runbook.md`.
 4. A supplied number below its confidence threshold is refused `DOCUMENT_NEEDS_REVIEW` and names the field; nothing is reserved.
+
+## Entry log without a cap, and the S3 copy (FR-016 revised)
+
+1. With `LOG_EVENTS=true`, invoke the example event (about 20 KB): the `event_entry` line holds it whole, not cut at 8000 characters (compare it with `tests/fixtures/sample_event.json`; only header credentials, if any, differ).
+2. Invoke a payload over 200,000 bytes (for example an `add_note` with a very long `text`, or a generated event): the line has `truncated: true`, `head` and `copy.bucket`/`copy.key`; the object at that key holds the full event JSON with header credentials still `***`.
+3. Without a route to S3 from the subnets, repeat step 2: the run still behaves as before and the line has `copy_error` (the write fails within about 8 seconds).
+4. Check the bucket: encrypted, public access blocked, lifecycle rule `EventCopyRetentionDays`; it exists only after a deploy with `LOG_EVENTS=true`. Set `LOG_EVENTS=false` again when finished and read the notes on the retained bucket in `docs/DEPLOYMENT.md`.

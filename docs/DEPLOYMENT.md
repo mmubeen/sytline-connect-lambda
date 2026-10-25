@@ -76,7 +76,8 @@ cp deploy.env.example deploy.env
 | `API_VPCE_ID` | `ApiVpcEndpointId` | **optional**: the existing `execute-api` interface endpoint (`vpce-...`) the private API is reachable through. **Empty = no API is created** (the function is then reached by direct invocation, the IDP event and its own schedule only). Always passed, so emptying it later removes the API |
 | `IDP_STATE_MACHINE_ARN` | `IdpStateMachineArn` | optional: the IDP state machine whose `SUCCEEDED` events start the event intake (same account and region; needs the IDP settings); empty = nothing starts automatically. See [EVENT_INTAKE.md](EVENT_INTAKE.md) |
 | `LIVE_WRITES`, `LIVE_APPROVAL_REF` | `LiveWrites` | leave `false`; see section 7 |
-| `LOG_EVENTS` | `LogEvents` | optional, default `false`: on entry the function logs a redacted copy of the event. `true` logs the **whole** event (cut at 8000 characters), so the logs then hold document and order content: debug with it, then turn it off. See [EVENT_INTAKE.md](EVENT_INTAKE.md#the-entry-log-line) |
+| `LOG_EVENTS` | `LogEvents` | optional, default `false`: on entry the function logs a redacted copy of the event. `true` logs the **whole** event (uncut; an event over one log entry also goes to a bucket the stack creates, see below), so the logs then hold document and order content: debug with it, then turn it off. See [EVENT_INTAKE.md](EVENT_INTAKE.md#the-entry-log-line) |
+| `EVENT_COPY_RETENTION_DAYS` | `EventCopyRetentionDays` | optional, default `30` (1 to 365): days the stored copy of an oversized event is kept; only used while `LOG_EVENTS=true` |
 | route, database, IDP and tuning settings | various | optional; see [DATABASE.md](DATABASE.md), [RESERVATIONS.md](RESERVATIONS.md) |
 
 Settings of the earlier shapes (`WORKER_ROUTE_TABLE_IDS`, `HOST_NETWORK_CIDR`, `PLANT_CIDR_*`, `DYNAMODB_PREFIX_LIST_ID`, `CREATE_VPC_ENDPOINTS`, `CREATE_API_ENDPOINT`, `ATTACH_*`, `ALLOW_PLAIN_HTTP`, `VERIFY_TLS`, `DATABASE_CHECK`) are no longer used: `deploy.sh` prints a notice naming any it finds in `deploy.env` and does not pass them.
@@ -184,3 +185,11 @@ enabled for a test the ERP owner approved in writing, with a reconciliation and 
 sam delete --stack-name sytline-connect --region us-gov-east-1
 ```
 The stack creates no network resource, so nothing in your network is touched. **The jobs table is retained**: it is not deleted with the stack (it keeps every upload and reservation record); delete it yourself only when you are sure you no longer need its records. The Secrets Manager secret is not part of the stack and is not deleted either.
+
+## The oversized-event bucket
+
+With `LOG_EVENTS=true` the stack creates one S3 bucket (output `EventCopyBucketName`) for events too large for one log entry. It is encrypted (SSE-S3), blocks public access, refuses non-TLS requests and expires objects after `EVENT_COPY_RETENTION_DAYS`. The function may only add objects under `events/`; reading them needs permissions you grant yourself.
+
+- The bucket holds full event content (names, addresses, part numbers). Turn `LOG_EVENTS` back to `false` when you have finished.
+- It is **retained** when the stack is deleted, and when `LOG_EVENTS` goes back to `false` the bucket leaves the stack but stays in the account (its objects still expire). Turning `LOG_EVENTS` on again creates a new bucket. Delete an old one yourself once it is empty and you no longer need it.
+- The function runs in your VPC, so the subnets need a route to S3 (a gateway endpoint, or your existing outbound path). Without it the copy fails within a few seconds and the log line shows `copy_error`; the run is not affected.
