@@ -158,3 +158,10 @@ def test_invoke_timeout_is_uncertain_connect_failure_is_not(live_writes):
         client(CallSvc(call=[TimeoutError("read timed out")])).invoke("SLCos", "NextCoSp", [])
     with pytest.raises(ErpUnreachable):
         client(CallSvc(call=[ConnectionError("Failed to establish a new connection")])).invoke("SLCos", "NextCoSp", [])
+
+
+def test_write_failing_while_building_the_request_was_not_sent(monkeypatch):
+    """A bug serializing the request (for example zeep: "'Schema' object has no attribute 'render'") sends nothing."""
+    monkeypatch.setenv("SYTELINE_LIVE_WRITES", "true")
+    with pytest.raises(ErpUnreachable):
+        client(Svc(save=[AttributeError("'Schema' object has no attribute 'render'")])).insert("SLCos", {"CoNum": "1"})

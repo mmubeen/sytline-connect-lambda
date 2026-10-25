@@ -31,7 +31,9 @@ def _looks_expired(exc):
 
 
 def _definitely_not_sent(exc):
-    """True when the failure happened while connecting, so the request cannot have been processed."""
+    """True when the failure happened before the request left (building it, or connecting), so it cannot have been processed."""
+    if isinstance(exc, (AttributeError, TypeError, ValueError, KeyError)):  # a bug while serializing the request
+        return True
     try:
         import requests
 
