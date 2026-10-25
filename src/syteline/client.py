@@ -3,7 +3,7 @@ SyteLine IDO web-service (SOAP over HTTP) client.
 
 ASSUMPTIONS (to be confirmed read-only by task T031 against the plant network, see
 specs/001-syteline-erp-integration/research.md): the SOAP operation names and payload shapes
-(LoadDataSet / SaveDataSet / CallMethod). They are isolated in `OPS` and the `_xml_*` / parse helpers so a
+(LoadDataSet / SaveDataSet / CallMethod). SaveDataSet's signature is confirmed (a DataSet: see `_dataset`). They are isolated in `OPS` and the XML / parse helpers so a
 correction touches only this file.
 
 Safety rules (FR-004, FR-016):
@@ -14,7 +14,6 @@ Safety rules (FR-004, FR-016):
 """
 
 import logging
-from xml.sax.saxutils import escape
 
 from . import config
 from .errors import (ErpError, ErpRejected, ErpUncertain, ErpUnreachable,  # noqa: F401
@@ -61,6 +60,7 @@ class SoapIdoClient:
             from zeep import Client
             from zeep.transports import Transport
 
+            _enable_dataset_render()
             if not self._verify:
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             session = Session()
@@ -90,7 +90,7 @@ class SoapIdoClient:
             self.connect()
         for attempt in (0, 1):
             try:
-                return getattr(self._service(), OPS[op])(self._token, *args)
+                return self._invoke(op, args)
             except Exception as exc:
                 if attempt == 0 and _looks_expired(exc):
                     log.info("session expired; re-authenticating once")
@@ -101,6 +101,14 @@ class SoapIdoClient:
                 if write and not _definitely_not_sent(exc):
                     raise ErpUncertain(f"{type(exc).__name__}: {exc}") from None
                 raise ErpUnreachable(f"{type(exc).__name__}: {exc}") from None
+
+    def _invoke(self, op, args):
+        service = self._service()
+        if op == "save" and hasattr(self._zeep, "settings"):
+            # the response is a DataSet (schema + any): read it ourselves, zeep cannot parse the row part reliably
+            with self._zeep.settings(raw_response=True):
+                return _dataset_result(getattr(service, OPS[op])(self._token, *args))
+        return getattr(service, OPS[op])(self._token, *args)
 
     # -- operations ----------------------------------------------------------------------
     def load(self, ido, properties, filter_="", record_cap=0):
@@ -114,7 +122,7 @@ class SoapIdoClient:
         """Insert one row; return the stored row. Row-level rejections raise ErpRejected."""
         if not config.live_writes_enabled():
             raise LiveWritesDisabled("live ERP writes are disabled (SYTELINE_LIVE_WRITES)")
-        raw = self._call("save", _xml_changes(ido, "Insert", values), write=True)
+        raw = self._call("save", _dataset(ido, "Insert", values), *SAVE_TAIL, write=True)
         err = row_error(raw)
         if err:
             raise ErpRejected(err)
@@ -130,7 +138,7 @@ class SoapIdoClient:
         """
         if not config.live_writes_enabled():
             raise LiveWritesDisabled("live ERP writes are disabled (SYTELINE_LIVE_WRITES)")
-        raw = self._call("save", _xml_changes(ido, "Update", {**key, **values}), write=True)
+        raw = self._call("save", _dataset(ido, "Update", {**key, **values}, key), *SAVE_TAIL, write=True)
         err = row_error(raw)
         if err:
             raise ErpRejected(err)
@@ -150,10 +158,88 @@ class SoapIdoClient:
 
 
 
-# -- XML helpers (shape assumed, see module docstring) -----------------------------------
-def _xml_changes(ido, action, values):
-    props = "".join(f"<{k}>{escape(str(v))}</{k}>" for k, v in values.items())
-    return f"<IDOChanges><{ido} Action=\"{action}\">{props}</{ido}></IDOChanges>"
+# -- XML helpers --------------------------------------------------------------------------
+# The real WSDL (confirmed): SaveDataSet(strSessionToken, updateDataSet: {schema, _value_1: ANY}, refreshAfterSave: boolean,
+# strCustomInsert, strCustomUpdate, strCustomDelete). updateDataSet is a .NET DataSet: an XML schema, then a diffgram.
+# ASSUMPTION (UNCONFIRMED against the live service): the row layout inside it (the standard DataSet diffgram, the table
+# named after the IDO; an update carries the key columns in a `diffgr:before` row). Only this function builds it.
+SAVE_TAIL = (True, "", "", "")  # refreshAfterSave, strCustomInsert, strCustomUpdate, strCustomDelete
+
+XS = "http://www.w3.org/2001/XMLSchema"
+MSDATA = "urn:schemas-microsoft-com:xml-msdata"
+DIFFGR = "urn:schemas-microsoft-com:xml-diffgram-v1"
+
+
+def _enable_dataset_render():
+    """zeep can read an `<s:element ref="s:schema"/>` part (every DataSet type of the real WSDL has one) but cannot write
+    it: sending a DataSet fails with "'Schema' object has no attribute 'render'". Teach it to write the element it is given."""
+    from zeep.xsd.elements import builtins
+
+    if getattr(builtins.Schema, "_dataset_render", False):
+        return
+
+    def render(self, parent, value, render_path=None):
+        if value is not None:
+            parent.append(value)
+
+    builtins.Schema.render = render
+    builtins.Schema.min_occurs = builtins.Schema.max_occurs = 1
+    builtins.Schema._dataset_render = True
+
+
+def _dataset(ido, action, values, key=None):
+    """The `updateDataSet` argument: {"schema": <xs:schema>, "_value_1": <diffgr:diffgram>} for one row of `ido`."""
+    from lxml import etree
+
+    cols = list(values)
+    ns = {"xs": XS, "msdata": MSDATA, "diffgr": DIFFGR}
+    schema = etree.Element(f"{{{XS}}}schema", nsmap=ns, id="DataSet")
+    root = etree.SubElement(schema, f"{{{XS}}}element", name="DataSet")
+    root.set(f"{{{MSDATA}}}IsDataSet", "true")
+    table = etree.SubElement(etree.SubElement(etree.SubElement(root, f"{{{XS}}}complexType"), f"{{{XS}}}choice",
+                                              minOccurs="0", maxOccurs="unbounded"), f"{{{XS}}}element", name=ido)
+    seq = etree.SubElement(etree.SubElement(table, f"{{{XS}}}complexType"), f"{{{XS}}}sequence")
+    for c in cols:
+        etree.SubElement(seq, f"{{{XS}}}element", name=c, type="xs:string", minOccurs="0")
+
+    diffgram = etree.Element(f"{{{DIFFGR}}}diffgram", nsmap={"msdata": MSDATA, "diffgr": DIFFGR})
+    data = etree.SubElement(diffgram, "DataSet")
+
+    def row(parent, props, **attrs):
+        el = etree.SubElement(parent, ido)
+        for name, val in attrs.items():
+            el.set(f"{{{DIFFGR if name != 'rowOrder' else MSDATA}}}{name}", val)
+        for k, v in props.items():
+            etree.SubElement(el, k).text = str(v)
+
+    if action == "Insert":
+        row(data, values, id=f"{ido}1", rowOrder="0", hasChanges="inserted")
+    else:
+        row(data, values, id=f"{ido}1", rowOrder="0", hasChanges="modified")
+        row(etree.SubElement(diffgram, f"{{{DIFFGR}}}before"), key or {}, id=f"{ido}1", rowOrder="0")
+    return {"schema": schema, "_value_1": diffgram}
+
+
+class Fault(Exception):
+    """A SOAP fault read from a raw response (the name is what `_call` classifies on, as for zeep's own Fault)."""
+
+
+def _dataset_result(response):
+    """The rows of a raw SOAP response holding a DataSet result, as one XML string (the schema part is dropped)."""
+    from lxml import etree
+
+    body = etree.fromstring(response.content).find("{http://schemas.xmlsoap.org/soap/envelope/}Body")
+    if body is None:
+        response.raise_for_status()
+        raise Fault("response without a SOAP body")
+    fault = body.find("{http://schemas.xmlsoap.org/soap/envelope/}Fault")
+    if fault is not None:
+        raise Fault((fault.findtext("faultstring") or "SOAP fault").strip())
+    response.raise_for_status()
+    result = body[0][0] if len(body) and len(body[0]) else None
+    parts = [etree.tostring(c, encoding="unicode") for c in (result if result is not None else [])
+             if isinstance(c.tag, str) and etree.QName(c).localname != "schema"]
+    return "<DataSet>" + "".join(parts) + "</DataSet>"
 
 
 def _root(raw):

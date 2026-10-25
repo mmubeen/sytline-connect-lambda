@@ -194,6 +194,8 @@ class ErpMock:
                     index[name] = len(out)
                     out.append([])
                 out[index[name]].append(el.text or "")
+            elif name == "updateDataSet":
+                out.append(el)  # the DataSet itself (schema + diffgram)
             else:
                 out.append(ErpMock._arg(el))
         return out
@@ -208,7 +210,7 @@ class ErpMock:
         """What the call log keeps: names and values, never the password or the session token."""
         out = {}
         for name, c in args:
-            value = "***" if name in ("password", "sessionToken") else (c.text if len(c) == 0 else "[list]")
+            value = "***" if name in ("password", "sessionToken", "strSessionToken") else (c.text if len(c) == 0 else "[list]")
             out[name] = out[name] + [value] if name == "parameters" and name in out else \
                 ([value] if name == "parameters" else value)
         return out
@@ -249,23 +251,26 @@ class ErpMock:
                 raise SoapFault(str(exc))
         return rows
 
-    def _save(self, changes):
+    def _save(self, dataset):
+        """The rows of a SaveDataSet DataSet (diffgram rows marked inserted or modified) -> the saved rows, as a DataSet."""
         if self.faults.take("erp.row_rejected"):
             self._row_fault = "erp.row_rejected"  # _soap records the one call with this fault
-            return '<IDOChanges><Row Error="Row rejected by the mock ERP (erp.row_rejected)"/></IDOChanges>'
+            return _dataset_xml('<Row diffgr:hasErrors="true" diffgr:Error="Row rejected by the mock ERP (erp.row_rejected)"/>')
         out = []
-        for el in etree.fromstring(changes.encode("utf-8")):
-            ido, action = etree.QName(el).localname, el.get("Action")
+        for el in dataset.iter():
+            change = el.get(f"{{{DIFFGR}}}hasChanges")
+            if change not in ("inserted", "modified") or any(
+                    etree.QName(a).localname == "before" for a in el.iterancestors() if isinstance(a.tag, str)):
+                continue
+            ido = etree.QName(el).localname
             values = {etree.QName(c).localname: (c.text or "") for c in el}
-            if action == "Insert":
+            if change == "inserted":
                 stored = self._add(ido, values)
-            elif action == "Update":
+            else:
                 stored = self._best_match(ido, values)
                 stored.update(values)
-            else:
-                raise SoapFault(f"unsupported action {action}")
             out.append(_row_xml(ido, stored))
-        return "<IDOChanges>" + "".join(out) + "</IDOChanges>"
+        return _dataset_xml("".join(out))
 
     def _best_match(self, ido, values):
         best, score = None, 0
@@ -301,6 +306,18 @@ def _row_xml(ido, row):
     return f"<{ido}>" + "".join(f"<{k}>{escape(str(v))}</{k}>" for k, v in row.items()) + f"</{ido}>"
 
 
+DIFFGR = "urn:schemas-microsoft-com:xml-diffgram-v1"
+
+
+class Raw(str):
+    """A result that is already XML: _envelope puts it in as is."""
+
+
+def _dataset_xml(rows):
+    return Raw('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" id="DataSet"/>'
+               f'<diffgr:diffgram xmlns:diffgr="{DIFFGR}"><DataSet xmlns="">{rows}</DataSet></diffgr:diffgram>')
+
+
 def _rows_xml(ido, rows):
     return "<DataSet>" + "".join(_row_xml(ido, r) for r in rows) + "</DataSet>"
 
@@ -310,7 +327,7 @@ def _envelope(op, result):
     if isinstance(value, list):
         inner = "".join(f"<string>{escape(x)}</string>" for x in value)
     else:
-        inner = escape(value)
+        inner = value if isinstance(value, Raw) else escape(value)
     xml = ('<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">'
            f'<soap:Body><{op}Response xmlns="{NS}"><{name}>{inner}</{name}></{op}Response></soap:Body></soap:Envelope>')
     return Response(xml, 200, {"Content-Type": "text/xml; charset=utf-8"})

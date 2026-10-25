@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Mock of the SyteLine IDO web service (specs/008): only the four operations src/syteline/client.py uses.
+     SaveDataSet has the real signature (a DataSet: schema + any); the other operations are still simplified.
      Names and shapes follow the assumptions in client.py; confirm against the real WSDL during discovery (T013 of feature 001).
      `parameters` is a repeated string element on purpose: with a wrapper type (ArrayOfString) zeep silently sends NO
      parameters when handed a plain list, which would hide a real problem if the production WSDL has that shape
@@ -32,11 +33,17 @@
       </s:sequence></s:complexType></s:element>
 
       <s:element name="SaveDataSet"><s:complexType><s:sequence>
-        <s:element minOccurs="0" name="sessionToken" type="s:string"/>
-        <s:element minOccurs="0" name="changes" type="s:string"/>
+        <s:element minOccurs="0" name="strSessionToken" type="s:string"/>
+        <s:element minOccurs="0" name="updateDataSet"><s:complexType><s:sequence>
+          <s:element ref="s:schema"/><s:any/></s:sequence></s:complexType></s:element>
+        <s:element name="refreshAfterSave" type="s:boolean"/>
+        <s:element minOccurs="0" name="strCustomInsert" type="s:string"/>
+        <s:element minOccurs="0" name="strCustomUpdate" type="s:string"/>
+        <s:element minOccurs="0" name="strCustomDelete" type="s:string"/>
       </s:sequence></s:complexType></s:element>
       <s:element name="SaveDataSetResponse"><s:complexType><s:sequence>
-        <s:element minOccurs="0" name="SaveDataSetResult" type="s:string"/>
+        <s:element minOccurs="0" name="SaveDataSetResult"><s:complexType><s:sequence>
+          <s:element ref="s:schema"/><s:any/></s:sequence></s:complexType></s:element>
       </s:sequence></s:complexType></s:element>
 
       <s:complexType name="ArrayOfString"><s:sequence>
