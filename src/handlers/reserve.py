@@ -49,7 +49,7 @@ def _body(item, duplicate):
         out["failure"] = item.get("failure") or {"code": errors.UNCERTAIN_OUTCOME,
                                                  "message": "the reservation never finished", "step": "reserve"}
         consumed = [{"kind": "job", "line": j["line"], "number": j["job"]} for j in report["jobs"]
-                    if j["source"] != "document"]  # a number the document supplied was not consumed here
+                    if j["source"] == "allocated"]  # a number the document or JOB_NUMBER gave was not consumed here
         if report["co_num"]:
             consumed.insert(0, {"kind": "co", "number": report["co_num"]})
         if consumed:

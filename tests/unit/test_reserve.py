@@ -255,3 +255,27 @@ def test_the_same_job_number_on_two_lines_is_not_checked_here(live_writes, fake_
     out, _, _ = go()
     assert out["reservation"]["state"] == rs.RESERVED
     assert [j["job"] for j in out["reservation"]["job_numbers"]][:2] == ["J1", "J1"]
+
+
+# ---- JOB_NUMBER: a fixed job number for tests (deploy.env) ------------------------------------------------------------
+def test_a_configured_job_number_is_used_for_every_line_and_nothing_is_allocated(live_writes, monkeypatch):
+    monkeypatch.setenv("JOB_NUMBER", "TEST-001")
+    out, soap, _ = go()
+    jobs = out["reservation"]["job_numbers"]
+    assert [(j["job"], j["source"]) for j in jobs] == [("TEST-001", "configured")] * 3
+    assert soap.calls.count(("invoke", "NextWOSp")) == 0 and soap.calls.count(("invoke", "NextCoSp")) == 1
+
+
+def test_a_configured_job_number_wins_over_the_documents_own(live_writes, monkeypatch, fake_idp):
+    doc_with_jobs(fake_idp, [None, "J-77", None])
+    monkeypatch.setenv("JOB_NUMBER", "TEST-001")
+    out, soap, _ = go()
+    assert [j["job"] for j in out["reservation"]["job_numbers"]] == ["TEST-001"] * 3
+    assert soap.calls.count(("invoke", "NextWOSp")) == 0
+
+
+def test_an_empty_job_number_setting_changes_nothing(live_writes, monkeypatch):
+    monkeypatch.setenv("JOB_NUMBER", "  ")
+    out, soap, _ = go()
+    assert [j["source"] for j in out["reservation"]["job_numbers"]] == ["allocated"] * 3
+    assert soap.calls.count(("invoke", "NextWOSp")) == 3

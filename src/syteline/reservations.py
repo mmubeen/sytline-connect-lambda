@@ -219,7 +219,7 @@ def numbers_report(item, now):
         else:  # partly_saved: the failed line's rows were proven absent, later lines were never attempted
             usage = "consumed_unused"
         source = entry.get("source", "allocated")  # entries stored before the optional job number have none
-        if source == "document" and usage == "consumed_unused":
-            usage = "supplied_not_saved"  # this service did not consume a number the document brought
+        if source != "allocated" and usage == "consumed_unused":
+            usage = "supplied_not_saved"  # this service did not consume a number the document (or JOB_NUMBER) brought
         jobs.append({"line": line, "job": str(entry["job"]), "source": source, "usage": usage})
     return {"co_num": item.get("co_num"), "jobs": jobs}

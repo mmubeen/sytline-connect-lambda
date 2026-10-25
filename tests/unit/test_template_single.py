@@ -268,3 +268,11 @@ def test_log_events_is_an_opt_in_parameter_off_by_default_and_reaches_the_functi
 def test_the_entry_log_adds_no_permission_and_no_resource(template):
     assert len(of_type(template, "AWS::Serverless::Function")) == 1
     assert not any("logs:" in str(s) for s in fn(template)["Policies"])
+
+
+def test_job_number_is_an_empty_by_default_test_parameter_that_reaches_the_function(template):
+    p = template["Parameters"]["JobNumber"]
+    assert p["Default"] == "" and "TEST" in p["Description"]
+    import re
+    assert re.match(p["AllowedPattern"], "") and re.match(p["AllowedPattern"], "TEST-001") and not re.match(p["AllowedPattern"], "a b")
+    assert env(template)["JOB_NUMBER"] == {"Ref": "JobNumber"}

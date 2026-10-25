@@ -487,3 +487,20 @@ def test_log_events_true_is_passed_with_a_warning_about_what_the_logs_will_hold(
 def test_log_events_must_be_true_or_false(run):
     p, calls = run({**BASE, **NET, "LOG_EVENTS": "maybe"})
     assert p.returncode != 0 and "LOG_EVENTS must be true or false" in (p.stdout + p.stderr) and not deployed(calls)
+
+
+# ---- JOB_NUMBER: a fixed job number for tests ---------------------------------------------------------------------------
+def test_job_number_defaults_to_empty_and_is_always_passed(run):
+    p, calls = run({**BASE, **NET})
+    assert p.returncode == 0 and overrides(calls)["JobNumber"] == "" and "JOB_NUMBER=" not in p.stdout
+
+
+def test_job_number_is_passed_with_a_warning(run):
+    p, calls = run({**BASE, **NET, "JOB_NUMBER": "TEST-001"})
+    assert p.returncode == 0 and overrides(calls)["JobNumber"] == "TEST-001"
+    assert "JOB_NUMBER=TEST-001" in p.stdout and "no new one is allocated" in p.stdout
+
+
+def test_job_number_must_be_a_plain_identifier(run):
+    p, calls = run({**BASE, **NET, "JOB_NUMBER": "a b"})
+    assert p.returncode != 0 and "JOB_NUMBER must be empty or" in (p.stdout + p.stderr) and not deployed(calls)

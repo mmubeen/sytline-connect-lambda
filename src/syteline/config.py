@@ -50,6 +50,11 @@ def _read_secret(arn):
         raise SecretStoreUnavailable(f"{SECRET_PATH_HINT} ({type(exc).__name__})") from None
 
 
+def fixed_job_number():
+    """JOB_NUMBER (deploy.env): a TEST setting. When set, every reserved line uses this job number and no new one is allocated."""
+    return os.environ.get("JOB_NUMBER", "").strip()
+
+
 def live_writes_enabled():
     """True only when SYTELINE_LIVE_WRITES is explicitly on. Default: off (FR-016)."""
     return truthy(os.environ.get("SYTELINE_LIVE_WRITES", "false"))

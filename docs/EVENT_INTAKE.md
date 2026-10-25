@@ -41,6 +41,10 @@ A line item of the document may carry its own job number. Map it with `IDP_FIELD
 - It is read like any other field the save uses: below its confidence threshold and not reviewed, the document is refused (`DOCUMENT_NEEDS_REVIEW`) and nothing is reserved.
 - **A supplied number is not checked**, neither against the ERP nor against the other lines. If the ERP rejects the job (for example the number is already in use), the order ends `needs_reconciliation` after the CO header and earlier lines were written; nothing is retried or removed. Follow [reconciliation-runbook.md](reconciliation-runbook.md). A supplied number whose line was not saved is reported with usage `supplied_not_saved` (this service did not consume it).
 
+### `JOB_NUMBER` in `deploy.env` (test only)
+
+`JOB_NUMBER=TEST-001` (up to 20 letters, digits, `-`, `_`) makes **every line of every reservation** use that job number: no `NextWOSp` call, `"source": "configured"` in the response, and it wins over a job number the document carries. A PO with several lines gets the same number on each line and the ERP rejects the second job, so use it with single-line documents. Leave it empty (the default) outside a test; `deploy.sh` prints a warning while it is set.
+
 ## Outcomes
 
 | `outcome` | Meaning | Anything reserved or written? |

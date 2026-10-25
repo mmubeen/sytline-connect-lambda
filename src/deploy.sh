@@ -173,6 +173,10 @@ fi
 if [[ "${LOG_EVENTS:-false}" == "true" ]]; then
   echo "WARNING: LOG_EVENTS=true: the function logs the WHOLE incoming event, so its logs will hold document and order content (names, addresses, part numbers). Turn it off (LOG_EVENTS=false) and redeploy when you have finished debugging."
 fi
+[[ "${JOB_NUMBER:-}" =~ ^[A-Za-z0-9_-]{0,20}$ ]] || die "JOB_NUMBER must be empty or up to 20 letters, digits, - or _"
+if [[ -n "${JOB_NUMBER:-}" ]]; then
+  echo "WARNING: JOB_NUMBER=$JOB_NUMBER: every line of every reservation will use this job number and no new one is allocated. A PO with several lines gets the same number on each and the ERP will reject the second job. Empty it (JOB_NUMBER=) and redeploy when the test is over."
+fi
 if [[ "${SQL_ENCRYPT:-true}" == "false" ]]; then
   echo "WARNING: SQL_ENCRYPT=false: the database connection will be UNENCRYPTED; the database login and password cross the network unprotected."
 fi
@@ -260,6 +264,7 @@ overrides=(
   "$(q DefaultsIdo "${DEFAULTS_IDO:-database}")"
   "$(q SqlEncrypt "${SQL_ENCRYPT:-true}")"
   "$(q LogEvents "${LOG_EVENTS:-false}")"
+  "$(q JobNumber "${JOB_NUMBER:-}")"
   "$(q SqlVerifyHostname "${SQL_VERIFY_HOSTNAME:-true}")"
   "$(q SqlLoginTimeout "${SQL_LOGIN_TIMEOUT:-5}")"
   "$(q SqlTimeout "${SQL_TIMEOUT:-10}")"

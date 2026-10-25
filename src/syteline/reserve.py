@@ -86,9 +86,10 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source
         record(store.set_co_num, rid, co_num)
         jobs = []
         for i in range(1, len(details["lines"]) + 1):
-            job = details["lines"][i - 1].get("job")  # a job number the document carries is used, not allocated
+            fixed = config.fixed_job_number()  # JOB_NUMBER (a test setting) wins over the document's own number
+            job = fixed or details["lines"][i - 1].get("job")  # a job number given is used, not allocated
             if job:
-                source = "document"
+                source = "configured" if fixed else "document"
             else:
                 job, source = allocate("next_job", "job", f"number_job_{i}"), "allocated"
                 consumed.append({"kind": "job", "line": i, "number": job})

@@ -67,6 +67,15 @@ Parameters:
       content are replaced by their size). "true": the whole event is logged (cut at 8000 characters), so the logs then hold
       document and order content; use it to debug a payload and turn it off again. Credentials in headers are never logged.
 
+  JobNumber:
+    Type: String
+    Default: ""
+    AllowedPattern: "^[A-Za-z0-9_-]{0,20}$"
+    Description: >-
+      TEST setting. Empty (default): job numbers are allocated by the ERP (or taken from the document's own job_number field).
+      A value: every line of every reservation uses this job number and no new one is allocated. A PO with several lines then
+      gives them all the same number and the ERP rejects the second job. Leave empty outside a test.
+
   # --- Which route each ERP operation uses: an IDO name keeps it on the web service; `database` (or empty) uses the
   #     SyteLine database (the PO OCR demo's SQL calls). The database login lives in the ERP credentials secret. ---
   NextCoIdo:
@@ -350,6 +359,7 @@ Resources:
           SYTELINE_SECRET_ARN: !Ref SytelineSecretArn
           SYTELINE_LIVE_WRITES: !Ref LiveWrites
           LOG_EVENTS: !Ref LogEvents
+          JOB_NUMBER: !Ref JobNumber
           SYTELINE_NEXT_CO_IDO: !Ref NextCoIdo
           SYTELINE_NEXT_JOB_IDO: !Ref NextJobIdo
           SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo
