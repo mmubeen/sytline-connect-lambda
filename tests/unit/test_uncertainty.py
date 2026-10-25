@@ -57,7 +57,7 @@ def test_timeout_before_storing_still_needs_reconciliation():
 
 
 def test_timeout_on_later_line_lists_everything_that_may_exist():
-    out, soap = go({("insert", "CCT_Coitems", 2): "timeout_after"})
+    out, soap = go({("insert", "SLCoitems", 2): "timeout_after"})
     assert out["state"] == "needs_reconciliation" and out["step"] == "create_line_2"
     assert out["possibly_written"] == [
         {"kind": "co", "key": "100"}, {"kind": "line", "key": "100/1"}, {"kind": "job", "key": "5000"},
@@ -68,11 +68,11 @@ def test_timeout_on_later_line_lists_everything_that_may_exist():
 def test_rejection_after_earlier_rows_is_needs_reconciliation_not_failed():
     out, soap = go({("insert", "CCTJobs", 1): "reject"})
     assert out["state"] == "needs_reconciliation" and out["code"] == "ERP_REJECTED"
-    assert soap.count("SLCos") == 1 and soap.count("CCT_Coitems") == 1  # left in place for a person
+    assert soap.count("SLCos") == 1 and soap.count("SLCoitems") == 1  # left in place for a person
 
 
 def test_unreachable_after_earlier_rows_is_needs_reconciliation():
-    out, _ = go({("insert", "CCT_Coitems", 1): "unreachable"})
+    out, _ = go({("insert", "SLCoitems", 1): "unreachable"})
     assert out["state"] == "needs_reconciliation" and out["possibly_written"] == [{"kind": "co", "key": "100"}]
 
 
@@ -81,7 +81,7 @@ def test_readback_failure_is_needs_reconciliation_with_all_records():
     assert out["state"] == "needs_reconciliation" and out["step"] == "read_back" and len(out["possibly_written"]) == 3
 
 
-@pytest.mark.parametrize("corrupt", [{("CCT_Coitems", "QtyOrdered"): "99"}, {("CCT_Coitems", "Item"): "WRONG"},
+@pytest.mark.parametrize("corrupt", [{("SLCoitems", "QtyOrdered"): "99"}, {("SLCoitems", "Item"): "WRONG"},
                                      {("SLCos", "CustNum"): "OTHER"}])
 def test_readback_mismatch_is_needs_reconciliation(corrupt):
     out, _ = go(n=1, corrupt=corrupt)

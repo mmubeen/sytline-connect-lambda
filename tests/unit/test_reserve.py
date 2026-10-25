@@ -46,7 +46,7 @@ def test_numbers_come_back_in_line_order_and_nothing_else_is_written(live_writes
     assert item["customer_match"] == {"cust_num": "C1", "cust_seq": 0}
     assert [c for c in soap.writes() if c[0] != "invoke"] == []  # no insert, no update: only number routines
     assert soap.calls.count(("invoke", "NextCoSp")) == 1 and soap.calls.count(("invoke", "NextWOSp")) == 3
-    assert not any(soap.rows.get(i) for i in ("SLCos", "CCT_Coitems", "CCTJobs"))
+    assert not any(soap.rows.get(i) for i in ("SLCos", "SLCoitems", "CCTJobs"))
 
 
 @pytest.mark.parametrize("customers,code", [([], errors.CUSTOMER_NOT_FOUND),

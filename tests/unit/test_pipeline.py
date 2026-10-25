@@ -25,8 +25,8 @@ def test_happy_path_order_and_readback(live_writes):
     assert out["lines"] == [{"line": 1, "job": "5000"}, {"line": 2, "job": "5001"}]
     kinds = [(c[0], c[1]) for c in soap.calls if c[0] in ("insert", "invoke")]
     assert kinds == [("invoke", "NextCoSp"), ("insert", "SLCos"),
-                     ("invoke", "NextWOSp"), ("insert", "CCT_Coitems"), ("insert", "CCTJobs"),
-                     ("invoke", "NextWOSp"), ("insert", "CCT_Coitems"), ("insert", "CCTJobs")]
+                     ("invoke", "NextWOSp"), ("insert", "SLCoitems"), ("insert", "CCTJobs"),
+                     ("invoke", "NextWOSp"), ("insert", "SLCoitems"), ("insert", "CCTJobs")]
     first_write = soap.calls.index(("invoke", "NextCoSp"))
     assert all(c == ("load", "SLCustAddrs") or c[0] != "load" for c in soap.calls[:first_write])  # only the lookup precedes
     reads = [c for c in soap.calls[soap.calls.index(("insert", "CCTJobs")):] if c[0] == "load"]
@@ -42,7 +42,7 @@ def test_request_overrides_defaults_and_teardown_is_written(live_writes):
     out, soap = run(r)
     assert out["state"] == "succeeded"
     assert (soap.rows["CCTJobs"][0]["Whse"], soap.rows["CCTJobs"][0]["OrdType"]) == ("W9", "S")
-    assert soap.rows["CCT_Coitems"][0]["Teardown"] == "TD-7"
+    assert soap.rows["SLCoitems"][0]["Teardown"] == "TD-7"
 
 
 def test_live_writes_off_stops_after_the_lookup_with_no_write_attempt():
@@ -108,7 +108,7 @@ def test_the_upload_takes_its_numbers_from_the_database_and_writes_rows_through_
     assert out["lines"] == [{"line": 1, "job": "5000"}, {"line": 2, "job": "5001"}]
     assert f.committed == [100, 5000, 5001] and f.opened == f.closed == 1
     assert [c[1] for c in soap.calls if c[0] == "invoke"] == []  # no numbering call to the web service
-    assert [c[1] for c in soap.calls if c[0] == "insert"] == ["SLCos", "CCT_Coitems", "CCTJobs", "CCT_Coitems", "CCTJobs"]
+    assert [c[1] for c in soap.calls if c[0] == "insert"] == ["SLCos", "SLCoitems", "CCTJobs", "SLCoitems", "CCTJobs"]
 
 
 def test_an_unknown_database_outcome_for_the_first_number_is_failed_with_the_uncertain_code(monkeypatch, db_numbers,
@@ -134,7 +134,7 @@ def test_missing_database_settings_fail_the_upload_before_anything_is_written(mo
 
 def test_the_database_connection_is_closed_when_the_upload_ends_in_any_state(monkeypatch, db_numbers, live_writes):
     f = FakeSqlServer().install(monkeypatch)
-    soap = FakeSoap(customers=CUST, scenarios={("insert", "CCT_Coitems", 1): "timeout_after"})
+    soap = FakeSoap(customers=CUST, scenarios={("insert", "SLCoitems", 1): "timeout_after"})
     out, _ = run_db(soap=soap)
     assert out["state"] == "needs_reconciliation" and f.opened == f.closed == 1
 

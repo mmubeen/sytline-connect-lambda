@@ -53,7 +53,7 @@ def test_every_missing_name_is_reported_together_and_nothing_is_reserved(live_wr
     out = run_reserve({"request_ref": "r1", "confirmed": True, "uploaded_by": "u", "document_id": DOC}, soap, store, "arn")
     f = out["failure"]
     assert f["code"] == errors.ERP_PROPERTIES_UNKNOWN and f["step"] == "check_properties"
-    assert "CCT_Coitems: CoNum, CoLine" in f["message"] and "CCTJobs: OrdNum" in f["message"] and "probe_properties" in f["message"]
+    assert "SLCoitems: CoNum, CoLine" in f["message"] and "CCTJobs: OrdNum" in f["message"] and "probe_properties" in f["message"]
     assert [m["property"] for m in out["missing_properties"][idos.LINE_IDO]] == ["CoNum", "CoLine"]
     assert out["reservation"]["state"] == rs.FAILED and out["reservation"]["job_numbers"] == [] and "consumed_unused" not in out
     assert soap.writes() == [] and not [c for c in soap.calls if c[0] == "invoke"]  # no number was consumed
@@ -98,4 +98,4 @@ def test_a_save_is_refused_before_the_order_header_is_written(live_writes):
            "lines": [{"item": "A", "quantity": 1, "uom": "EA"}]}
     out = savewf.run_save(res, req, soap, CFG)
     assert out["state"] == "failed" and out["code"] == errors.ERP_PROPERTIES_UNKNOWN and out["step"] == "check_properties"
-    assert soap.writes() == [] and "CCT_Coitems: CoNum" in out["message"]
+    assert soap.writes() == [] and "SLCoitems: CoNum" in out["message"]

@@ -41,12 +41,17 @@ class SaveRun(Upload):
 
     # -- steps -----------------------------------------------------------------------------
     def _teardown(self, i, value):
-        """Set the line's teardown date (a separate update, as in the demo). A definite rejection is a warning;
-        anything else leaves the outcome unknown and stops the run."""
+        """Set the line's teardown date (a separate update, as in the demo) when a property for it is configured. A definite
+        rejection is a warning; anything else leaves the outcome unknown and stops the run."""
+        prop = idos.line_teardown_prop()
+        if not prop:
+            self.results[i - 1]["warnings"].append(
+                f"teardown date not written: no line property is configured for it ({idos.LINE_TEARDOWN_SETTING})")
+            return
         step = f"teardown_{i}"
         self._time(step)
         try:
-            self.soap.update(LINE_IDO, {"CoNum": self.co_num, "CoLine": i}, {idos.LINE_TEARDOWN_PROP: value})
+            self.soap.update(LINE_IDO, {"CoNum": self.co_num, "CoLine": i}, {prop: value})
         except ErpRejected as exc:
             self.results[i - 1]["warnings"].append(f"teardown date not set: {exc}")
         except LiveWritesDisabled:

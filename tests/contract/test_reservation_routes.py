@@ -440,7 +440,7 @@ def test_status_accepted_save_has_empty_lines_until_the_run_records_some(full, l
 
 def test_status_needs_reconciliation_and_partly_saved(full, live_writes):
     (store, soap, _), worker = full
-    soap.scenarios[("insert", "CCT_Coitems", 2)] = "reject"
+    soap.scenarios[("insert", "SLCoitems", 2)] = "reject"
     rid = reserved((store, soap, None))
     call(save_intake.handler, sevent(rid, sbody()))
     worker.work_save({"reservation_id": rid}, None)

@@ -35,8 +35,8 @@ def test_happy_path_order_links_and_per_line_results(live_writes):
     req["lines"][0].update(teardown="2026-10-25", engine_sn="E1", serial_num="S1", packing="BOX")
     out, soap = go(req=req)
     assert out["state"] == "succeeded" and out["co_num"] == "100"
-    assert kinds(soap) == [("insert", "SLCos"), ("insert", "CCT_Coitems"), ("update", "CCT_Coitems"),
-                           ("insert", "CCTJobs"), ("insert", "CCT_Coitems"), ("insert", "CCTJobs")]
+    assert kinds(soap) == [("insert", "SLCos"), ("insert", "SLCoitems"), ("update", "SLCoitems"),
+                           ("insert", "CCTJobs"), ("insert", "SLCoitems"), ("insert", "CCTJobs")]
     assert not any(c == ("invoke", "NextWOSp") or c == ("invoke", "NextCoSp") for c in soap.calls)  # FR-005
     assert out["results"] == [
         {"line": 1, "job": "5000", "item": "I0", "status": "saved", "warnings": [], "co_line": 1},
@@ -44,7 +44,7 @@ def test_happy_path_order_links_and_per_line_results(live_writes):
     head = soap.rows["SLCos"][0]
     assert head["CustNum"] == "C1" and head[idos.CO_HEADER_PROPS["cust_po"]] == "PO-1"
     assert head["OrderDate"] == "2026-10-20" and "DateReceived" not in head  # SLCos has no received-date property
-    line1 = soap.rows["CCT_Coitems"][0]
+    line1 = soap.rows["SLCoitems"][0]
     assert line1[idos.LINE_LINK_PROPS["ref_num"]] == "5000" and line1[idos.LINE_LINK_PROPS["ref_type"]] == "J"
     assert line1[idos.LINE_TEARDOWN_PROP] == "2026-10-25"  # set by the separate update
     job1 = soap.rows["CCTJobs"][0]
@@ -63,7 +63,7 @@ def test_readback_follows_the_last_write_and_covers_header_lines_and_jobs(live_w
 
 
 def test_a_missing_or_wrong_row_at_readback_is_needs_reconciliation(live_writes):
-    soap = FakeSoap(customers=CUST, corrupt={("CCT_Coitems", "Item"): "OTHER"})
+    soap = FakeSoap(customers=CUST, corrupt={("SLCoitems", "Item"): "OTHER"})
     out, _ = go(soap=soap)
     assert out["state"] == "needs_reconciliation" and out["code"] == errors.READBACK_MISMATCH
     assert all(r["status"] == "unverified" for r in out["results"])
@@ -71,7 +71,7 @@ def test_a_missing_or_wrong_row_at_readback_is_needs_reconciliation(live_writes)
 
 
 def test_a_line_that_does_not_reference_its_job_is_not_reported_saved(live_writes):
-    soap = FakeSoap(customers=CUST, corrupt={("CCT_Coitems", idos.LINK_NUM_PROP): "9999"})
+    soap = FakeSoap(customers=CUST, corrupt={("SLCoitems", idos.LINK_NUM_PROP): "9999"})
     out, _ = go(soap=soap)
     assert out["state"] == "needs_reconciliation" and out["code"] == errors.READBACK_MISMATCH
     assert any("reference its job" in w for r in out["results"] for w in r["warnings"])
@@ -86,7 +86,7 @@ def test_readback_failure_is_uncertain_not_success(live_writes):
 def test_teardown_rejection_is_a_warning_and_the_job_still_saves(live_writes):
     req = save_req(2)
     req["lines"][0]["teardown"] = "2026-10-25"
-    soap = FakeSoap(customers=CUST, scenarios={("update", "CCT_Coitems", 1): "reject"})
+    soap = FakeSoap(customers=CUST, scenarios={("update", "SLCoitems", 1): "reject"})
     out, soap = go(req=req, soap=soap)
     assert out["state"] == "succeeded"
     assert out["results"][0]["status"] == "saved" and "teardown date not set" in out["results"][0]["warnings"][0]
@@ -96,7 +96,7 @@ def test_teardown_rejection_is_a_warning_and_the_job_still_saves(live_writes):
 def test_teardown_with_an_unknown_outcome_stops_the_run(live_writes):
     req = save_req(2)
     req["lines"][0]["teardown"] = "x"
-    soap = FakeSoap(customers=CUST, scenarios={("update", "CCT_Coitems", 1): "timeout_after"})
+    soap = FakeSoap(customers=CUST, scenarios={("update", "SLCoitems", 1): "timeout_after"})
     out, soap = go(req=req, soap=soap)
     assert out["state"] == "needs_reconciliation" and out["code"] == errors.UNCERTAIN_OUTCOME
     assert out["step"] == "teardown_1" and soap.count("CCTJobs") == 0
@@ -105,7 +105,7 @@ def test_teardown_with_an_unknown_outcome_stops_the_run(live_writes):
 
 def test_no_teardown_means_no_update_call(live_writes):
     out, soap = go()
-    assert ("update", "CCT_Coitems") not in soap.calls
+    assert ("update", "SLCoitems") not in soap.calls
 
 
 def test_live_writes_off_fails_before_any_write():
@@ -118,7 +118,7 @@ def test_header_rejected_with_nothing_written_is_a_definite_failure(live_writes)
     soap = FakeSoap(customers=CUST, scenarios={("insert", "SLCos", 1): "reject"})
     out, soap = go(soap=soap)
     assert out["state"] == "failed" and out["code"] == errors.ERP_REJECTED and out["step"] == "create_co"
-    assert soap.count("CCT_Coitems") == 0
+    assert soap.count("SLCoitems") == 0
 
 
 def test_time_budget_exhausted_before_the_first_write_fails_cleanly(live_writes):
@@ -128,16 +128,16 @@ def test_time_budget_exhausted_before_the_first_write_fails_cleanly(live_writes)
 
 # ---- US3: failure classification (research.md R7) -------------------------------------------
 def test_rejected_line_after_saved_lines_is_partly_saved_when_its_rows_are_proven_absent(live_writes):
-    soap = FakeSoap(customers=CUST, scenarios={("insert", "CCT_Coitems", 2): "reject"})
+    soap = FakeSoap(customers=CUST, scenarios={("insert", "SLCoitems", 2): "reject"})
     out, soap = go(n=3, soap=soap)
     assert out["state"] == "partly_saved" and out["code"] == errors.ERP_REJECTED and out["step"] == "create_line_2"
     assert [r["status"] for r in out["results"]] == ["saved", "failed", "not_attempted"]
-    assert "rejected" in out["results"][1]["error"] and soap.count("CCT_Coitems") == 1 and soap.count("CCTJobs") == 1
+    assert "rejected" in out["results"][1]["error"] and soap.count("SLCoitems") == 1 and soap.count("CCTJobs") == 1
     assert "possibly_written" not in out
 
 
 def test_rejected_first_line_leaves_a_header_so_it_needs_reconciliation(live_writes):
-    soap = FakeSoap(customers=CUST, scenarios={("insert", "CCT_Coitems", 1): "reject"})
+    soap = FakeSoap(customers=CUST, scenarios={("insert", "SLCoitems", 1): "reject"})
     out, _ = go(soap=soap)
     assert out["state"] == "needs_reconciliation" and out["code"] == errors.ERP_REJECTED
     assert {"kind": "co", "key": "100"} in out["possibly_written"]
@@ -162,29 +162,29 @@ def test_rejection_whose_absence_cannot_be_proven_needs_reconciliation(live_writ
 
         read_back = load  # the fake aliases read_back to its own load
 
-    soap = NoReadsAfterLine2(customers=CUST, scenarios={("insert", "CCT_Coitems", 2): "reject"})
+    soap = NoReadsAfterLine2(customers=CUST, scenarios={("insert", "SLCoitems", 2): "reject"})
     out, _ = go(n=3, soap=soap)
     assert out["state"] == "needs_reconciliation" and out["code"] == errors.ERP_REJECTED
 
 
-@pytest.mark.parametrize("ido,nth", [("CCT_Coitems", 2), ("CCTJobs", 2)])
+@pytest.mark.parametrize("ido,nth", [("SLCoitems", 2), ("CCTJobs", 2)])
 @pytest.mark.parametrize("how", ["timeout_after", "timeout_before"])
 def test_unknown_outcome_is_never_classified_as_failed_or_retried(live_writes, ido, nth, how):
     soap = FakeSoap(customers=CUST, scenarios={("insert", ido, nth): how})
     out, soap = go(n=3, soap=soap)
     assert out["state"] == "needs_reconciliation" and out["code"] == errors.UNCERTAIN_OUTCOME
     assert soap.calls.count(("insert", "SLCos")) == 1  # nothing was repeated
-    assert soap.count("CCT_Coitems") <= 2 and not any(r["status"] == "saved" for r in out["results"][1:])
+    assert soap.count("SLCoitems") <= 2 and not any(r["status"] == "saved" for r in out["results"][1:])
 
 
 def test_no_failure_injection_removes_or_repeats_a_write(live_writes):
-    for scen in ({("insert", "CCT_Coitems", 2): "reject"}, {("insert", "CCTJobs", 1): "timeout_after"},
-                 {("update", "CCT_Coitems", 1): "timeout_after"}):
+    for scen in ({("insert", "SLCoitems", 2): "reject"}, {("insert", "CCTJobs", 1): "timeout_after"},
+                 {("update", "SLCoitems", 1): "timeout_after"}):
         req = save_req(3)
         req["lines"][0]["teardown"] = "t"
         out, soap = go(n=3, req=req, soap=FakeSoap(customers=CUST, scenarios=scen))
         assert soap.calls.count(("insert", "SLCos")) == 1 and soap.count("SLCos") == 1  # header written once
-        assert soap.calls.count(("update", "CCT_Coitems")) <= 1  # the teardown update is never repeated
+        assert soap.calls.count(("update", "SLCoitems")) <= 1  # the teardown update is never repeated
         assert not hasattr(soap, "delete")  # and the client has no way to remove a row
 
 
@@ -234,8 +234,8 @@ def test_missing_database_settings_are_only_a_warning_for_the_defaults(monkeypat
 
 def test_reading_the_defaults_does_not_change_the_order_of_erp_writes(monkeypatch, live_writes):
     out, soap = go_defaults(monkeypatch, FakeSqlServer(co_rows=CO_ROWS))
-    assert kinds(soap) == [("insert", "SLCos"), ("insert", "CCT_Coitems"), ("insert", "CCTJobs"),
-                           ("insert", "CCT_Coitems"), ("insert", "CCTJobs")]
+    assert kinds(soap) == [("insert", "SLCos"), ("insert", "SLCoitems"), ("insert", "CCTJobs"),
+                           ("insert", "SLCoitems"), ("insert", "CCTJobs")]
 
 
 def test_the_defaults_are_not_read_when_live_writes_are_off(monkeypatch):
@@ -256,7 +256,7 @@ def test_a_supplied_job_number_is_saved_like_any_reserved_one_without_a_numberin
     soap = FakeSoap(customers=CUST)
     out = savewf.run_save(supplied_reservation(), save_req(2), soap, CFG)
     assert out["state"] == "succeeded" and [r["job"] for r in out["results"]] == ["5000", "J-77"]
-    assert soap.rows["CCTJobs"][1]["Job"] == "J-77" and soap.rows["CCT_Coitems"][1][idos.LINE_LINK_PROPS["ref_num"]] == "J-77"
+    assert soap.rows["CCTJobs"][1]["Job"] == "J-77" and soap.rows["SLCoitems"][1][idos.LINE_LINK_PROPS["ref_num"]] == "J-77"
     assert not any(c[0] == "invoke" for c in soap.calls)
 
 

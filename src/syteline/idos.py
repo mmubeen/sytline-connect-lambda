@@ -11,7 +11,7 @@ import os
 
 # Confirmed by docs/COJobCreationIDOs.xlsx or the instruction sheet
 CO_IDO = "SLCos"
-LINE_IDO = "CCT_Coitems"  # named in the instruction sheet; not in the workbook
+LINE_IDO = "SLCoitems"  # in the workbook. (CCT_Coitems, named in the instruction sheet, has none of these properties in this ERP)
 JOB_IDO = "CCTJobs"
 NOTE_IDO = "SpecificNotes"
 OBJECT_NOTE_IDO = "ObjectNotes"
@@ -60,7 +60,14 @@ def received_date_prop():
 
 LINE_LINK_PROPS = {"ref_type": "RefType", "ref_num": "RefNum", "ref_line_suf": "RefLineSuf", "ref_release": "RefRelease"}
 LINK_NUM_PROP = LINE_LINK_PROPS["ref_num"]  # read back to confirm the line references its job
-LINE_TEARDOWN_PROP = "Teardown"  # set by a separate update after the line exists, as in the demo
+# The teardown date is set by a separate update after the line exists, as in the demo. SLCoitems has NO teardown property (the
+# workbook); the property that holds it, if any, is named by SYTELINE_LINE_TEARDOWN_PROP. Unset: the date is not written and the
+# line says so.
+LINE_TEARDOWN_SETTING = "SYTELINE_LINE_TEARDOWN_PROP"
+
+
+def line_teardown_prop():
+    return os.environ.get(LINE_TEARDOWN_SETTING) or None
 # The job's link back to its order is OrdNum / OrdLine (the workbook has no CoNum / CoLine on SLJobs or CCTJobs).
 JOB_LINK_PROPS = {"co_num": "OrdNum", "co_line": "OrdLine"}
 # RootJob, uf_eng_sn and uf_sn are confirmed by the workbook (CCTJobs); the property for `packing` is not in it (UNCONFIRMED).

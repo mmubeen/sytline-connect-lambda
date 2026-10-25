@@ -3,7 +3,7 @@ The upload sequence (instruction sheet section 4, adapted to FR-018: web service
 research.md R5/R6):
 
   resolve customer (read) -> [live-writes gate] -> NextCoSp (method call) -> insert SLCos
-  -> per line: NextWOSp (method call) -> insert CCT_Coitems -> insert CCTJobs -> read back and verify.
+  -> per line: NextWOSp (method call) -> insert SLCoitems -> insert CCTJobs -> read back and verify.
 
 Outcome classification (FR-004):
   failed                 - nothing can have been written (or the ERP rejected the very first row and
@@ -14,8 +14,8 @@ Outcome classification (FR-004):
   succeeded              - every row verified by read-back.
 
 ASSUMPTIONS (confirm with discovery task T013): the web-service names in idos.py, the property names
-written to SLCos / CCT_Coitems / CCTJobs and the way the teardown value is stored (here: property
-`Teardown` on CCT_Coitems). Verified only against fakes.
+written to SLCos / SLCoitems / CCTJobs and the way the teardown value is stored (here: the property named by
+SYTELINE_LINE_TEARDOWN_PROP, if any). Verified only against fakes.
 """
 
 import logging
@@ -191,8 +191,8 @@ class Upload:
                 job = self._allocate("next_job", "job", f"number_job_{i}")
                 vals = {"CoNum": self.co_num, "CoLine": i, "Item": ln["item"], "UM": ln["uom"],
                         "QtyOrdered": ln["quantity"]}
-                for src, dst in (("due_date", "DueDate"), ("price", "Price"), ("teardown", "Teardown")):
-                    if src in ln:
+                for src, dst in (("due_date", "DueDate"), ("price", "Price"), ("teardown", idos.line_teardown_prop())):
+                    if dst and src in ln:  # no teardown property configured: that date is not written
                         vals[dst] = ln[src]
                 self._insert(LINE_IDO, vals, "line", f"{self.co_num}/{i}", f"create_line_{i}")
                 self._insert(JOB_IDO, {
