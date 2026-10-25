@@ -162,4 +162,3 @@ The caller can ask for the state of a reservation and its save at any time: rese
 - The demo's last step, filing a copy of the scanned PO in a job folder on a network share, is out of scope: this service has no access to that share. The caller can do it using the returned job numbers.
 - The demo's reporting by customer number and per-line tracker are covered by the per-line results and status request, not by a separate audit file.
 - The existing one-step upload (feature 001) stays as it is; this workflow reuses its customer matching, safety states and verification rather than replacing them.
-- Whether this is delivered in the VPC version only or also in the stand-alone version follows how notes and upload are delivered there, and is decided at planning.

@@ -215,7 +215,6 @@ def test_no_warning_and_no_database_stage_when_no_operation_uses_the_database(en
     assert db_stages(out) == [] and UNENC_WARNING not in out.get("warnings", [])
 
 
-# ---- the stand-alone database check (revision 2026-10-22) -------------------------------------------------------
 # ---- the database probe of the diagnostics runs exactly when the stages would (spec FR-019) -----------------------------
 def stub_probes(monkeypatch):
     """Record which hosts the diagnostics probe, without any real lookup or connection."""

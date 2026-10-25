@@ -242,11 +242,6 @@ def test_the_outputs_name_the_one_function_the_api_and_the_table(template):
     assert set(template["Outputs"]) == {"DirectFunctionName", "FunctionArn", "ApiId", "JobsTableName", "AttachedVpcId"}
 
 
-def test_the_stand_alone_template_and_its_build_configuration_are_gone():
-    assert not os.path.exists(os.path.join(SRC, "template-standalone.yaml"))
-    assert "standalone" not in open(os.path.join(SRC, "samconfig.toml")).read().lower()
-
-
 def test_the_function_has_a_makefile_build_target_and_the_idp_sdk_is_packaged_from_a_checkout(template):
     makefile = open(os.path.join(SRC, "Makefile")).read()
     listed = set(re.search(r"^FUNCTIONS\s*=((?:.*\\\n)*.*)$", makefile, re.M).group(1).replace("\\", " ").split())

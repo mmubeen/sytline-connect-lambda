@@ -31,7 +31,7 @@ POLL ?= 5
 
 # stop early, with the fix, when containers cannot be started (before the slow build)
 containers:
-	@$(DOCKER_COMPOSE) version >/dev/null 2>&1 || { echo "ERROR: '$(DOCKER_COMPOSE)' does not work: the Compose tool is missing. Install it, e.g. Docker Desktop (includes it), or with Homebrew: brew install docker-compose, then link it as a Docker plugin: mkdir -p ~/.docker/cli-plugins && ln -sfn \"\$$(brew --prefix)/opt/docker-compose/bin/docker-compose\" ~/.docker/cli-plugins/docker-compose   (or just use the standalone one: make DOCKER_COMPOSE=docker-compose ...)" >&2; exit 2; }
+	@$(DOCKER_COMPOSE) version >/dev/null 2>&1 || { echo "ERROR: '$(DOCKER_COMPOSE)' does not work: the Compose tool is missing. Install it, e.g. Docker Desktop (includes it), or with Homebrew: brew install docker-compose, then link it as a Docker plugin: mkdir -p ~/.docker/cli-plugins && ln -sfn \"\$$(brew --prefix)/opt/docker-compose/bin/docker-compose\" ~/.docker/cli-plugins/docker-compose   (or just use the separate docker-compose program: make DOCKER_COMPOSE=docker-compose ...)" >&2; exit 2; }
 	@docker info >/dev/null 2>&1 || { echo "ERROR: the Docker daemon is not running (docker info fails): start Docker Desktop, or your runtime (for example: colima start)" >&2; exit 2; }
 
 deps:

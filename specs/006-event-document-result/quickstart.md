@@ -27,7 +27,6 @@ Set `IDP_STATE_MACHINE_ARN` in `deploy.env`, redeploy, upload a document to the 
 ## 8. One Lambda, `action` decides (revision)
 - `{"action": "health"}` runs the connectivity check as before; `{}` and `{"dry_run": true}` are refused `EVENT_INVALID` and the message says to pass `"action": "health"`.
 - `{"action": "document_event", "event": <the sample>}` and the raw sample give the same outcome; an unknown action gives `UNKNOWN_ACTION`.
-- Stand-alone function: `{"action": "document_event", ...}` gives `ACTION_UNAVAILABLE`.
 
 ## Entry log (FR-016)
 

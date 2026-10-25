@@ -98,7 +98,7 @@ def test_the_ca_certificate_is_required_only_while_encrypted(monkeypatch):
     assert config.sql_missing({}) == ["SQL_SERVER", "SQL_DATABASE", "SQL_USER", "SQL_PASS"]
 
 
-# ---- stand-alone database check (feature 005, revision 2026-10-22) -----------------------------------------
+# ---- event defaults ------------------------------------------------------------------------------------------
 def test_event_defaults_use_the_event_date_and_the_configured_warehouse_and_order_type(monkeypatch):
     monkeypatch.setenv("SYTELINE_DEFAULT_WHSE", "MAIN")
     monkeypatch.setenv("SYTELINE_DEFAULT_ORDTYPE", "R")

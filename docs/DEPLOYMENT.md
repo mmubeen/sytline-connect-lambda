@@ -9,7 +9,7 @@ to a VPC, subnets and security group(s) that already exist. The network and ERP 
 > The SyteLine web-service names (collections, methods, SOAP operations) are unconfirmed until the read-only
 > discovery task (T013 in `specs/001-syteline-erp-integration/tasks.md`) has run. **Keep live ERP writes off.**
 
-> **Moving from an earlier shape** (eight functions, a network created by the stack, or the stand-alone stack)? Read [MIGRATION.md](MIGRATION.md) **before** deploying.
+> **Moving from an earlier shape** (eight functions, a network created by the stack, or an older separate stack)? Read [MIGRATION.md](MIGRATION.md) **before** deploying.
 
 > Related: the job-number workflow [RESERVATIONS.md](RESERVATIONS.md), the IDP event intake [EVENT_INTAKE.md](EVENT_INTAKE.md), the SyteLine database calls [DATABASE.md](DATABASE.md), testing a deployment step by step [TESTING.md](TESTING.md).
 

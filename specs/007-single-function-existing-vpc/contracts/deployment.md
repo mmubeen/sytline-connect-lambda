@@ -12,7 +12,7 @@ Exactly one `AWS::Serverless::Function` (`<stack>-fn`, timeout 300 s, 256 MB, py
 | `ApiVpcEndpointId` | **no** (default empty = no API) | existing `execute-api` interface endpoint (`^$|^vpce-[0-9a-f]+$`) the private API is reachable through |
 | `SytelineWsdl`, `SytelineUser`, `SytelineSecretArn`, `SytelineConfig`, `DefaultWhse`, `DefaultOrdType`, `LiveWrites`, `UseFipsEndpoints` | as today | unchanged |
 | route, SQL, tuning and IDP parameters, `IdpStateMachineArn` | as today | unchanged |
-| removed | | `WorkerRouteTableIds`, `HostNetworkCidr`, `PlantCidr1..3`, `DynamoDbPrefixListId`, `CreateVpcEndpoints`, `CreateApiEndpoint`; stand-alone only: `SytelineWsdlHttps/Http`, `AllowPlainHttp`, `VerifyTls`, `Attach*`, `DatabaseCheck` |
+| removed | | `WorkerRouteTableIds`, `HostNetworkCidr`, `PlantCidr1..3`, `DynamoDbPrefixListId`, `CreateVpcEndpoints`, `CreateApiEndpoint`; also `SytelineWsdlHttps/Http`, `AllowPlainHttp`, `VerifyTls`, `Attach*`, `DatabaseCheck` |
 
 ## Outputs
 `DirectFunctionName`, `FunctionArn`, `ApiId`, `JobsTableName`, `AttachedVpcId`. Removed: the network handover outputs (`HostVpcId`, `HostSubnetIds`, …).
@@ -21,4 +21,4 @@ Exactly one `AWS::Serverless::Function` (`<stack>-fn`, timeout 300 s, 256 MB, py
 Required: `SYTELINE_WSDL`, `SYTELINE_USER`, `SYTELINE_SECRET_ARN`, `WORKER_VPC_ID`, `WORKER_SUBNET_IDS`, `WORKER_SG_IDS`. Optional: `API_VPCE_ID` (empty = no API). Optional as today: `AWS_PROFILE_NAME`, `SYTELINE_CONFIG`, `SYTELINE_DEFAULT_*`, `LIVE_WRITES` / `LIVE_APPROVAL_REF`, `USE_FIPS_ENDPOINTS`, the database login block and options, route and tuning settings, IDP settings, `IDP_STATE_MACHINE_ARN`. Removed settings found in the file: a notice names them; they are not passed.
 
 ## `deploy.sh`
-`./deploy.sh [--build|--validate|--profile NAME|--yes]`; no `--standalone`, no `--allow-network-change`. It refuses (before building) a missing or malformed network identifier, warns on a single subnet, merges the database login into the secret as before, and prints a notice when the existing stack still has the old functions (see docs/MIGRATION.md).
+`./deploy.sh [--build|--validate|--profile NAME|--yes]`; no `--allow-network-change` and no option for an alternate deployment. It refuses (before building) a missing or malformed network identifier, warns on a single subnet, merges the database login into the secret as before, and prints a notice when the existing stack still has the old functions (see docs/MIGRATION.md).

@@ -10,19 +10,16 @@
 
 ## Background
 
-The integration is deployed today in two shapes:
+The integration is deployed today as the **plant stack** (`src/template.yaml`): eight Lambda functions (the order upload and its status, the job-number reserve, save and reservation status, the background worker, the sweeper, and the direct-invoke function), a private API in front of five of them, a jobs table, and, unless the deployer supplies an existing network, a **new VPC** with subnets, a route table, security groups, egress rules and endpoints
 
-- the **plant stack** (`src/template.yaml`): eight Lambda functions (the order upload and its status, the job-number reserve, save and reservation status, the background worker, the sweeper, and the direct-invoke function), a private API in front of five of them, a jobs table, and, unless the deployer supplies an existing network, a **new VPC** with subnets, a route table, security groups, egress rules and endpoints; and
-- the **stand-alone stack** (`src/template-standalone.yaml`): one function that runs outside any VPC or, optionally, inside an existing one.
-
-Deployers have to choose between "create a network" and "use mine", between eight functions and one, and between two stacks. This feature removes those choices: **the deployment never creates any network resource, always runs inside a VPC, subnets and security group that already exist, and deploys exactly one Lambda function** that does everything the integration does today, with the request's `action` deciding what runs (as the direct-invoke function already does for the connectivity check, the notes and the document event intake).
+Deployers have to choose between "create a network" and "use mine", and the deployment has eight functions. This feature removes those choices: **the deployment never creates any network resource, always runs inside a VPC, subnets and security group that already exist, and deploys exactly one Lambda function** that does everything the integration does today, with the request's `action` deciding what runs (as the direct-invoke function already does for the connectivity check, the notes and the document event intake).
 
 ## Clarifications
 
 ### Session 2026-10-23
 
 - Q: Should the private API that fronts the upload, status, reserve, save and reservation-status requests stay? → A: Yes. It stays as the way callers reach those actions, with every route pointing at the one function and the same IAM authorisation. Its interface (an existing `execute-api` interface endpoint) is supplied by the deployer; the deployment no longer has an option to create it.
-- Q: Should the separate stand-alone stack be retired or kept? → A: Retired. There is one stack, one template and one settings file. The `--standalone` deployment, its template, its settings block and its tests go; an ERP that is reachable only from the internet (no VPC) is no longer served by this project.
+- Q: How many stacks, templates and settings files? → A: One of each. The function always runs in an existing VPC; an ERP that is reachable only from the internet (no VPC) is not served by this project.
 - Q: Must the deployer supply the `execute-api` endpoint? → A: No, it is optional. With an endpoint the private API is created as before; with none there is no API at all (no API, no routes, no permission for it), so a deployment that only uses direct invocation and the IDP event needs no endpoint.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -82,7 +79,7 @@ The properties the separate functions gave for free still hold: ERP writes are s
 - The existing network has no route to Secrets Manager or DynamoDB: the function cannot read its credentials or its table; the health check names the failing stage (as today), and the deployment documents what the network must provide, since it now creates none of it.
 - The subnets span fewer Availability Zones than the old created network (which used two): a single-subnet deployment is allowed, with a warning that it is not highly available.
 - The security group has no egress rule to the ERP or the database: the connectivity check fails at the right stage; the deployment does not add rules to a security group it does not own.
-- A deployment of the old plant stack (eight functions, network created) or of the old stand-alone stack is upgraded: see FR-009 and FR-010.
+- A deployment of the old plant stack (eight functions, network created) is upgraded: see FR-009 and FR-010.
 - The function's own time limit is shorter than the longest background save: the save must be able to run longer than a quick request (see FR-008).
 
 ## Requirements *(mandatory)*
@@ -94,13 +91,13 @@ The properties the separate functions gave for free still hold: ERP writes are s
 - **FR-003**: A deployment MUST create exactly one Lambda function. Supporting resources that are not network resources and not functions (the jobs table, the function's role, the dependency layer, an event rule for the cleanup schedule, and the optional rule for the document event) are allowed.
 - **FR-004**: The one function MUST carry out every action that exists today, selected by `action`, with unchanged inputs and outputs: `health`, `add_note`, `get_notes`, `document_event`, the confirmed-order upload and its status, the reservation, the save and the reservation status, the background save, and the cleanup. An unknown action MUST be refused as today.
 - **FR-005**: When an existing `execute-api` interface endpoint is supplied, the private API MUST be created and remain the way callers reach the confirmed-order upload and its status and the job-number reservation, save and reservation status, with every route handled by the one function, the same paths, methods, IAM authorisation and request and response bodies as today. The endpoint is supplied by the deployer; the deployment MUST NOT create one (FR-001). The endpoint is OPTIONAL: when none is supplied, no API (and nothing that belongs to it) MUST be created, and the function is reached by direct invocation, the IDP event and its own schedule only. Changing the setting later adds or removes the API without touching the function or the jobs table.
-- **FR-006**: The stand-alone deployment MUST be retired: no second template, no `--standalone` option, no stand-alone settings block, and no stand-alone tests. Its behaviours that only made sense outside the plant (running outside any VPC, the https-only rule with its plain-HTTP override, the attached-or-not database check switch) MUST NOT remain as settings; the single function behaves as the plant function does today (the ERP address and TLS behaviour of the plant deployment, the database check decided by the operation routes).
+- **FR-006**: There MUST be one stack, one template, one settings file and one deploy path; there is no second template, no alternate deployment option and no alternate settings block. Running outside any VPC, an https-only rule with a plain-HTTP override and an attached-or-not database check switch MUST NOT exist as settings; the single function behaves as the plant function does today (the ERP address and TLS behaviour of the plant deployment, the database check decided by the operation routes).
 - **FR-007**: A deployment MUST no longer accept the settings that exist only to create or reach a created network: the host network address range, the plant address ranges, the managed prefix list, the create-endpoint switches and the four-part "supply a network" settings of the old plant stack, replaced by the single set of three network settings, plus the existing `execute-api` endpoint of FR-005.
 - **FR-008**: The single function MUST be able to run a background save for as long as the old worker could (up to the longest save of 25 lines), and MUST still answer a health check, a status request or a document event within its own time budget while a save is running.
 - **FR-009**: Replacing a deployment of the old shape with the new one MUST NOT delete or recreate the jobs table or its data, and MUST remove the functions and network resources the old shape created only after the new function is serving, with the order and the manual steps documented.
 - **FR-010**: ERP writes MUST remain serialized: two saves running at the same time MUST NOT interleave their writes to the ERP.
 - **FR-011**: The role of the one function MUST be the minimum union of what the eight old functions needed (secret read, jobs table, starting itself asynchronously, reading the IDP, network-interface use) and MUST be documented as one role.
-- **FR-012**: The deploy script and the example settings file MUST offer one deployment (one stack, one settings file, no stand-alone block) and MUST NOT offer the create-the-network settings; the tests that keep the two modes in sync MUST be updated to match the new, single shape.
+- **FR-012**: The deploy script and the example settings file MUST offer one deployment (one stack, one settings file) and MUST NOT offer the create-the-network settings; the tests that keep the two modes in sync MUST be updated to match the new, single shape.
 
 ### Key Entities
 
@@ -120,12 +117,12 @@ The properties the separate functions gave for free still hold: ERP writes are s
 - **SC-004**: Two simultaneous saves never overlap their ERP writes in 100% of test runs, and a health check issued during a save is answered within 10 seconds.
 - **SC-005**: Replacing an old-shape deployment with the new one leaves the jobs table and its items unchanged (item count before equals after).
 - **SC-006**: The deployer fills in one settings file with 3 network settings (VPC, subnets, security group) and the ID of an existing API endpoint instead of the 4 plus 6 optional ones of the old plant shape, and there is no second settings file or block.
-- **SC-007**: After the stand-alone deployment is retired, no template, script option, settings entry or test refers to a stand-alone mode, and the whole test suite passes with only the pre-existing failures.
+- **SC-007**: No template, script option, settings entry or test refers to an alternate deployment mode, and the whole test suite passes with only the pre-existing failures.
 
 ## Assumptions
 
-- "The lambda" means the integration as a whole; the plant deployment is the one that remains, and the stand-alone deployment is retired (FR-006).
-- Retiring the stand-alone stack also retires its https-only guard and plain-HTTP override: the single function talks to the ERP as the plant function does today (an HTTP web service on the plant network). A deployer who needs an https-only rule for the ERP address would need that added as a separate feature.
+- "The lambda" means the integration as a whole; the plant deployment is the only deployment (FR-006).
+- There is no https-only guard or plain-HTTP override: the single function talks to the ERP as the plant function does today (an HTTP web service on the plant network). A deployer who needs an https-only rule for the ERP address would need that added as a separate feature.
 - The private API's endpoint exists already (the deployer's, or the network team's) and the deployer supplies its ID; the API keeps its current limits (a request must finish within the API's time limit, longer work is handed to the background action).
 - The VPC, subnets and security group exist, belong to the network team and already provide what the function needs (a route to the ERP and the database, a private path to Secrets Manager and DynamoDB, an outbound path to the IDP); the deployment documents these needs but creates none of them.
 - The job-number workflow, the database calls, the document event intake and the connectivity checks of features 001 to 006 keep their behaviour; this feature changes how they are deployed and reached, not what they do.
@@ -134,5 +131,5 @@ The properties the separate functions gave for free still hold: ERP writes are s
 
 ## Notes
 
-- This reverses the plant stack's "create the host network" option (feature 002) and the stand-alone "no VPC" option (feature 003), and removes seven of the eight functions; the specs of those features remain as history.
+- This reverses the plant stack's "create the host network" option (feature 002) and the "no VPC" option, and removes seven of the eight functions; the spec of feature 002 remains as history.
 - Both open decisions were answered in the clarification session; there are no open markers.

@@ -27,7 +27,7 @@ Expected: valid template with the four route parameters and the 1433 egress rule
 ```
 python -m pytest tests -q
 ```
-Expected: no new failures versus before this feature (the 12 failures and 2 errors in `tests/unit/test_transport.py`, `tests/contract/test_health.py` and `tests/unit/test_standalone_parity.py` already exist).
+Expected: no new failures versus before this feature (the 12 failures and 2 errors in `tests/unit/test_transport.py` and `tests/contract/test_health.py` already exist).
 
 ## 5. Against a real database (test configuration only, after the network and login exist)
 1. Put `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS` in the ERP secret, plus `SQL_CA_PEM` (the default, encrypted mode) or deploy with `SqlEncrypt=false` (unencrypted, no CA needed; a warning appears in the logs and the health check); the four route parameters at `database`.
@@ -36,35 +36,13 @@ Expected: no new failures versus before this feature (the 12 failures and 2 erro
 4. With live writes **on** in an approved test window: reserve a 2-line PO, check in SyteLine that the numbers advanced and nothing else changed, then save it and check the header carries the customer's terms and ship-via.
 Verify the `LongList` / `Infobar` types, the routine signatures and the `custaddr` / `co` column names read-only first (research.md R3).
 
-
-## 6. Stand-alone version (revision 2026-10-22)
-1. `python -m pytest tests/unit/test_template_standalone.py tests/unit/test_standalone_parity.py tests/unit/test_health_database.py tests/unit/test_deploy_script.py -q`: the new parameters default to off, `DatabaseCheck=true` needs the three attachment settings, the plant health result is unchanged, the stand-alone result is unchanged with the default, and with the check on and attached the stages and warning match the plant version.
-2. Deploy `./deploy.sh --standalone` with the three `ATTACH_*` settings, `DATABASE_CHECK=true` and the database keys in the secret; invoke `{"action":"health"}`: `db_dns`, `db_tcp`, `db_login` pass (the security group must allow TCP 1433). Without `ATTACH_*` the script refuses `DATABASE_CHECK=true`.
-
-
-## 7. Automatic stand-alone check (revision 2026-10-22)
-`python -m pytest tests/unit/test_config.py tests/unit/test_health_database.py tests/unit/test_template_standalone.py tests/unit/test_deploy_script.py tests/unit/test_standalone_parity.py -q`: `auto` is the default; an attached stand-alone function runs the stages without any switch; not attached it shows the earlier result with no note; `false` never runs; `true` without attachment is refused at deployment. Deployed: an attached `./deploy.sh --standalone` with no `DATABASE_CHECK` setting shows the three stages on `{"action":"health"}` (failing with the missing keys named until they are in the secret).
-
-
-## 8. Mode parity (revision 2026-10-22)
-`python -m pytest tests/unit/test_mode_parity.py -q`: all pass on the current files. To see it work, change `Default: "5"` of `SqlLoginTimeout` in only one template (or delete `SQL_LOGIN_TIMEOUT` from one example file) and re-run: the suite fails naming the setting; revert the change afterwards.
-
-## Single settings file (revision)
-
-1. Copy `src/deploy.env.example` to `src/deploy.env`; fill the shared block and the block for the mode you deploy.
-2. `./deploy.sh --validate` and `./deploy.sh --standalone --validate` both succeed from that one file.
-3. With a leftover `src/deploy.standalone.env`, `./deploy.sh --standalone` stops with the move-and-delete message and builds nothing.
-4. `PYENV_VERSION=3.12 pytest tests/unit/test_mode_parity.py tests/unit/test_deploy_script.py` passes; moving a variable into the wrong block makes it fail.
-
 ## Deploy message wording (revision)
 
-1. `./deploy.sh --standalone --yes` with the three `ATTACH_*` settings prints the `Check: ...` network line once, before the build.
-2. With `SQL_SERVER` (and the other database values) set it prints `Will add or update these keys in the credentials secret: ...`; the output never contains the password.
+1. With `SQL_SERVER` (and the other database values) set it prints `Will add or update these keys in the credentials secret: ...`; the output never contains the password.
 
 ## Database in the diagnostics (revision)
 
 1. Plant deployment, database route in use: invoke `{"action": "health", "diagnose": true}`; `diagnostics.database` shows the name lookup and a connection per address, `findings` has a database entry, and `stages`/`ok` are the same as without `diagnose`.
 2. Block port 1433 (security group): the same call shows `database.connected: false` and a finding that names the port and the security group; `db_login` fails as before.
 3. `{"dry_run": true, "diagnose": true}`: `diagnostics.database_skipped` says a dry run does not read the secret.
-4. Stand-alone deployment not attached (or `DatabaseCheck=false`): no database key appears in `diagnostics`.
 

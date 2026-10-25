@@ -2,7 +2,6 @@ ERROR tests/unit/test_transport.py::test_health_refuses_http_before_any_traffic[
 ERROR tests/unit/test_transport.py::test_health_refuses_http_before_any_traffic[True]
 FAILED tests/contract/test_health.py::test_dry_run_needs_only_wsdl_and_stage_order
 FAILED tests/contract/test_health.py::test_dry_run_never_creates_a_session_and_check_sql_has_no_effect
-FAILED tests/unit/test_standalone_parity.py::test_dry_run_health_has_the_same_stages_and_shape
 FAILED tests/unit/test_transport.py::test_client_refuses_an_http_declared_address
 FAILED tests/unit/test_transport.py::test_client_refuses_http_before_creating_the_soap_client
 FAILED tests/unit/test_transport.py::test_guard_off_http_works_exactly_as_before

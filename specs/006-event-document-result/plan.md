@@ -23,7 +23,7 @@ default, the whole event (size-capped) only when `LOG_EVENTS=true`. See research
 
 **Testing**: pytest with the existing fakes (`FakeIdp`, `FakeSoap`, `FakeJobsTable`, `FakeLambda`, `FakeSqlServer`), a repaired copy of the example event as a fixture, template tests
 
-**Target Platform**: AWS GovCloud us-gov-east-1; plant VPC deployment only (the stand-alone deployment has no reserve or save)
+**Target Platform**: AWS GovCloud us-gov-east-1; plant VPC deployment only
 
 **Project Type**: serverless service, extension of an existing project
 
@@ -73,12 +73,12 @@ src/
     ├── savestart.py            # NEW: accept_save + start the worker, extracted from handlers/save_intake.py
     ├── reservations.py         # + writes the DOCRES#<document_id> marker when a reservation is created
     ├── config.py               # + event_defaults(): order/received date, warehouse, order type, or the missing names
-    └── errors.py               # + EVENT_IGNORED, EVENT_INVALID, DEFAULTS_NOT_CONFIGURED, ACTION_UNAVAILABLE
+    └── errors.py               # + EVENT_IGNORED, EVENT_INVALID, DEFAULTS_NOT_CONFIGURED
 tests/
 ├── fixtures/sample_event.json  # NEW: the example event as valid JSON
 ├── tools/make_sample_event.py  # NEW: repairs sample_events.json into valid JSON
 ├── fakes.py                    # + event builder helper
-└── unit/ test_lambda_actions.py (NEW: default action, strict refusal, stand-alone refusal), test_eventdoc.py, test_event_intake.py, test_eventstore.py, test_idp_summary.py, test_template_event.py
+└── unit/ test_lambda_actions.py (NEW: default action, strict refusal), test_eventdoc.py, test_event_intake.py, test_eventstore.py, test_idp_summary.py, test_template_event.py
 docs/EVENT_INTAKE.md            # NEW: set-up, outcomes, what the sample document does and why
 ```
 

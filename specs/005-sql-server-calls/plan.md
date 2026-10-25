@@ -8,14 +8,6 @@
 
 Add the PO OCR demo's three database calls to the VPC deployment, each used **only for an operation that has no web-service endpoint configured**: (1) reserve the CO and job numbers by running `NextCoSp` / `NextWOSp` and committing, (2) find the customer from name and address by searching the customer address data with the demo's scoring (threshold 70, ambiguity margin 3, candidate cap 1000), (3) read the customer's default terms and ship-via codes from its most recent order. The route per operation is decided by a setting before anything is sent (an IDO name for the web service, or `database`/empty); no failure ever switches it. A new module `src/syteline/sqlserver.py` is the only code that talks to the database: a pure-Python TDS driver (`python-tds`) over a TLS connection that is encrypted and certificate-verified by default (with an explicit, warned `SYTELINE_SQL_ENCRYPT=false` option for a server that offers no verifiable certificate), with a fixed whitelist of statements (SELECT of two tables, EXEC of the two routines, COMMIT/ROLLBACK, a harmless ping) so it can never insert, update or delete a row. Existing numbering, customer-resolution and header-save code gains a route switch; the web-service code stays for operations that have an endpoint. The connectivity check reports each operation's route and the database stages. See [research.md](research.md).
 
-**Revision 2026-10-22 (stand-alone health check):** the stand-alone Lambda also gets the database settings, used only by its connectivity check and only when attached to an existing VPC (research.md R13 to R15). No new database operation; `sqlserver.py` and the health stages are reused.
-
-**Revision 2026-10-22 (automatic stand-alone check):** the stand-alone database check now runs automatically whenever the function is attached (`DatabaseCheck` = `auto`, the new default; `true` forces, `false` disables). See research.md R16.
-
-**Revision 2026-10-22 (mode parity):** a new test module `tests/unit/test_mode_parity.py` keeps the settings shared by the plant and stand-alone deployments in sync across the two templates, `deploy.sh` and the example files (spec FR-015, SC-011). Tests only: no structural change (research.md R17 to R19).
-
-**Revision 2026-10-22 (single settings file):** both deployment modes read one `deploy.env` with one `deploy.env.example`; shared settings appear once, mode-specific settings sit in marked blocks, and `deploy.standalone.env` is retired (research.md R20 to R23, FR-017).
-
 **Revision 2026-10-22 (deploy message wording):** the attached-network reminder and the secret-merge notice printed by `deploy.sh` are reworded (research.md R26, FR-018); wording only.
 
 **Revision 2026-10-22 (database in the diagnostics):** the opt-in `diagnose` section also probes the SQL Server host when the health check would run the database stages (research.md R27 to R30, FR-019); probes only, no login.
@@ -82,12 +74,7 @@ src/
     ├── config.py                  # + database settings from the secret; route helpers
     ├── idos.py                    # + SLCos terms/ship property names (UNCONFIRMED); route setting names
     └── errors.py                  # + DATABASE_NOT_CONFIGURED, CUSTOMER_LOW_CONFIDENCE
-src/deploy.sh                    # revision (single file): both branches read deploy.env; a leftover deploy.standalone.env stops --standalone with a message
-src/deploy.env.example           # revision: shared block, PLANT ONLY block, STAND-ALONE ONLY block; src/deploy.standalone.env.example is deleted
-src/template-standalone.yaml     # revision: + DatabaseCheck, SqlEncrypt, SqlVerifyHostname, SqlLoginTimeout parameters and env on DirectFunction
 src/syteline/health.py           # revision (diagnostics): decides `database_probe` once and passes it to every run_diagnostics call
-src/syteline/health.py           # revision: database stages also when SYTELINE_DB_CHECK=true and the function is attached (SYTELINE_ATTACHED)
-src/syteline/config.py           # revision: db_check(), attached()
 docs/
 └── DATABASE.md                    # NEW: when the database is used, settings, secret keys, TLS, least-privilege login, network
 tests/
@@ -95,7 +82,7 @@ tests/
 ├── fixtures/customer_match_golden.json   # NEW: decisions from the demo's scoring code
 ├── tools/make_customer_golden.py         # NEW: regenerates the golden file from the demo checkout
 └── unit/
-    ├── test_diagnostics.py (revision: database probe cases), test_health_database.py (revision: when the probe runs), test_mode_parity.py, test_deploy_script.py (revision: one settings file, retired-file refusal, mode blocks)
+    ├── test_diagnostics.py (revision: database probe cases), test_health_database.py (revision: when the probe runs), test_deploy_script.py
     ├── test_routes.py, test_sqlserver.py, test_numbers.py, test_customer_match.py, test_defaults.py,
     ├── test_no_sql.py (changed: allow only sqlserver.py, audit statements), test_health_database.py,
     └── test_template_database.py

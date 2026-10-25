@@ -425,16 +425,9 @@ def test_a_setting_of_the_earlier_shapes_gets_a_notice_and_is_not_passed(run, na
     assert not any(name.replace("_", "").lower() == k.lower() for k in overrides(calls))
 
 
-def test_there_is_no_standalone_option_and_no_network_mode_flag(run):
-    for flag in ("--standalone", "--allow-network-change"):
-        p, calls = run({**BASE, **NET}, args=[flag])
-        assert p.returncode == 2 and "unknown argument" in p.stdout and "SAM" not in calls
-
-
-def test_a_leftover_standalone_settings_file_is_only_mentioned(run):
-    run.work.joinpath("deploy.standalone.env").write_text('SYTELINE_USER="old"\n')
-    p, calls = run({**BASE, **NET})
-    assert p.returncode == 0 and "deploy.standalone.env is not read any more" in p.stdout
+def test_there_is_no_network_mode_flag(run):
+    p, calls = run({**BASE, **NET}, args=["--allow-network-change"])
+    assert p.returncode == 2 and "unknown argument" in p.stdout and "SAM" not in calls
 
 
 def test_the_notice_about_functions_of_the_earlier_shape_appears_only_when_they_exist(run):

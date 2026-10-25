@@ -16,4 +16,4 @@ Copy `src/deploy.env.example` to `src/deploy.env`; fill the ERP settings, `WORKE
 Start two saves close together: their ERP writes do not overlap (log timestamps / `LOCK#erp-writes` holder changes). While one runs, a health check and a status request answer within seconds.
 
 ## 6. Moving from the old shape
-Follow `docs/MIGRATION.md`; afterwards the jobs table item count equals the count before, the seven old functions are gone, and `aws cloudformation delete-stack --stack-name sytline-connect-standalone` has removed the stand-alone stack.
+Follow `docs/MIGRATION.md`; afterwards the jobs table item count equals the count before, the seven old functions are gone, and the leftover old stack named in the migration guide has been deleted with `aws cloudformation delete-stack`.

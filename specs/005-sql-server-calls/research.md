@@ -12,7 +12,7 @@
 - variable **set to a name**: web service, that endpoint;
 - variable **set to `database` or empty**: database.
 The template always sets all four, with default `database` (the existing web-service names were guesses, unconfirmed, so no endpoint is known to exist). The decision reads settings only; nothing is probed and no failure changes it.
-**Rationale**: FR-012 and the clarified rule. An absent variable keeps the stand-alone version and old stacks unchanged. Accepting both `database` and empty avoids relying on a platform accepting an empty environment value.
+**Rationale**: FR-012 and the clarified rule. An absent variable keeps old stacks unchanged. Accepting both `database` and empty avoids relying on a platform accepting an empty environment value.
 **Migration note**: updating an existing VPC stack makes its numbering and customer lookup use the database; without database settings in the secret they fail clearly (`DATABASE_NOT_CONFIGURED`) before anything is reserved. Setting a parameter to the old IDO name restores the web-service route.
 
 ## R3. Reserving numbers (demo behaviour, adapted to the driver)
@@ -52,89 +52,17 @@ The template always sets all four, with default `database` (the existing web-ser
 ## R11. Guard tests
 **Decision**: `tests/unit/test_no_sql.py` changes from "no SQL client anywhere" to: the driver may be imported only in `src/syteline/sqlserver.py`; no other SQL client module is imported anywhere; and a recording-connection audit (SC-005) runs every code path and asserts each executed statement matches the whitelist (the two `SELECT`s, the two `EXEC`s, `COMMIT`/`ROLLBACK`, `SELECT 1`) with no `INSERT`/`UPDATE`/`DELETE`/`MERGE`/`DROP`/`ALTER`/`CREATE`/`TRUNCATE`.
 
-## R12. Stand-alone version
-**Decision**: unchanged and out of scope. Its template sets none of the route variables, so the absent-variable rule keeps its web-service behaviour; the database code is in the zip but unreachable without settings.
-
-
-## Revision 2026-10-22: the stand-alone health check (R13 to R15)
-
-## R13. What the stand-alone version gets
-**Decision**: only the connectivity test. The stand-alone function has just the `health`, `add_note` and `get_notes` actions, so no number reservation, customer search or defaults exist there to route. It reuses `health._database_stages` (`db_dns`, `db_tcp`, `db_login`) and `sqlserver.SqlServer` unchanged, with the same encryption rules (encrypted and verified by default, `SYTELINE_SQL_ENCRYPT=false` the explicit warned option, no CA then needed) and the same credential rules (keys only in the secret; the stand-alone role already reads that secret).
-**Rationale**: matches the clarified spec (FR-011, assumptions); no new code path that can write.
-
-## R14. Switching the check on, and attachment
-**Decision**: the route variables are not set in the stand-alone template (absent = earlier behaviour, and none of its actions use the database), so `routes.uses_database()` is false there. A new setting `SYTELINE_DB_CHECK` (stand-alone parameter `DatabaseCheck`, default `false`) turns the database stages on explicitly. The template also sets `SYTELINE_ATTACHED` to `true` only when all three attachment settings are supplied (the existing `AttachToVpc` condition). Rule in `health.run_health`: run the database stages when not a dry run and (`routes.uses_database()` or `config.db_check()`); when `db_check()` is on but the function is not attached, do not run them and add `"database_check": "skipped: the function is not attached to a VPC"` to the response (a route to the plant database cannot exist outside a VPC). The plant version is unchanged: it never sets `SYTELINE_DB_CHECK`.
-**Alternatives**: setting the four route variables to `database` in the stand-alone template (misleading: no action uses them, and `routes` would claim the database serves operations it does not); always running the stages when attached (changes the default health result of existing attached deployments, and fails them where the database settings are not yet in the secret).
-
-## R15. Template, deploy and network
-**Decision**: `template-standalone.yaml` gains parameters `DatabaseCheck` (default `false`), `SqlEncrypt` (default `true`), `SqlVerifyHostname` (default `true`), `SqlLoginTimeout` (default `5`) and the env on `DirectFunction`: `SYTELINE_DB_CHECK`, `SYTELINE_SQL_ENCRYPT`, `SYTELINE_SQL_VERIFY_HOSTNAME`, `SYTELINE_SQL_LOGIN_TIMEOUT`, `SYTELINE_ATTACHED`. A rule refuses `DatabaseCheck=true` without the three attachment settings (nothing is created). `deploy.sh --standalone` and `deploy.standalone.env.example` get `DATABASE_CHECK`, `SQL_ENCRYPT`, `SQL_VERIFY_HOSTNAME`, `SQL_LOGIN_TIMEOUT` (always passed, validated like the plant ones; `SQL_ENCRYPT=false` warns). The database keys go in the secret (`SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, optional `SQL_PORT`, `SQL_CA_PEM` while encrypted). The stack creates no network rule: the deployer's security group must allow TCP 1433 from the function to the database. The layer already contains the driver (shared `requirements.txt`).
-
-
-## Revision 2026-10-22: automatic stand-alone check (R16)
-
-## R16. Three-valued database check
-**Decision**: `SYTELINE_DB_CHECK` (stand-alone parameter `DatabaseCheck`) takes `auto`, `true` or `false`; absent or any other value means `auto`. `config.db_check_mode()` returns the normalised value (trimmed, lower-cased). Rule in `health.run_health` (not a dry run, which never touches the database):
-- the plant routes decide first, exactly as today: `routes.uses_database()` runs the stages whatever the mode (the plant template never sets `SYTELINE_DB_CHECK` or `SYTELINE_ATTACHED`);
-- otherwise, mode `false`: no stages and no note; mode `auto`: run the stages when `config.attached()`, else do nothing (quietly: it is the default for functions that were never meant to reach the plant, so no skip note); mode `true`: run when attached, else no stages and the note `database_check: skipped: the function is not attached to a VPC` (reachable only by forcing the environment: the template and `deploy.sh` refuse `true` without the attachment).
-A missing database key is not special-cased: `db_login` fails naming the keys, as for the plant version, and `ok` is false.
-**Consequence to state**: an already-attached stand-alone deployment starts showing the three stages on its next health call, and `ok` is false until the database keys exist in the secret; `DatabaseCheck=false` keeps the earlier result.
-**Alternatives**: auto only when `SQL_SERVER` is in the secret (rejected by the deployer: a missing key should be visible, not silent); keep default off (superseded).
-
-
-## Revision 2026-10-22: parity tests for the two deployment modes (R17 to R19)
-
-## R17. Scope: tests only
-**Decision**: no template, script or code restructuring (clarified). A new `tests/unit/test_mode_parity.py` compares the plant (`src/template.yaml`) and stand-alone (`src/template-standalone.yaml`) deployments, `src/deploy.sh` and the two example files. Findings when planned: the eight parameters present in both templates (`LiveWrites`, `SqlEncrypt`, `SqlLoginTimeout`, `SqlVerifyHostname`, `SytelineConfig`, `SytelineSecretArn`, `SytelineUser`, `UseFipsEndpoints`) are identical today apart from description wording, and every shared environment variable is wired the same way except `SYTELINE_WSDL` (plant: one parameter; stand-alone: the https/http pair by design). The tests lock that state in.
-
-## R18. What "shared" and "in sync" mean
-**Decision**: the shared set is computed, not listed: the parameters that exist in both templates. Adding a parameter to both therefore puts it under test automatically; adding it to only one is not an error (modes legitimately differ: network, attachment, route and tuning settings are plant-only; WSDL pair, `AllowPlainHttp`, `VerifyTls`, `Attach*`, `DatabaseCheck` stand-alone-only). For each shared parameter the tests check:
-1. **Template definition**: `Type`, `Default`, `AllowedValues`, `AllowedPattern` equal in both (descriptions may differ: they describe the mode).
-2. **Function wiring**: the environment variables of `DirectFunction` that reference the parameter are the same names in both templates (`{Ref: Param}` only; derived values such as the WSDL `If` are listed in an explicit exceptions table with a reason).
-3. **deploy.sh**: the parameter is passed in both the plant branch and the stand-alone branch, from the same environment variable (the upper-snake-case of the parameter name: `SqlLoginTimeout` -> `SQL_LOGIN_TIMEOUT`, with `UseFipsEndpoints` -> `USE_FIPS_ENDPOINTS`), and where the script supplies a default (`${VAR:-default}`) it equals the template default. A small mapping table lists parameters whose script variable does not follow the rule (none expected today).
-4. **Example files**: both `deploy.env.example` and `deploy.standalone.env.example` contain a line `VAR=` for that variable (commented or not), and for parameters with a non-empty template default the example value equals it.
-**Exceptions table**: `SYTELINE_WSDL` wiring only. Every entry must carry a reason and the test fails if an entry is no longer needed (no stale exceptions).
-
-## R19. Proving the tests catch drift (SC-011)
-**Decision**: besides checking the real files, the module has a self-test that mutates in-memory copies (a changed default, a changed allowed value, a parameter missing from `deploy.sh` text, a variable missing from an example, a differently named environment variable) and asserts the checker reports each, so a future edit that weakens the checker is itself caught. The checker is a set of plain functions returning lists of violation strings; the real-file tests assert the lists are empty.
-**Alternatives**: snapshot/golden files of the parameter tables (hide intent, produce noisy diffs); generating one file from the other (structural change, rejected by the clarification).
-
-
-## Revision 2026-10-22: single settings file (R20 to R23)
-
-## R20. One file for both modes
-**Decision**: `deploy.env` and `deploy.env.example` serve `./deploy.sh` and `./deploy.sh --standalone` (clarified, FR-017). `env_file` is always `deploy.env`; `--standalone` still selects the stack, template and build directory (`--config-env standalone`). `deploy.standalone.env.example` is deleted. The example is laid out as: (1) shared settings, written once (ERP address, user, secret ARN, config, AWS profile, live-writes gate, FIPS, database login block, `SQL_ENCRYPT`, `SQL_VERIFY_HOSTNAME`, `SQL_LOGIN_TIMEOUT`); (2) a `PLANT ONLY` block (`WORKER_*`, network creation, `API_*`, `IDP_*`, route IDOs, `SITE_ID`, `SQL_TIMEOUT`, `MATCH_*`, default warehouse/order type); (3) a `STAND-ALONE ONLY` block (`ATTACH_*`, `ALLOW_PLAIN_HTTP`, `VERIFY_TLS`, `DATABASE_CHECK`).
-**Rationale**: a setting both modes share has one name, one default and one place; the parity tests no longer need to compare two example files.
-**Alternatives**: a common file loaded by two mode files (rejected in the clarification: three files); keep two files with a drift check (rejected).
-
-## R21. A shared value is shared
-**Decision**: a shared setting has one value for both stacks (for example the same `SYTELINE_WSDL`). Where the modes would differ, the setting is not shared but mode-only. Nothing is renamed. Consequence stated in the example: the stand-alone mode still refuses an `http://` ERP address unless `ALLOW_PLAIN_HTTP=true`, so a plant address that is plain HTTP needs that explicit stand-alone-only opt-in.
-**Rationale**: no hidden per-mode overrides; the file reads the same whichever mode runs.
-
-## R22. Each mode ignores the other's block
-**Decision**: the stand-alone branch of `deploy.sh` never reads plant-only variables and the plant branch never reads stand-alone-only variables; a value present in the other block is neither validated nor passed. The "missing" error text names `deploy.env` in both branches. The database-login merge (`update_secret`) is unchanged and runs from the shared block in both modes.
-
-## R23. The retired file is refused, not read
-**Decision**: when `--standalone` is used and `deploy.standalone.env` exists, `deploy.sh` exits before building with a message that names the file and says to move its settings into `deploy.env` (stand-alone-only block) and delete it. No silent fallback to the old file. The `.gitignore` entry for `src/deploy.standalone.env` stays so a leftover file is never committed.
-**Alternatives**: read the old file for a transition period (rejected: two sources of truth, the problem being solved).
-
-## R24. Parity tests follow the new layout
-**Decision**: `tests/unit/test_mode_parity.py` changes the example check only: the single example must contain `VAR=` for every shared variable (its default equal to the template default) in the shared part, every plant-only variable only in the `PLANT ONLY` block and every stand-alone-only variable only in the `STAND-ALONE ONLY` block; the script check adds that each branch references no variable of the other mode's block. The self-test mutates copies to prove each rule fires (misplaced variable, missing shared variable, cross-mode read). `test_deploy_script.py` gains: `--standalone` reads `deploy.env`; leftover `deploy.standalone.env` stops it.
-
-## R25. The stand-alone refusal of plant network settings is replaced by a notice
-**Decision**: today `--standalone` stops with "not applicable to the stand-alone version" when a plant network setting (`WORKER_*`, `HOST_NETWORK_CIDR`, `PLANT_CIDR_*`, `DYNAMODB_PREFIX_LIST_ID`, `API_VPCE_ID`, `CREATE_API_ENDPOINT`, `CREATE_VPC_ENDPOINTS`) is set. With one shared file those values are normal, so the refusal is removed: the settings are not passed to CloudFormation and one line names them ("ignored by the stand-alone version: ..."). Consistent with R22 and with the plant branch's existing "ignored" warning for create-mode settings.
-**Consequence**: two tests that expect the refusal (`test_deploy_script.py`, "not applicable") change to expect the notice and no pass-through.
-
 ## Revision 2026-10-22: deploy message wording (R26)
 
-## R26. Two messages reworded, nothing else
-**Decision**: in `src/deploy.sh` the attached stand-alone line becomes `Check: the subnets need a route to the ERP and a way to reach Secrets Manager (VPC endpoint or NAT). The stack does not create either. See docs/STANDALONE.md.` and the line in `update_secret` becomes `Will add or update these keys in the credentials secret: <keys>. All other keys stay as they are, and values are never printed.` Both keep their place, their trigger (attached deploy; database values present) and the existing confirmation question and `--yes`; no value is ever interpolated except key names.
-**Test**: the deploy-script tests assert the new text (both `Check:` naming the ERP route, Secrets Manager and `docs/STANDALONE.md`; the notice naming the keys and "All other keys stay as they are"), and that a database password given in the settings file never appears in stdout or stderr.
+## R26. One message reworded, nothing else
+**Decision**: in `src/deploy.sh` the line in `update_secret` becomes `Will add or update these keys in the credentials secret: <keys>. All other keys stay as they are, and values are never printed.` It keeps its place, its trigger (database values present) and the existing confirmation question and `--yes`; no value is ever interpolated except key names.
+**Test**: the deploy-script tests assert the new text (the notice naming the keys and "All other keys stay as they are"), and that a database password given in the settings file never appears in stdout or stderr.
 **Alternatives**: a pre-deploy network check or one combined summary (offered in the clarification, not chosen).
 
 ## Revision 2026-10-22: database in the diagnostics (R27 to R30)
 
 ## R27. Who decides, and what `run_diagnostics` receives
-**Decision**: `health.run_health` computes one boolean, `database_probe = not dry_run and (routes.uses_database() or (mode != "false" and cfgmod.attached()))` (the same expression that decides the database stages) and passes it as `run_diagnostics(cfg, timeout, env=None, database=False)`. `diagnostics.py` never imports routes or the stand-alone setting, so it stays free of mode logic. A false value adds no keys, so existing diagnostics output and tests are unchanged.
+**Decision**: `health.run_health` computes one boolean, `database_probe = not dry_run and (routes.uses_database())` (the same expression that decides the database stages) and passes it as `run_diagnostics(cfg, timeout, env=None, database=False)`. `diagnostics.py` never imports routes, so it stays free of route logic. A false value adds no keys, so existing diagnostics output and tests are unchanged.
 **Rationale**: one decision, one place; the diagnosis can never probe a host the health check would not test (spec FR-019).
 **Alternatives**: let `diagnostics` call `routes`/`config` itself (duplicates the rule); probe whenever `SQL_SERVER` exists (rejected in the clarification).
 
@@ -144,7 +72,7 @@ A missing database key is not special-cased: `db_login` fails naming the keys, a
 **Consequence to state**: the module's promise changes from "reads no secret" to "uses the server name and port the health check has already read from the secret; sends no credentials". Updated in the module docstring and the docs.
 
 ## R29. Database findings
-**Decision**: a new `database_findings(d)` appended to `findings`, one entry per case: (a) name does not resolve, with the nameserver's own answer used as for the ERP (NXDOMAIN, SERVFAIL/REFUSED, no answer, answers correctly but the function's lookup fails); (b) name resolves but no address accepts a connection on the port while the AWS endpoint is reachable (route, security group on that port, SQL Server not listening or its firewall; the stand-alone version also: not attached, so no route to the plant); (c) name resolves and a connection succeeds ("the database host and port are reachable: if db_login still fails, the cause is the login, the certificate or the encryption setting; see that stage's error"). The ERP findings are unchanged and the database entries name "the database".
+**Decision**: a new `database_findings(d)` appended to `findings`, one entry per case: (a) name does not resolve, with the nameserver's own answer used as for the ERP (NXDOMAIN, SERVFAIL/REFUSED, no answer, answers correctly but the function's lookup fails); (b) name resolves but no address accepts a connection on the port while the AWS endpoint is reachable (route, security group on that port, SQL Server not listening or its firewall); (c) name resolves and a connection succeeds ("the database host and port are reachable: if db_login still fails, the cause is the login, the certificate or the encryption setting; see that stage's error"). The ERP findings are unchanged and the database entries name "the database".
 **Alternatives**: reuse the ERP finding text with a different noun (rejected: the remedies differ, e.g. port 1433 and the SQL security group).
 
 ## R30. Where the decision is passed

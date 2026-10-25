@@ -1,6 +1,6 @@
 # Moving to the one-function deployment
 
-Earlier shapes of this project were deployed as: **(a)** the plant stack `sytline-connect` with **eight functions** and, unless you supplied a network, a **VPC it created**; and **(b)** a separate **stand-alone** stack `sytline-connect-standalone` (one function, optionally outside any VPC). The deployment is now **one function in a network that already exists**, created by nobody but the network team. This page says how to move without losing data or breaking a network.
+Earlier shapes of this project were deployed as the plant stack `sytline-connect` with **eight functions** and, unless you supplied a network, a **VPC it created**; and a separate small stack may also exist. The deployment is now **one function in a network that already exists**, created by nobody but the network team. This page says how to move without losing data or breaking a network.
 
 What does not change: the jobs table and every record in it (it is retained by the stack from now on), the API paths and bodies, the IAM authorisation, the secret, and what each action does.
 
@@ -30,9 +30,9 @@ What does not change: the jobs table and every record in it (it is retained by t
 
 If you are not sure, deploy the new template as a **new stack with a different name** (change `stack_name` in `src/samconfig.toml`) and the new network settings; run both side by side with live writes off; when the new one is verified, point callers at it and delete the old stack. The jobs table is the one resource both stacks cannot share (it has a stack-generated name): copy the records you need, or finish the old uploads before switching.
 
-## The stand-alone stack
+## A leftover stack
 
-It holds no data. After the new deployment works: `aws cloudformation delete-stack --stack-name sytline-connect-standalone --region us-gov-east-1`, and delete `deploy.standalone.env` and any `ATTACH_*` lines. The stand-alone option (no VPC, https-only ERP) is **retired**: an ERP reachable only from the internet is no longer served by this project, and the https-only rule with its plain-HTTP override no longer exists (the single function talks to the ERP as the plant function always did).
+If a stack named `sytline-connect-standalone` still exists in the account, it holds no data: after the new deployment works, delete it with `aws cloudformation delete-stack --stack-name sytline-connect-standalone --region us-gov-east-1`, and remove any `ATTACH_*` lines from your settings file.
 
 ## Rolling back
 

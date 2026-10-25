@@ -148,7 +148,7 @@ fi
 echo "Network: the function will be attached to VPC $WORKER_VPC_ID (subnets $WORKER_SUBNET_IDS, security groups $WORKER_SG_IDS); nothing network-related is created."
 echo "Reminder: this network must give the function a route to the ERP and the database and a private path to Secrets Manager, DynamoDB and the IDP; the stack creates none of them. See docs/DEPLOYMENT.md."
 
-# settings of the earlier shapes (create-the-network, stand-alone) are no longer used: say so, never pass them
+# settings of the earlier shapes (create-the-network) are no longer used: say so, never pass them
 ignored=()
 for v in HOST_NETWORK_CIDR PLANT_CIDR_1 PLANT_CIDR_2 PLANT_CIDR_3 DYNAMODB_PREFIX_LIST_ID CREATE_VPC_ENDPOINTS \
          CREATE_API_ENDPOINT WORKER_ROUTE_TABLE_IDS ATTACH_VPC_ID ATTACH_SUBNET_IDS ATTACH_SG_IDS ALLOW_PLAIN_HTTP \
@@ -156,7 +156,6 @@ for v in HOST_NETWORK_CIDR PLANT_CIDR_1 PLANT_CIDR_2 PLANT_CIDR_3 DYNAMODB_PREFI
   [[ -z "${!v:-}" ]] || ignored+=("$v")
 done
 if (( ${#ignored[@]} )); then echo "Note: no longer used by this deployment, ignored (remove them from $env_file): ${ignored[*]}"; fi
-[[ ! -f deploy.standalone.env ]] || echo "Note: deploy.standalone.env is not read any more (the stand-alone deployment was retired); delete it and the stand-alone stack."
 
 # --- live ERP writes stay off unless explicitly approved ---------------------------------
 live="${LIVE_WRITES:-false}"

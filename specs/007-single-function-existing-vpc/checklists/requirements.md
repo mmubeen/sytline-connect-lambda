@@ -31,4 +31,4 @@
 
 ## Notes
 
-- Both markers were answered (FR-005: keep the private API; FR-006: retire the stand-alone stack); see Clarifications.
+- Both markers were answered (FR-005: keep the private API; FR-006: one stack, one template, one settings file); see Clarifications.

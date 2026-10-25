@@ -6,7 +6,7 @@
 
 ## Summary
 
-Collapse the eight Lambda functions of the plant stack and the stand-alone stack into **one function**, `lambda_function.lambda_handler`, that routes by event kind and by `action` (research.md R1 to R3): API Gateway requests by their route, the scheduled cleanup and the self-started background work by explicit actions, the IDP event by default. Remove everything that creates a network (VPC, subnets, route table, security groups, egress rules, endpoints) and the settings that fed it; the function is always attached to a VPC, subnets and security groups the deployer supplies (R4). Keep the private API in front of the one function with an existing `execute-api` endpoint (R5). Replace the old worker's "reserved concurrency of one" by a lease lock in the jobs table so ERP writes stay serialized without throttling everything else (R6), give each action its own time budget so API routes still stop within the API's limit (R7), and retire the stand-alone stack, its https-only guard and its tests (R9). Protect the jobs table and document the move from the old shape (R10, R11).
+Collapse the eight Lambda functions of the plant stack into **one function**, `lambda_function.lambda_handler`, that routes by event kind and by `action` (research.md R1 to R3): API Gateway requests by their route, the scheduled cleanup and the self-started background work by explicit actions, the IDP event by default. Remove everything that creates a network (VPC, subnets, route table, security groups, egress rules, endpoints) and the settings that fed it; the function is always attached to a VPC, subnets and security groups the deployer supplies (R4). Keep the private API in front of the one function with an existing `execute-api` endpoint (R5). Replace the old worker's "reserved concurrency of one" by a lease lock in the jobs table so ERP writes stay serialized without throttling everything else (R6), give each action its own time budget so API routes still stop within the API's limit (R7), and keep one stack, one template and one settings file, without the https-only guard (R9). Protect the jobs table and document the move from the old shape (R10, R11).
 
 ## Technical Context
 
@@ -30,7 +30,7 @@ Collapse the eight Lambda functions of the plant stack and the stand-alone stack
 
 ## Constitution Check
 
-`.specify/memory/constitution.md` is the unfilled template: no ratified gates. The spec's rules and the standing rules of features 001 to 006 were applied; one is relaxed on purpose and stated: the https-only ERP rule of the stand-alone stack is retired with that stack (spec Assumptions), and the role becomes the union of eight roles (FR-011).
+`.specify/memory/constitution.md` is the unfilled template: no ratified gates. The spec's rules and the standing rules of features 001 to 006 were applied; one is relaxed on purpose and stated: the https-only ERP rule is not applied (spec Assumptions), and the role becomes the union of eight roles (FR-011).
 
 ## Project Structure
 
@@ -62,18 +62,17 @@ src/
 │   ├── savestart.py, handlers/intake.py, handlers/sweeper.py   # start the background work with an `action` payload, on this same function
 │   ├── config.py              # worker_function_name() falls back to AWS_LAMBDA_FUNCTION_NAME; remove require_https/allow_http/
 │   │                          #   transport_problem/attached/db_check_mode and their env settings
-│   ├── health.py, client.py   # remove the stand-alone branches (https guard, DatabaseCheck, SYTELINE_ATTACHED)
+│   ├── health.py, client.py   # remove the https guard, DatabaseCheck and SYTELINE_ATTACHED
 │   └── errors.py              # remove ACTION_UNAVAILABLE and INSECURE_TRANSPORT usage
 ├── template.yaml              # rewritten: 1 function, API with 5 routes, schedule, optional event rule, table (Retain), layer; no network
-├── template-standalone.yaml   # DELETED
-├── samconfig.toml             # standalone configuration removed
+├── samconfig.toml             # one configuration
 ├── Makefile                   # one function target
-├── deploy.sh, deploy.env.example   # one deployment: 3 network settings + API endpoint; no standalone branch or block
-docs/                          # STANDALONE.md deleted; DEPLOYMENT, README, TESTING, DATABASE, EVENT_INTAKE, new MIGRATION.md
+├── deploy.sh, deploy.env.example   # one deployment: 3 network settings + API endpoint
+docs/                          # DEPLOYMENT, README, TESTING, DATABASE, EVENT_INTAKE, new MIGRATION.md
 tests/
 ├── unit/ test_dispatch.py (NEW), test_erplock.py (NEW), test_budget.py (NEW), test_template_single.py (NEW, replaces
-│         test_template_network/rules/standalone/reservation/event shape checks), test_deploy_script.py (rewritten for one deployment)
-└── DELETED: test_mode_parity.py, test_standalone_parity.py, test_template_standalone.py, the https-guard cases of test_transport.py
+│         test_template_network/rules/reservation/event shape checks), test_deploy_script.py (rewritten for one deployment)
+└── DELETED: test_mode_parity.py, the https-guard cases of test_transport.py
 ```
 
 **Structure Decision**: the handlers keep their code and tests (they take an API event or a payload); only the entry point, the template, the deploy script and the guard/mode code change. The router is the one new piece of logic; the lock is the one new safeguard.

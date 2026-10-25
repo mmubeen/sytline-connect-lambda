@@ -11,7 +11,7 @@ There is one Lambda (`DirectFunction`, `lambda_function.lambda_handler`) and its
 | `add_note`, `get_notes` | unchanged | as before |
 | anything else | refused `UNKNOWN_ACTION` | |
 
-In the stand-alone deployment `document_event` answers `ACTION_UNAVAILABLE` (no jobs table, no IDP). The Lambda is started by EventBridge (when `IdpStateMachineArn` is set) or invoked directly. Asynchronous invocation has **no retries** (R4, R11); the response is discarded by EventBridge and is the direct-invoke result. The response of `document_event` also carries `"action": "document_event"` and `"ok"` (R15).
+The Lambda is started by EventBridge (when `IdpStateMachineArn` is set) or invoked directly. Asynchronous invocation has **no retries** (R4, R11); the response is discarded by EventBridge and is the direct-invoke result. The response of `document_event` also carries `"action": "document_event"` and `"ok"` (R15).
 
 ## Template parameter (plant only)
 | Parameter | Default | Meaning |

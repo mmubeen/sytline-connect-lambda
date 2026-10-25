@@ -45,8 +45,8 @@
 **Out of scope**: customer default terms and ship-via from the demo's `get_customer_defaults` (feature 001 does not set them); can be added after discovery if the plant wants them.
 
 ## R10. Where it runs
-**Decision**: VPC version only. The stand-alone version excludes the jobs table and the worker (feature 003, FR-004), and reservations need durable state.
-**Alternatives**: a direct-invoke `reserve` action in the stand-alone version (no way to enforce single use without a store).
+**Decision**: VPC deployment only, because reservations need durable state (the jobs table and the worker).
+**Alternatives**: a direct-invoke `reserve` action without a store (no way to enforce single use).
 
 ## R11. Sweeper
 **Decision**: the sweeper re-drives `save_accepted` reservations older than 120 s (no write can have happened yet) and parks `saving` reservations older than the worker timeout plus 30 s as `needs_reconciliation` (`STALE_RUNNING`), exactly like uploads. `reserved` items never expire; unused ones are reported by the status request.

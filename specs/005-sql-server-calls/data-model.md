@@ -44,18 +44,3 @@ Returned by `NumberSource.next_co()` / `next_job()` as a string of digits. Creat
 5. `SELECT 1` (connectivity check)
 All values travel as parameters; the routine name comes from a two-entry constant, never from input.
 
-
-## Revision 2026-10-22: stand-alone health check
-- Settings (stand-alone template parameter -> environment variable): `DatabaseCheck` -> `SYTELINE_DB_CHECK` (`true` runs the database stages, default `false`), `SqlEncrypt` -> `SYTELINE_SQL_ENCRYPT`, `SqlVerifyHostname` -> `SYTELINE_SQL_VERIFY_HOSTNAME`, `SqlLoginTimeout` -> `SYTELINE_SQL_LOGIN_TIMEOUT`; `SYTELINE_ATTACHED` (`true` only when the function is attached to a VPC; set by the template, not a parameter).
-- Rule: the stages run when not a dry run and (any route is `database` or `SYTELINE_DB_CHECK` is true) and, for `SYTELINE_DB_CHECK`, the function is attached; `DatabaseCheck=true` without a VPC attachment is refused at deployment and, if forced through the environment, reported as skipped.
-- Same secret keys as the plant version; no new stored data.
-
-
-## Revision 2026-10-22: automatic stand-alone check
-- `SYTELINE_DB_CHECK` / `DatabaseCheck`: `auto` (default), `true`, `false` (see research.md R16). Template `AllowedValues: ["auto", "true", "false"]`; `deploy.sh --standalone` setting `DATABASE_CHECK` (default `auto`).
-- Decision table (not a dry run; "routes" = the plant route settings): routes use the database -> stages run. Else mode `false` -> nothing. Mode `auto` -> stages if attached, else nothing. Mode `true` -> stages if attached, else the `database_check` skip note.
-- Deployment rule: `DatabaseCheck=true` still needs the three `Attach*` settings; `auto` and `false` do not.
-
-
-## Revision 2026-10-22: mode parity (no stored data)
-Parity rules, per setting present as a parameter in both templates (research.md R18): (1) equal `Type`, `Default`, `AllowedValues`, `AllowedPattern`; (2) same environment variable names on `DirectFunction` referencing it; (3) `deploy.sh` passes it in both branches from `UPPER_SNAKE(Param)`, default equal to the template default; (4) both example files list `UPPER_SNAKE(Param)=`, with the template default as the example value when that default is non-empty. Exceptions table: `SYTELINE_WSDL` wiring. Violations are reported as strings of the form `<where>: <setting>: <what differs>`.

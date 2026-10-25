@@ -9,7 +9,7 @@ No new API route. The reservation and upload routes keep their shapes; this feat
 | `NextJobIdo` | `SYTELINE_NEXT_JOB_IDO` | `database` | IDO name for `NextWOSp`, or `database` |
 | `CustomerIdo` | `SYTELINE_CUSTOMER_IDO` | `database` | customer collection, or `database` |
 | `DefaultsIdo` | `SYTELINE_DEFAULTS_IDO` | `database` | order collection for terms/ship-via, or `database` |
-Set on `ReserveFunction`, `WorkerFunction` and `DirectFunction` (all three, so reserve, save and the health check agree). A variable that is absent keeps the earlier web-service behaviour (stand-alone version, local runs); an absent `DefaultsIdo` means `off` (the routes object shows `"defaults": "off"`): no defaults are read and nothing connects.
+Set on `ReserveFunction`, `WorkerFunction` and `DirectFunction` (all three, so reserve, save and the health check agree). A variable that is absent keeps the earlier web-service behaviour (local runs); an absent `DefaultsIdo` means `off` (the routes object shows `"defaults": "off"`): no defaults are read and nothing connects.
 
 ## Secret keys (existing ERP secret)
 `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, optional `SQL_PORT`, and `SQL_CA_PEM` (required unless the connection is explicitly unencrypted). See data-model.md.
@@ -47,42 +47,6 @@ Where a response carries these, `step` names the operation (`number_co`, `number
 - By default the database connection is TLS with a verified certificate chain (host-name check off only by `SYTELINE_SQL_VERIFY_HOSTNAME=false`, with a warning per connection). The only way to an unencrypted connection is `SYTELINE_SQL_ENCRYPT=false`, which warns on every connection and is reported by the connectivity check; no failure, missing CA or handshake error ever leads to an unencrypted connection.
 - Every database statement is one of the five in data-model.md; none changes a row except the routines' own reservation.
 
-
-## Revision 2026-10-22: stand-alone health check
-| Stand-alone parameter | Environment variable | Default | Meaning |
-|---|---|---|---|
-| `DatabaseCheck` | `SYTELINE_DB_CHECK` | `false` | `true`: the health check also runs `db_dns`, `db_tcp`, `db_login`. Requires the three `Attach*` settings (refused otherwise) |
-| `SqlEncrypt` | `SYTELINE_SQL_ENCRYPT` | `true` | as in the plant version (`false` = unencrypted, warned, no CA needed) |
-| `SqlVerifyHostname` | `SYTELINE_SQL_VERIFY_HOSTNAME` | `true` | as in the plant version |
-| `SqlLoginTimeout` | `SYTELINE_SQL_LOGIN_TIMEOUT` | `5` | seconds for the connection and login |
-| (template) | `SYTELINE_ATTACHED` | `true` when attached, else `false` | lets the function know it can reach a private network |
-
-Health response, stand-alone, `DatabaseCheck=true`: attached -> the stages and the unencrypted warning exactly as in the plant version; not attached (only reachable by forcing the environment) -> no database stage and `"database_check": "skipped: the function is not attached to a VPC"`. With `DatabaseCheck=false` (default) the response is unchanged from today.
-Secret keys, error and stage messages: as in the sections above. The stand-alone actions `add_note` and `get_notes` never use the database.
-
-
-## Revision 2026-10-22: automatic stand-alone check
-`DatabaseCheck` / `SYTELINE_DB_CHECK` is now `auto` | `true` | `false`, default `auto` (the table above showed `true`/`false`, default `false`; this supersedes it):
-- `auto`: the stand-alone health check runs `db_dns`, `db_tcp`, `db_login` (and the unencrypted warning) whenever the function is attached to a VPC; a function that is not attached shows exactly the earlier result.
-- `true`: as `auto`, and refused at deployment without the three `Attach*` settings.
-- `false`: never, whatever the attachment.
-A missing database key makes `db_login` fail naming the keys (`database not configured: ...`) and the overall `ok` false. The plant deployment never sets this variable and is unchanged.
-
-
-## Revision 2026-10-22: parity contract (test contract, no runtime interface)
-`tests/unit/test_mode_parity.py` exposes pure functions used by the tests and the self-test: `shared_parameters(plant, standalone)`, `template_violations(plant, standalone)`, `wiring_violations(plant, standalone)`, `script_violations(script_text, plant, standalone)`, `example_violations(example_texts, plant, standalone)`; each returns a list of violation strings (empty = in sync). Adding a setting to both modes must require updating all four places or the suite fails; adding it to one mode only never fails the parity tests.
-
-## Settings file (revision: one file for both modes)
-
-`src/deploy.env` (copied from `src/deploy.env.example`, git-ignored) is read by `./deploy.sh` and `./deploy.sh --standalone`.
-
-| Block | Variables | Read by |
-|---|---|---|
-| Shared | `SYTELINE_WSDL`, `SYTELINE_USER`, `SYTELINE_SECRET_ARN`, `SYTELINE_CONFIG`, `AWS_PROFILE_NAME`, `LIVE_WRITES`, `LIVE_APPROVAL_REF`, `USE_FIPS_ENDPOINTS`, `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASS`, `SQL_PORT`, `SQL_CA_PEM_FILE`, `SQL_ENCRYPT`, `SQL_VERIFY_HOSTNAME`, `SQL_LOGIN_TIMEOUT` | both modes |
-| `PLANT ONLY` | `WORKER_*`, `CREATE_VPC_ENDPOINTS`, `HOST_NETWORK_CIDR`, `PLANT_CIDR_*`, `DYNAMODB_PREFIX_LIST_ID`, `API_VPCE_ID`, `CREATE_API_ENDPOINT`, `IDP_*`, `*_IDO`, `SITE_ID`, `SQL_TIMEOUT`, `MATCH_*`, `SYTELINE_DEFAULT_*` | plant mode; ignored by `--standalone` |
-| `STAND-ALONE ONLY` | `ATTACH_VPC_ID`, `ATTACH_SUBNET_IDS`, `ATTACH_SG_IDS`, `ALLOW_PLAIN_HTTP`, `VERIFY_TLS`, `DATABASE_CHECK` | `--standalone`; ignored by plant mode |
-
-`./deploy.sh --standalone` with a `deploy.standalone.env` present exits before building: "deploy.standalone.env is no longer read: move its settings into deploy.env (stand-alone block) and delete it". No other behaviour changes.
 
 ## Diagnostics (`{"diagnose": true}`), revision: database probe
 

@@ -20,7 +20,7 @@ Expected: three new routes on the private API, reserve and worker functions in t
 ```
 python -m pytest tests -q
 ```
-Expected: no new failures versus before this feature (feature 001-003 behavior unchanged, FR-017). The existing failures in `tests/unit/test_transport.py` are unrelated.
+Expected: no new failures versus before this feature (existing behavior unchanged, FR-017). The existing failures in `tests/unit/test_transport.py` are unrelated.
 
 ## 4. Live walkthrough (only in a test configuration with live writes deliberately on, after the read-only discovery task)
 1. `POST /job-reservations` with a 2-line PO → note `reservation_id`, `co_num`, two job numbers.
