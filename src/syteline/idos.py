@@ -35,12 +35,25 @@ CUSTOMER_LOOKUP_CAP = 50
 # Property names written by the job-reservation save (feature 004), following the PO OCR demo's field mapping
 # (JOB_NUMBER_RETRIEVAL.md). ALL UNCONFIRMED until the read-only discovery task has been run against the plant:
 # correct them here only.
-CO_HEADER_PROPS = {"cust_po": "CustPo", "received_date": "DateReceived", "terms_code": "TermsCode",
-                   "ship_code": "ShipCode"}
+# CustPo, TermsCode and ShipCode are confirmed by docs/COJobCreationIDOs.xlsx. SLCos has NO received-date property (the
+# service refused "DateReceived"): the received date is written only when SYTELINE_CO_RECEIVED_DATE_PROP names the property.
+CO_HEADER_PROPS = {"cust_po": "CustPo", "terms_code": "TermsCode", "ship_code": "ShipCode"}
+RECEIVED_DATE_SETTING = "SYTELINE_CO_RECEIVED_DATE_PROP"
+
+
+def received_date_prop():
+    """The CO header property that holds the date the PO was received, or None (not written)."""
+    return os.environ.get(RECEIVED_DATE_SETTING) or None
+
+
+
 LINE_LINK_PROPS = {"ref_type": "RefType", "ref_num": "RefNum", "ref_line_suf": "RefLineSuf", "ref_release": "RefRelease"}
 LINK_NUM_PROP = LINE_LINK_PROPS["ref_num"]  # read back to confirm the line references its job
 LINE_TEARDOWN_PROP = "Teardown"  # set by a separate update after the line exists, as in the demo
-JOB_EXTRA_PROPS = {"root_job": "RootJob", "engine_sn": "EngineSn", "serial_num": "SerialNum", "packing": "Packing"}
+# The job's link back to its order is OrdNum / OrdLine (the workbook has no CoNum / CoLine on SLJobs or CCTJobs).
+JOB_LINK_PROPS = {"co_num": "OrdNum", "co_line": "OrdLine"}
+# RootJob, uf_eng_sn and uf_sn are confirmed by the workbook (CCTJobs); the property for `packing` is not in it (UNCONFIRMED).
+JOB_EXTRA_PROPS = {"root_job": "RootJob", "engine_sn": "uf_eng_sn", "serial_num": "uf_sn", "packing": "Packing"}
 
 
 # Route settings (feature 005): per operation, an IDO name keeps it on the web service; `database` or empty uses the

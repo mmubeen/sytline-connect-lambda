@@ -129,7 +129,7 @@ class Upload:
             cos = self.soap.read_back(CO_IDO, ["CoNum", "CustNum"], f"CoNum = {_q(self.co_num)}")
             lines = self.soap.read_back(LINE_IDO, ["CoNum", "CoLine", "Item", "QtyOrdered"],
                                         f"CoNum = {_q(self.co_num)}")
-            jobs = [self.soap.read_back(JOB_IDO, ["Job", "CoNum", "CoLine"], f"Job = {_q(j['job'])}")
+            jobs = [self.soap.read_back(JOB_IDO, ["Job", *idos.JOB_LINK_PROPS.values()], f"Job = {_q(j['job'])}")
                     for j in self.lines]
         except Exception as exc:
             raise _Stop(self._park(errors.UNCERTAIN_OUTCOME, f"read-back failed: {exc}", step))
@@ -197,7 +197,8 @@ class Upload:
                 self._insert(LINE_IDO, vals, "line", f"{self.co_num}/{i}", f"create_line_{i}")
                 self._insert(JOB_IDO, {
                     "Job": job, "OrdType": ordtype, "Whse": whse, "Item": ln["item"],
-                    "QtyReleased": ln["quantity"], "CoNum": self.co_num, "CoLine": i,
+                    "QtyReleased": ln["quantity"], idos.JOB_LINK_PROPS["co_num"]: self.co_num,
+                    idos.JOB_LINK_PROPS["co_line"]: i,
                 }, "job", job, f"create_job_{i}")
                 self.lines.append({"line": i, "job": job})
 

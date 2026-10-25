@@ -152,3 +152,11 @@ Both use the same ERP safety rules, the same single worker and the same jobs tab
 | Reserve answers `CUSTOMER_AMBIGUOUS` / `CUSTOMER_LOW_CONFIDENCE` / `CUSTOMER_NOT_FOUND` (422) | the document's customer and address did not identify one confident SyteLine customer; the response lists the best candidates with scores (not found: none); correct the document in IDP and try again; nothing was reserved |
 | Reserve answers `UNCERTAIN_OUTCOME` (502) | the database connection was lost while a number was being reserved; that number may be consumed (the response lists the numbers already obtained as `consumed_unused`); it is never retried: reserve again with a new `request_ref` |
 | `ERP_UNREACHABLE` on a database step | cannot connect or log in: run `{"action":"health"}` and read `db_dns`, `db_tcp`, `db_login` (certificate, host name, login) |
+
+## Property names checked against `docs/COJobCreationIDOs.xlsx`
+
+The first live saves showed which guessed names were wrong; the workbook settles these:
+
+- **CO header (`SLCos`)**: `CustPo`, `TermsCode`, `ShipCode`, `OrderDate`, `Stat` exist. There is **no received-date property**: the service refused `DateReceived`. The received date is therefore not written unless `SYTELINE_CO_RECEIVED_DATE_PROP` names the property to use (not yet a template parameter).
+- **Job (`CCTJobs`)**: no `CoNum` or `CoLine`; the job's link back to its order is `OrdNum` / `OrdLine` (`idos.JOB_LINK_PROPS`, also what the read-back checks). The engine and serial numbers are `uf_eng_sn` and `uf_sn`.
+- **Still unconfirmed** (not in the workbook): the line's teardown-date property (`Teardown`, on `CCT_Coitems`), the job's packing property (`Packing`), and what `OrdType` must hold (in `SLJobs` it is the type of the referencing order, not necessarily the configured "order type").

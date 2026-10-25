@@ -60,7 +60,7 @@ class SaveRun(Upload):
             cos = self.soap.read_back(CO_IDO, ["CoNum", "CustNum"], f"CoNum = {_q(self.co_num)}")
             rows = self.soap.read_back(LINE_IDO, ["CoNum", "CoLine", "Item", "QtyOrdered", idos.LINK_NUM_PROP],
                                        f"CoNum = {_q(self.co_num)}")
-            found = {j["job"]: self.soap.read_back(JOB_IDO, ["Job", "CoNum", "CoLine"], f"Job = {_q(j['job'])}")
+            found = {j["job"]: self.soap.read_back(JOB_IDO, ["Job", *idos.JOB_LINK_PROPS.values()], f"Job = {_q(j['job'])}")
                      for j in self.jobs if j["line"] in lines}
         except Exception:
             return None
@@ -92,8 +92,8 @@ class SaveRun(Upload):
             job_rows = found[j["job"]]
             if len(job_rows) != 1:
                 p.append("job not found or duplicated")
-            elif (str(job_rows[0].get("CoNum", "")).strip() != self.co_num
-                  or str(job_rows[0].get("CoLine", "")).strip() != str(i)):
+            elif (str(job_rows[0].get(idos.JOB_LINK_PROPS["co_num"], "")).strip() != self.co_num
+                  or str(job_rows[0].get(idos.JOB_LINK_PROPS["co_line"], "")).strip() != str(i)):
                 p.append("job is not linked back to its CO line")
             problems[i] = "; ".join(p) or None
         return {"header": header, "lines": problems}
@@ -125,8 +125,8 @@ class SaveRun(Upload):
             header = {"CoNum": self.co_num, "CustNum": self.customer["cust_num"], "CustSeq": self.customer["cust_seq"],
                       "OrderDate": req.get("order_date") or today(), "Stat": "O",
                       idos.CO_HEADER_PROPS["cust_po"]: req["po_number"]}
-            if req.get("received_date"):
-                header[idos.CO_HEADER_PROPS["received_date"]] = req["received_date"]
+            if req.get("received_date") and idos.received_date_prop():
+                header[idos.received_date_prop()] = req["received_date"]
             # the customer's terms and ship-via from its most recent order; never blocks the save (warning instead)
             found, warning = defaults.read(self.customer, self.soap, self.cfg)
             if warning:
@@ -152,7 +152,8 @@ class SaveRun(Upload):
                 if "teardown" in ln:
                     self._teardown(i, ln["teardown"])
                 jvals = {"Job": job, "OrdType": ordtype, "Whse": whse, "Item": ln["item"],
-                         "QtyReleased": ln["quantity"], "CoNum": self.co_num, "CoLine": i,
+                         "QtyReleased": ln["quantity"], idos.JOB_LINK_PROPS["co_num"]: self.co_num,
+                         idos.JOB_LINK_PROPS["co_line"]: i,
                          idos.JOB_EXTRA_PROPS["root_job"]: job}
                 for src in ("engine_sn", "serial_num", "packing"):
                     if ln.get(src):

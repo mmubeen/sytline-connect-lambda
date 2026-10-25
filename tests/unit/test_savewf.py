@@ -43,13 +43,15 @@ def test_happy_path_order_links_and_per_line_results(live_writes):
         {"line": 2, "job": "5001", "item": "I1", "status": "saved", "warnings": [], "co_line": 2}]
     head = soap.rows["SLCos"][0]
     assert head["CustNum"] == "C1" and head[idos.CO_HEADER_PROPS["cust_po"]] == "PO-1"
-    assert head[idos.CO_HEADER_PROPS["received_date"]] == "2026-10-19" and head["OrderDate"] == "2026-10-20"
+    assert head["OrderDate"] == "2026-10-20" and "DateReceived" not in head  # SLCos has no received-date property
     line1 = soap.rows["CCT_Coitems"][0]
     assert line1[idos.LINE_LINK_PROPS["ref_num"]] == "5000" and line1[idos.LINE_LINK_PROPS["ref_type"]] == "J"
     assert line1[idos.LINE_TEARDOWN_PROP] == "2026-10-25"  # set by the separate update
     job1 = soap.rows["CCTJobs"][0]
-    assert job1["Job"] == "5000" and job1["CoNum"] == "100" and job1["CoLine"] == 1 and job1["RootJob"] == "5000"
-    assert job1[idos.JOB_EXTRA_PROPS["engine_sn"]] == "E1" and job1["Whse"] == "MAIN" and job1["OrdType"] == "J"
+    link = idos.JOB_LINK_PROPS
+    assert job1["Job"] == "5000" and job1[link["co_num"]] == "100" and job1[link["co_line"]] == 1 and job1["RootJob"] == "5000"
+    assert "CoNum" not in job1 and "CoLine" not in job1  # the job's link back is OrdNum / OrdLine
+    assert job1[idos.JOB_EXTRA_PROPS["engine_sn"]] == "E1" and idos.JOB_EXTRA_PROPS["engine_sn"] == "uf_eng_sn" and job1["Whse"] == "MAIN" and job1["OrdType"] == "J"
     assert soap.rows["CCTJobs"][1]["Job"] == "5001" and soap.rows["CCTJobs"][1]["QtyReleased"] == 2
 
 
@@ -264,3 +266,13 @@ def test_the_erp_rejecting_a_supplied_job_number_needs_reconciliation_and_nothin
     assert out["state"] == "needs_reconciliation" and out["step"] == "create_job_2"
     assert {"kind": "line", "key": "100/2"} in out["possibly_written"] and {"kind": "co", "key": "100"} in out["possibly_written"]
     assert [c for c in soap.calls if c[:2] == ("insert", "CCTJobs")].__len__() == 2  # no retry
+
+
+def test_the_received_date_is_written_only_when_its_property_is_configured(monkeypatch, live_writes):
+    req = save_req(1, received_date="2026-10-19")
+    monkeypatch.setenv("SYTELINE_CO_RECEIVED_DATE_PROP", "Datefld")
+    _, soap = go(n=1, req=req)
+    assert soap.rows["SLCos"][0]["Datefld"] == "2026-10-19"
+    monkeypatch.delenv("SYTELINE_CO_RECEIVED_DATE_PROP")
+    _, soap = go(n=1, req=req)
+    assert "2026-10-19" not in soap.rows["SLCos"][0].values()
