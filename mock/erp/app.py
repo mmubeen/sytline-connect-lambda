@@ -47,12 +47,17 @@ def _match(row, cond):
     if not m:
         raise ValueError(f"unsupported filter condition: {cond}")
     prop, op, raw = m.groups()
-    have, want = str(row.get(prop, "")).strip(), _unquote(raw)
+    have, want = str(row.get(prop, "")).strip(), _unquote(raw).strip()  # the real service pads, the mock compares trimmed
     if op == "=":
         return have.upper() == want.upper()
     if op == ">=":
         return have >= want
     return re.match(_like_to_regex(want), have, re.I) is not None
+
+
+LINE_READ = {"co_num": "CoNum", "co_line": "CoLine", "co_release": "CoRelease", "item": "Item", "qty_ordered": "QtyOrdered",
+             "u_m": "UM", "whse": "Whse", "ref_type": "RefType", "ref_num": "RefNum", "ref_line_suf": "RefLineSuf",
+             "ref_release": "RefRelease", "due_date": "DueDate"}
 
 
 class SoapFault(Exception):
@@ -257,6 +262,8 @@ class ErpMock:
             values = {etree.QName(c).localname: (c.text or "") for c in el}
             if change == "inserted":
                 stored = self._add(ido, values)
+                if ido == "CCT_Coitems":  # lines are written to CCT_Coitems (lowercase names) and read through SLCoitems
+                    self._add("SLCoitems", {LINE_READ[k]: v for k, v in values.items() if k in LINE_READ})
             else:
                 stored = self._best_match(ido, values)
                 stored.update(values)

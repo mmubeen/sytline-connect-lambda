@@ -57,7 +57,7 @@ def test_timeout_before_storing_still_needs_reconciliation():
 
 
 def test_timeout_on_later_line_lists_everything_that_may_exist():
-    out, soap = go({("insert", "SLCoitems", 2): "timeout_after"})
+    out, soap = go({("insert", "CCT_Coitems", 2): "timeout_after"})
     assert out["state"] == "needs_reconciliation" and out["step"] == "create_line_2"
     assert out["possibly_written"] == [
         {"kind": "co", "key": "100"}, {"kind": "line", "key": "100/1"}, {"kind": "job", "key": "5000"},
@@ -72,7 +72,7 @@ def test_rejection_after_earlier_rows_is_needs_reconciliation_not_failed():
 
 
 def test_unreachable_after_earlier_rows_is_needs_reconciliation():
-    out, _ = go({("insert", "SLCoitems", 1): "unreachable"})
+    out, _ = go({("insert", "CCT_Coitems", 1): "unreachable"})
     assert out["state"] == "needs_reconciliation" and out["possibly_written"] == [{"kind": "co", "key": "100"}]
 
 

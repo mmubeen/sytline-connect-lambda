@@ -1,16 +1,10 @@
 import pytest
 
 from fakes import FakeSoap
-from syteline import errors, idos, savewf
+from syteline import errors, idos, rowbuild, savewf
 
 CFG = {"SYTELINE_DEFAULT_WHSE": "MAIN", "SYTELINE_DEFAULT_ORDTYPE": "J"}
 CUST = [{"cust_num": "C1", "cust_seq": 0, "name": "ACME"}]
-
-
-@pytest.fixture(autouse=True)
-def teardown_property(monkeypatch):
-    """SLCoitems has no teardown property of its own: these tests name one (the setting is covered at the end of the file)."""
-    monkeypatch.setenv("SYTELINE_LINE_TEARDOWN_PROP", "Teardown")
 
 
 def reservation(n=2):
@@ -41,24 +35,34 @@ def test_happy_path_order_links_and_per_line_results(live_writes):
     req["lines"][0].update(teardown="2026-10-25", engine_sn="E1", serial_num="S1", packing="BOX")
     out, soap = go(req=req)
     assert out["state"] == "succeeded" and out["co_num"] == "100"
-    assert kinds(soap) == [("insert", "SLCos"), ("insert", "SLCoitems"), ("update", "SLCoitems"),
-                           ("insert", "CCTJobs"), ("insert", "SLCoitems"), ("insert", "CCTJobs")]
+    assert kinds(soap) == [("insert", "SLCos"), ("insert", "CCT_Coitems"), ("insert", "UserDefinedFields"),
+                           ("insert", "CCTJobs"), ("insert", "CCT_Coitems"), ("insert", "CCTJobs")]
     assert not any(c == ("invoke", "NextWOSp") or c == ("invoke", "NextCoSp") for c in soap.calls)  # FR-005
     assert out["results"] == [
         {"line": 1, "job": "5000", "item": "I0", "status": "saved", "warnings": [], "co_line": 1},
         {"line": 2, "job": "5001", "item": "I1", "status": "saved", "warnings": [], "co_line": 2}]
     head = soap.rows["SLCos"][0]
-    assert head["CustNum"] == "C1" and head[idos.CO_HEADER_PROPS["cust_po"]] == "PO-1"
-    assert head["OrderDate"] == "2026-10-20" and "DateReceived" not in head  # SLCos has no received-date property
-    line1 = soap.rows["SLCoitems"][0]
-    assert line1[idos.LINE_LINK_PROPS["ref_num"]] == "5000" and line1[idos.LINE_LINK_PROPS["ref_type"]] == "J"
-    assert line1["Teardown"] == "2026-10-25"  # set by the separate update
+    assert head["CoNum"] == "       100" and head["CustNum"] == "     C1" and head["CustSeq"] == "   0"  # padded to the ERP's widths
+    assert head["CustPo"] == "PO-1".rjust(22) and head["OrderDate"] == "2026-10-19T00:00:00-04:00"  # the received date, Eastern
+    assert {k: head[k] for k in ("Stat", "Whse", "TaxCode1", "FrtTaxCode1", "MscTaxCode1", "OrigSite")} == {
+        "Stat": "P", "Whse": "MAIN", "TaxCode1": "R", "FrtTaxCode1": "N", "MscTaxCode1": "N", "OrigSite": "CCT"}
+    assert "DateReceived" not in head
+    line1 = soap.rows["CCT_Coitems"][0]  # lines are written to CCT_Coitems with lowercase names
+    assert line1["co_num"] == "       100" and line1["co_line"] == "   1" and line1["item"] == "I0".rjust(30)
+    assert line1["ref_num"] == "      5000" and line1["ref_type"] == "J" and line1["ref_line_suf"] == "0" and line1["u_m"] == "EA"
+    assert (line1["qty_ordered"], line1["qty_ordered_conv"], line1["stat"], line1["ship_site"], line1["whse"]) == ("1", "1", "P", "CCT", "MAIN")
+    assert "Teardown" not in line1 and "teardown" not in line1
+    (udf,) = soap.rows["UserDefinedFields"]  # the teardown date is a UserDefinedFields row for the line's RowPointer
+    assert udf["TableName"] == "coitem" and udf["UDFDT1"] == "2026-10-25T00:00:00-04:00"
+    assert udf["RowId"] == soap.rows["SLCoitems"][0]["RowPointer"]
     job1 = soap.rows["CCTJobs"][0]
     link = idos.JOB_LINK_PROPS
-    assert job1["Job"] == "5000" and job1[link["co_num"]] == "100" and job1[link["co_line"]] == 1 and job1["RootJob"] == "5000"
-    assert "CoNum" not in job1 and "CoLine" not in job1  # the job's link back is OrdNum / OrdLine
-    assert job1[idos.JOB_EXTRA_PROPS["engine_sn"]] == "E1" and idos.JOB_EXTRA_PROPS["engine_sn"] == "uf_eng_sn" and job1["Whse"] == "MAIN" and job1["OrdType"] == "J"
-    assert soap.rows["CCTJobs"][1]["Job"] == "5001" and soap.rows["CCTJobs"][1]["QtyReleased"] == 2
+    assert job1["Job"] == "      5000" and job1[link["co_num"]] == "       100" and job1[link["co_line"]] == 1
+    assert job1["RootJob"] == "      5000" and "CoNum" not in job1 and "CoLine" not in job1  # the link back is OrdNum / OrdLine
+    assert (job1["Type"], job1["Stat"], job1["OrdType"], job1["Suffix"], job1["RootSuf"], job1["OrdRelease"]) == ("J", "F", "O", 0, 0, 0)
+    assert (job1["uf_eng_sn"], job1["uf_sn"], job1["uf_app"]) == ("E1", "S1", "CDBD")  # Box -> CDBD, Crate -> YES
+    assert job1["JobDate"] == "2026-10-19T00:00:00-04:00" == job1["JschStartDate"] == job1["JschEndDate"] and job1["Whse"] == "MAIN"
+    assert soap.rows["CCTJobs"][1]["Job"] == "      5001" and soap.rows["CCTJobs"][1]["QtyReleased"] == "2"
 
 
 def test_readback_follows_the_last_write_and_covers_header_lines_and_jobs(live_writes):
@@ -92,7 +96,7 @@ def test_readback_failure_is_uncertain_not_success(live_writes):
 def test_teardown_rejection_is_a_warning_and_the_job_still_saves(live_writes):
     req = save_req(2)
     req["lines"][0]["teardown"] = "2026-10-25"
-    soap = FakeSoap(customers=CUST, scenarios={("update", "SLCoitems", 1): "reject"})
+    soap = FakeSoap(customers=CUST, scenarios={("insert", "UserDefinedFields", 1): "reject"})
     out, soap = go(req=req, soap=soap)
     assert out["state"] == "succeeded"
     assert out["results"][0]["status"] == "saved" and "teardown date not set" in out["results"][0]["warnings"][0]
@@ -102,16 +106,16 @@ def test_teardown_rejection_is_a_warning_and_the_job_still_saves(live_writes):
 def test_teardown_with_an_unknown_outcome_stops_the_run(live_writes):
     req = save_req(2)
     req["lines"][0]["teardown"] = "x"
-    soap = FakeSoap(customers=CUST, scenarios={("update", "SLCoitems", 1): "timeout_after"})
+    soap = FakeSoap(customers=CUST, scenarios={("insert", "UserDefinedFields", 1): "timeout_after"})
     out, soap = go(req=req, soap=soap)
     assert out["state"] == "needs_reconciliation" and out["code"] == errors.UNCERTAIN_OUTCOME
     assert out["step"] == "teardown_1" and soap.count("CCTJobs") == 0
     assert [r["status"] for r in out["results"]] == ["unverified", "not_attempted"]
 
 
-def test_no_teardown_means_no_update_call(live_writes):
+def test_no_teardown_means_no_teardown_row(live_writes):
     out, soap = go()
-    assert ("update", "SLCoitems") not in soap.calls
+    assert ("insert", "UserDefinedFields") not in soap.calls and "UserDefinedFields" not in soap.rows
 
 
 def test_live_writes_off_fails_before_any_write():
@@ -124,7 +128,7 @@ def test_header_rejected_with_nothing_written_is_a_definite_failure(live_writes)
     soap = FakeSoap(customers=CUST, scenarios={("insert", "SLCos", 1): "reject"})
     out, soap = go(soap=soap)
     assert out["state"] == "failed" and out["code"] == errors.ERP_REJECTED and out["step"] == "create_co"
-    assert soap.count("SLCoitems") == 0
+    assert soap.count("CCT_Coitems") == 0
 
 
 def test_time_budget_exhausted_before_the_first_write_fails_cleanly(live_writes):
@@ -134,16 +138,16 @@ def test_time_budget_exhausted_before_the_first_write_fails_cleanly(live_writes)
 
 # ---- US3: failure classification (research.md R7) -------------------------------------------
 def test_rejected_line_after_saved_lines_is_partly_saved_when_its_rows_are_proven_absent(live_writes):
-    soap = FakeSoap(customers=CUST, scenarios={("insert", "SLCoitems", 2): "reject"})
+    soap = FakeSoap(customers=CUST, scenarios={("insert", "CCT_Coitems", 2): "reject"})
     out, soap = go(n=3, soap=soap)
     assert out["state"] == "partly_saved" and out["code"] == errors.ERP_REJECTED and out["step"] == "create_line_2"
     assert [r["status"] for r in out["results"]] == ["saved", "failed", "not_attempted"]
-    assert "rejected" in out["results"][1]["error"] and soap.count("SLCoitems") == 1 and soap.count("CCTJobs") == 1
+    assert "rejected" in out["results"][1]["error"] and soap.count("CCT_Coitems") == 1 and soap.count("CCTJobs") == 1
     assert "possibly_written" not in out
 
 
 def test_rejected_first_line_leaves_a_header_so_it_needs_reconciliation(live_writes):
-    soap = FakeSoap(customers=CUST, scenarios={("insert", "SLCoitems", 1): "reject"})
+    soap = FakeSoap(customers=CUST, scenarios={("insert", "CCT_Coitems", 1): "reject"})
     out, _ = go(soap=soap)
     assert out["state"] == "needs_reconciliation" and out["code"] == errors.ERP_REJECTED
     assert {"kind": "co", "key": "100"} in out["possibly_written"]
@@ -161,36 +165,36 @@ def test_rejected_job_leaves_a_line_without_a_job_so_it_needs_reconciliation(liv
 def test_rejection_whose_absence_cannot_be_proven_needs_reconciliation(live_writes):
     class NoReadsAfterLine2(FakeSoap):
         def load(self, ido, properties, filter_="", record_cap=0):
-            if "AND CoLine = 2" in filter_:
+            if "AND CoLine = '   2'" in filter_:
                 from syteline.errors import ErpUnreachable
                 raise ErpUnreachable("read failed")
             return super().load(ido, properties, filter_, record_cap)
 
         read_back = load  # the fake aliases read_back to its own load
 
-    soap = NoReadsAfterLine2(customers=CUST, scenarios={("insert", "SLCoitems", 2): "reject"})
+    soap = NoReadsAfterLine2(customers=CUST, scenarios={("insert", "CCT_Coitems", 2): "reject"})
     out, _ = go(n=3, soap=soap)
     assert out["state"] == "needs_reconciliation" and out["code"] == errors.ERP_REJECTED
 
 
-@pytest.mark.parametrize("ido,nth", [("SLCoitems", 2), ("CCTJobs", 2)])
+@pytest.mark.parametrize("ido,nth", [("CCT_Coitems", 2), ("CCTJobs", 2)])
 @pytest.mark.parametrize("how", ["timeout_after", "timeout_before"])
 def test_unknown_outcome_is_never_classified_as_failed_or_retried(live_writes, ido, nth, how):
     soap = FakeSoap(customers=CUST, scenarios={("insert", ido, nth): how})
     out, soap = go(n=3, soap=soap)
     assert out["state"] == "needs_reconciliation" and out["code"] == errors.UNCERTAIN_OUTCOME
     assert soap.calls.count(("insert", "SLCos")) == 1  # nothing was repeated
-    assert soap.count("SLCoitems") <= 2 and not any(r["status"] == "saved" for r in out["results"][1:])
+    assert soap.count("CCT_Coitems") <= 2 and not any(r["status"] == "saved" for r in out["results"][1:])
 
 
 def test_no_failure_injection_removes_or_repeats_a_write(live_writes):
-    for scen in ({("insert", "SLCoitems", 2): "reject"}, {("insert", "CCTJobs", 1): "timeout_after"},
-                 {("update", "SLCoitems", 1): "timeout_after"}):
+    for scen in ({("insert", "CCT_Coitems", 2): "reject"}, {("insert", "CCTJobs", 1): "timeout_after"},
+                 {("insert", "UserDefinedFields", 1): "timeout_after"}):
         req = save_req(3)
         req["lines"][0]["teardown"] = "t"
         out, soap = go(n=3, req=req, soap=FakeSoap(customers=CUST, scenarios=scen))
         assert soap.calls.count(("insert", "SLCos")) == 1 and soap.count("SLCos") == 1  # header written once
-        assert soap.calls.count(("update", "SLCoitems")) <= 1  # the teardown update is never repeated
+        assert soap.calls.count(("insert", "UserDefinedFields")) <= 1  # the teardown row is never repeated
         assert not hasattr(soap, "delete")  # and the client has no way to remove a row
 
 
@@ -240,8 +244,8 @@ def test_missing_database_settings_are_only_a_warning_for_the_defaults(monkeypat
 
 def test_reading_the_defaults_does_not_change_the_order_of_erp_writes(monkeypatch, live_writes):
     out, soap = go_defaults(monkeypatch, FakeSqlServer(co_rows=CO_ROWS))
-    assert kinds(soap) == [("insert", "SLCos"), ("insert", "SLCoitems"), ("insert", "CCTJobs"),
-                           ("insert", "SLCoitems"), ("insert", "CCTJobs")]
+    assert kinds(soap) == [("insert", "SLCos"), ("insert", "CCT_Coitems"), ("insert", "CCTJobs"),
+                           ("insert", "CCT_Coitems"), ("insert", "CCTJobs")]
 
 
 def test_the_defaults_are_not_read_when_live_writes_are_off(monkeypatch):
@@ -262,7 +266,7 @@ def test_a_supplied_job_number_is_saved_like_any_reserved_one_without_a_numberin
     soap = FakeSoap(customers=CUST)
     out = savewf.run_save(supplied_reservation(), save_req(2), soap, CFG)
     assert out["state"] == "succeeded" and [r["job"] for r in out["results"]] == ["5000", "J-77"]
-    assert soap.rows["CCTJobs"][1]["Job"] == "J-77" and soap.rows["SLCoitems"][1][idos.LINE_LINK_PROPS["ref_num"]] == "J-77"
+    assert soap.rows["CCTJobs"][1]["Job"].strip() == "J-77" and soap.rows["CCT_Coitems"][1]["ref_num"].strip() == "J-77"
     assert not any(c[0] == "invoke" for c in soap.calls)
 
 
@@ -274,32 +278,32 @@ def test_the_erp_rejecting_a_supplied_job_number_needs_reconciliation_and_nothin
     assert [c for c in soap.calls if c[:2] == ("insert", "CCTJobs")].__len__() == 2  # no retry
 
 
-def test_the_received_date_is_written_only_when_its_property_is_configured(monkeypatch, live_writes):
-    req = save_req(1, received_date="2026-10-19")
-    monkeypatch.setenv("SYTELINE_CO_RECEIVED_DATE_PROP", "Datefld")
-    _, soap = go(n=1, req=req)
-    assert soap.rows["SLCos"][0]["Datefld"] == "2026-10-19"
-    monkeypatch.delenv("SYTELINE_CO_RECEIVED_DATE_PROP")
-    _, soap = go(n=1, req=req)
-    assert "2026-10-19" not in soap.rows["SLCos"][0].values()
-
-
-def test_a_numeric_customer_number_is_written_as_the_erp_stores_it(live_writes):
-    """CustNum is a right-aligned, 7-character NumSortedString: "1234" is sent as "   1234" (the read-back compares stripped)."""
-    assert idos.erp_cust_num("1234") == "   1234" and idos.erp_cust_num(" 1234567 ") == "1234567"
-    assert idos.erp_cust_num("C1") == "C1" and idos.erp_cust_num("") == ""
+def test_a_numeric_customer_number_is_padded_to_seven_and_the_readback_compares_trimmed(live_writes):
+    assert rowbuild.rjust("1234", 7) == "   1234" and rowbuild.rjust(" 1234567 ", 7) == "1234567" and rowbuild.rjust(None, 3) == "   "
     soap = FakeSoap(customers=CUST)
     res = reservation(1)
     res["customer_match"] = {"cust_num": "1234", "cust_seq": 0}
     out = savewf.run_save(res, save_req(1), soap, CFG)
-    assert soap.rows["SLCos"][0]["CustNum"] == "   1234" and soap.rows["SLCos"][0]["CustSeq"] == 0
+    assert soap.rows["SLCos"][0]["CustNum"] == "   1234" and soap.rows["SLCos"][0]["CustSeq"] == "   0"
     assert out["state"] == "succeeded"
 
 
-def test_without_a_configured_teardown_property_no_update_is_made_and_the_line_says_so(live_writes, monkeypatch):
-    monkeypatch.delenv("SYTELINE_LINE_TEARDOWN_PROP")
-    req = save_req(1)
-    req["lines"][0]["teardown"] = "2026-10-25"
-    out, soap = go(n=1, req=req)
-    assert out["state"] == "succeeded" and ("update", "SLCoitems") not in soap.calls
-    assert any("teardown date not written" in w and "SYTELINE_LINE_TEARDOWN_PROP" in w for w in out["results"][0]["warnings"])
+def test_dates_are_iso_datetimes_with_the_eastern_offset_and_other_text_is_left_alone():
+    assert rowbuild.erp_datetime("2026-10-19") == "2026-10-19T00:00:00-04:00"   # daylight time
+    assert rowbuild.erp_datetime("01/15/2026") == "2026-01-15T00:00:00-05:00"   # standard time
+    assert rowbuild.erp_datetime("soon") == "soon"
+    assert rowbuild.number(3.0) == "3" and rowbuild.number(2.5) == "2.5" and rowbuild.number("x") == "x"
+    assert [rowbuild.packing_code(v) for v in ("Box", "CRATE", "pallet")] == ["CDBD", "YES", "pallet"]
+
+
+def test_without_a_found_default_the_header_has_no_terms_or_ship_code_and_the_defaults_win(live_writes):
+    head = rowbuild.co_header("100", {"cust_num": "1", "cust_seq": 0}, {"po_number": "P", "order_date": "2026-10-20"}, None)
+    assert "TermsCode" not in head and head["OrderDate"] == "2026-10-20T00:00:00-04:00" and head["Stat"] == "P"
+    with_codes = rowbuild.co_header("100", {"cust_num": "1", "cust_seq": 0}, {"po_number": "P"}, {"terms_code": "N30", "ship_code": "FOB"})
+    assert (with_codes["TermsCode"], with_codes["ShipCode"]) == ("N30", "FOB")
+
+
+def test_a_line_without_a_due_date_uses_the_received_date_for_the_job_schedule(live_writes):
+    req = {"po_number": "P", "received_date": "2026-10-19"}
+    row = rowbuild.job_row("100", 1, {"item": "I", "quantity": 1, "uom": "EA", "due_date": "2026-11-01"}, "5000", req)
+    assert row["JobDate"] == "2026-10-19T00:00:00-04:00" and row["JschStartDate"] == row["JschEndDate"] == "2026-11-01T00:00:00-04:00"

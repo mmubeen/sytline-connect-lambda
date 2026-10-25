@@ -2,7 +2,7 @@
 
 Follows the PO OCR demo's per-line order (runner._process_line) on top of the existing upload bookkeeping:
 
-  CO header -> per line: CO line carrying its job number (ref_num) -> teardown date (separate update) -> job
+  CO header -> per line: CO line (CCT_Coitems) carrying its job number (ref_num) -> teardown date (UserDefinedFields row) -> job
   -> read back every saved line, job and the link between them.
 
 It never obtains a number (the reservation already holds them). Safety rules are those of the upload (FR-004 of
@@ -10,10 +10,9 @@ feature 001): stop at the first problem, record a row as possibly written BEFORE
 never retry. Outcome states: saved | partly_saved | failed | needs_reconciliation (research.md R7, R8).
 """
 
-from . import config, defaults, errors, idos, preflight
+from . import config, defaults, errors, idos, preflight, rowbuild
 from .errors import ErpError, ErpRejected, LiveWritesDisabled
-from .pipeline import CO_IDO, JOB_IDO, LINE_IDO, Upload, _q, _Stop
-from .validation import today
+from .pipeline import CO_IDO, JOB_IDO, LINE_IDO, Upload, _Stop
 
 SAVED, FAILED, NOT_ATTEMPTED, UNVERIFIED = "saved", "failed", "not_attempted", "unverified"
 
@@ -41,17 +40,12 @@ class SaveRun(Upload):
 
     # -- steps -----------------------------------------------------------------------------
     def _teardown(self, i, value):
-        """Set the line's teardown date (a separate update, as in the demo) when a property for it is configured. A definite
-        rejection is a warning; anything else leaves the outcome unknown and stops the run."""
-        prop = idos.line_teardown_prop()
-        if not prop:
-            self.results[i - 1]["warnings"].append(
-                f"teardown date not written: no line property is configured for it ({idos.LINE_TEARDOWN_SETTING})")
-            return
+        """Set the line's teardown date as the demo does: a UserDefinedFields row for the line's RowPointer. A definite rejection
+        is a warning; anything else leaves the outcome unknown and stops the run."""
         step = f"teardown_{i}"
         self._time(step)
         try:
-            self.soap.update(LINE_IDO, {"CoNum": self.co_num, "CoLine": i}, {prop: value})
+            rowbuild.set_teardown(self.soap, self.co_num, i, value)
         except ErpRejected as exc:
             self.results[i - 1]["warnings"].append(f"teardown date not set: {exc}")
         except LiveWritesDisabled:
@@ -62,10 +56,10 @@ class SaveRun(Upload):
     def _read_back(self, lines):
         """{line: problem or None} for the given line numbers, plus a header problem; None if the read failed."""
         try:
-            cos = self.soap.read_back(CO_IDO, ["CoNum", "CustNum"], f"CoNum = {_q(self.co_num)}")
+            cos = self.soap.read_back(CO_IDO, ["CoNum", "CustNum"], rowbuild.co_filter(self.co_num))
             rows = self.soap.read_back(LINE_IDO, ["CoNum", "CoLine", "Item", "QtyOrdered", idos.LINK_NUM_PROP],
-                                       f"CoNum = {_q(self.co_num)}")
-            found = {j["job"]: self.soap.read_back(JOB_IDO, ["Job", *idos.JOB_LINK_PROPS.values()], f"Job = {_q(j['job'])}")
+                                       rowbuild.co_filter(self.co_num))
+            found = {j["job"]: self.soap.read_back(JOB_IDO, ["Job", *idos.JOB_LINK_PROPS.values()], rowbuild.job_filter(j["job"]))
                      for j in self.jobs if j["line"] in lines}
         except Exception:
             return None
@@ -74,7 +68,7 @@ class SaveRun(Upload):
             header = "CO header not found or duplicated"
         elif str(cos[0].get("CustNum", "")).strip() != str(self.customer.get("cust_num", "")):
             header = "CO customer differs from the resolved customer"
-        by_line = {str(r.get("CoLine")): r for r in rows}
+        by_line = {str(r.get("CoLine")).strip(): r for r in rows}
         problems = {}
         for j in self.jobs:
             i = j["line"]
@@ -135,43 +129,20 @@ class SaveRun(Upload):
                                              "check_properties"))
                 if missing:
                     raise _Stop(self._failed(errors.ERP_PROPERTIES_UNKNOWN, preflight.message(missing), "check_properties"))
-            header = {"CoNum": self.co_num, "CustNum": idos.erp_cust_num(self.customer["cust_num"]), "CustSeq": self.customer["cust_seq"],
-                      "OrderDate": req.get("order_date") or today(), "Stat": "O",
-                      idos.CO_HEADER_PROPS["cust_po"]: req["po_number"]}
-            if req.get("received_date") and idos.received_date_prop():
-                header[idos.received_date_prop()] = req["received_date"]
             # the customer's terms and ship-via from its most recent order; never blocks the save (warning instead)
             found, warning = defaults.read(self.customer, self.soap, self.cfg)
             if warning:
                 self.warnings.append(warning)
-            if found:
-                for key in ("terms_code", "ship_code"):
-                    if found[key]:
-                        header[idos.CO_HEADER_PROPS[key]] = found[key]
-            self._insert(CO_IDO, header, "co", self.co_num, "create_co")
+            self._insert(CO_IDO, rowbuild.co_header(self.co_num, self.customer, req, found), "co", self.co_num, "create_co")
 
             whse = req.get("warehouse") or self.cfg.get("SYTELINE_DEFAULT_WHSE", "")
-            ordtype = req.get("order_type") or self.cfg.get("SYTELINE_DEFAULT_ORDTYPE", "")
-            link = idos.LINE_LINK_PROPS
             for entry, ln in zip(self.jobs, req["lines"]):
                 i, job = entry["line"], entry["job"]
-                vals = {"CoNum": self.co_num, "CoLine": i, "Item": ln["item"], "UM": ln["uom"],
-                        "QtyOrdered": ln["quantity"], link["ref_type"]: "J", link["ref_num"]: job,
-                        link["ref_line_suf"]: 0, link["ref_release"]: 0}
-                for src, dst in (("due_date", "DueDate"), ("price", "Price")):
-                    if src in ln:
-                        vals[dst] = ln[src]
-                self._insert(LINE_IDO, vals, "line", f"{self.co_num}/{i}", f"create_line_{i}")
+                self._insert(idos.LINE_WRITE_IDO, rowbuild.co_line(self.co_num, i, ln, job, whse), "line",
+                             f"{self.co_num}/{i}", f"create_line_{i}")
                 if "teardown" in ln:
                     self._teardown(i, ln["teardown"])
-                jvals = {"Job": job, "OrdType": ordtype, "Whse": whse, "Item": ln["item"],
-                         "QtyReleased": ln["quantity"], idos.JOB_LINK_PROPS["co_num"]: self.co_num,
-                         idos.JOB_LINK_PROPS["co_line"]: i,
-                         idos.JOB_EXTRA_PROPS["root_job"]: job}
-                for src in ("engine_sn", "serial_num", "packing"):
-                    if ln.get(src):
-                        jvals[idos.JOB_EXTRA_PROPS[src]] = ln[src]
-                self._insert(JOB_IDO, jvals, "job", job, f"create_job_{i}")
+                self._insert(JOB_IDO, rowbuild.job_row(self.co_num, i, ln, job, req, whse), "job", job, f"create_job_{i}")
                 self._written.add(i)
                 self.results[i - 1]["co_line"] = i
 
@@ -214,8 +185,8 @@ class SaveRun(Upload):
         job = self.jobs[i - 1]["job"]
         try:
             line_rows = self.soap.read_back(LINE_IDO, ["CoNum", "CoLine"],
-                                            f"CoNum = {_q(self.co_num)} AND CoLine = {i}")
-            job_rows = self.soap.read_back(JOB_IDO, ["Job"], f"Job = {_q(job)}")
+                                            f"{rowbuild.co_filter(self.co_num)} AND CoLine = {idos.quote(rowbuild.rjust(i, rowbuild.CO_LINE_WIDTH))}")
+            job_rows = self.soap.read_back(JOB_IDO, ["Job"], rowbuild.job_filter(job))
         except Exception:
             return False
         return not line_rows and not job_rows

@@ -91,7 +91,7 @@ def test_a_passing_document_reserves_and_the_background_save_writes_the_order(wo
     ops = [c["operation"] for c in erp.calls_since(0)]
     assert "CallMethod" in ops          # the numbers were reserved
     assert "SaveDataSet" in ops         # and the order was written to the mock ERP only
-    assert any(r.get("CustPo") == "MOCK-PO-0001" for r in erp.rows("SLCos"))
+    assert any(str(r.get("CustPo")).strip() == "MOCK-PO-0001" for r in erp.rows("SLCos"))
 
 
 def test_a_job_number_the_document_supplies_is_kept_and_not_allocated(world):
@@ -101,7 +101,7 @@ def test_a_job_number_the_document_supplies_is_kept_and_not_allocated(world):
     assert [j["source"] for j in out["jobs"]] == ["allocated", "document"] and out["jobs"][1]["job"] == "MOCK-JOB-77"
     runtime.wait()
     assert not any("exception" in r for r in runtime.results), runtime.results
-    assert [r["Job"] for r in erp.rows("CCTJobs")] == [out["jobs"][0]["job"], "MOCK-JOB-77"]
+    assert [r["Job"].strip() for r in erp.rows("CCTJobs")] == [out["jobs"][0]["job"], "MOCK-JOB-77"]
     ops = [c["operation"] for c in erp.calls_since(0)]
     assert ops.count("CallMethod") == 2  # the CO number and one job number; none for line 2
 

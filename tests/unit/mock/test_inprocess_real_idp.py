@@ -138,7 +138,7 @@ def test_the_real_document_is_read_through_the_stand_in_and_the_order_goes_to_th
     out = run(stack, with_erp_data=True)
     assert out["outcome"] in ("reserved", "save_accepted"), out
     assert not any("exception" in r for r in runtime.results)
-    assert any(r.get("CustPo") == "MOCK-PO-0001" for r in erp.rows("SLCos"))
+    assert any(str(r.get("CustPo")).strip() == "MOCK-PO-0001" for r in erp.rows("SLCos"))
     real = [c for c in edge.calls.query(service="aws") if c["target"] == "real"]
     assert real and {c["action"] for c in real} <= realidp.READ_ONLY
     assert all(c["allowed"] for c in real)

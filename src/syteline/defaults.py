@@ -9,7 +9,7 @@ Never blocks a save: any problem, or a customer without orders, returns no defau
 
 import logging
 
-from . import config, idos, routes, steplog
+from . import config, idos, routes, rowbuild, steplog
 from .errors import ErpError, IntegrationError
 
 log = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ def _from_service(customer, soap, collection):
     web service only has to filter on the customer)."""
     props = idos.CO_HEADER_PROPS
     rows = soap.load(collection, ["CoNum", "CustNum", "CustSeq", props["terms_code"], props["ship_code"]],
-                     idos.filter_eq("CustNum", customer["cust_num"]))
+                     idos.filter_eq("CustNum", rowbuild.rjust(customer["cust_num"], rowbuild.CUST_NUM_WIDTH)))
     seq = str(customer.get("cust_seq", "")).strip()
 
     def newest(candidates):

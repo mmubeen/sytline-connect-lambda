@@ -108,8 +108,8 @@ def test_event_defaults_use_the_event_date_and_the_configured_warehouse_and_orde
 
 def test_event_defaults_name_what_is_not_configured(monkeypatch):
     monkeypatch.delenv("SYTELINE_DEFAULT_WHSE", raising=False)
-    monkeypatch.setenv("SYTELINE_DEFAULT_ORDTYPE", "  ")
-    assert config.event_defaults("2026-10-22")["missing"] == ["SYTELINE_DEFAULT_WHSE", "SYTELINE_DEFAULT_ORDTYPE"]
+    monkeypatch.setenv("SYTELINE_DEFAULT_ORDTYPE", "  ")  # no longer needed: a job always links to its order (OrdType O)
+    assert config.event_defaults("2026-10-22")["missing"] == ["SYTELINE_DEFAULT_WHSE"]
 
 
 def test_the_background_work_runs_on_this_same_function_unless_another_is_named(monkeypatch):

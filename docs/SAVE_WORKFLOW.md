@@ -56,10 +56,10 @@ The worker claims the reservation (`save_accepted` to `saving`; a second claim i
 |---|---|---|---|
 | 0 | Live-writes check | nothing | `failed` (`LIVE_WRITES_DISABLED`), nothing written |
 | 0b | **Customer defaults** | nothing (a read only): the terms code and ship-via code of the customer's most recent order, from the same ship-to first, otherwise any order; through the database or the web service as configured (`DefaultsIdo`); not read at all when that setting is absent | never blocks the save: no previous order or an unreadable default leaves the header without them and adds an order-level **warning** (shown by the status view) |
-| 1 | **CO header** (`SLCos`) | CO number, customer number and sequence, order date (request value or today), status `O`, customer PO number (from the document's PO number), received date if given, and the **terms code and ship-via code** from step 0b when found | rejected and proven absent: `failed`; otherwise see "Outcomes" |
-| 2a | **CO line** (`SLCoitems`; `CCT_Coitems` has none of these properties in this ERP), per line, in order | CO number, line number, item, UOM, quantity, due date and price if given, and the job reference: type `J`, **reference number = the line's reserved job number**, suffix 0, release 0 | see "Outcomes" |
-| 2b | **Teardown date**, only if the line has `teardown` | a separate update of that CO line | a rejection is a **warning** on the line and the run goes on; any other failure stops the run as uncertain |
-| 2c | **Job** (`CCTJobs`) | job number, order type and warehouse (request value, else the deployment default), item, quantity released, CO number and line (the link back), root job = the job number, engine serial, serial number and packing if given | see "Outcomes" |
+| 1 | **CO header** (`SLCos`) | CO number, customer number and sequence, customer PO number, **order date = the date the PO was received** (else the order date, else today), terms code and ship-via code from step 0b when found, and the fixed defaults `Stat` P, `Whse` MAIN, `TaxCode1` R, `FrtTaxCode1` N, `MscTaxCode1` N, `OrigSite` CCT. Key values are right-justified to the ERP's widths (CoNum 10, CustNum 7, CustSeq 4, CustPo 22). | a definite rejection with nothing written: `failed`; otherwise `needs_reconciliation` |
+| 2a | **CO line** (`CCT_Coitems`, lowercase column names), per line, in order | `co_num`, `co_line`, `co_release` 0, `item` (30 wide), `qty_ordered` and `qty_ordered_conv`, `u_m`, `whse`, `stat` P, `ship_site` CCT, `due_date` if given, and the job reference `ref_type` J, **`ref_num` = the line's reserved job number**, `ref_line_suf` 0, `ref_release` 0. Price is not written. | a definite rejection: the line is `failed` (`partly_saved` when earlier lines are proven saved); otherwise `needs_reconciliation` |
+| 2b | **Teardown date**, only if the line has `teardown` | a **`UserDefinedFields` row** for the line (`RowId` = the line's `RowPointer` read from `SLCoitems`, `TableName` `coitem`, `UDFDT1` = the date) | a rejection (or no RowPointer found) is a **warning** on the line and the run goes on; any other failure stops the run as uncertain |
+| 2c | **Job** (`CCTJobs`) | job number, `Suffix` 0, `Type` J, `Stat` F, item, warehouse (request value, else the deployment default), quantity released, `OrdType` **O**, `OrdNum` / `OrdLine` / `OrdRelease` (the link back to the CO line), `RootJob` = the job number, `RootSuf` 0, `JobDate` (the received date), `JschStartDate` and `JschEndDate` (the line's due date, else the received date), and `uf_eng_sn`, `uf_sn`, `uf_app` (packing: Box -> CDBD, Crate -> YES) if given | see "Out
 | 3 | **Read-back** | nothing (reads only) | see below |
 
 Each row is recorded as "possibly written" **before** it is sent. If the worker stops at any moment, the record shows exactly which rows might exist in SyteLine.
@@ -153,21 +153,23 @@ Both use the same ERP safety rules, the same single worker and the same jobs tab
 | Reserve answers `UNCERTAIN_OUTCOME` (502) | the database connection was lost while a number was being reserved; that number may be consumed (the response lists the numbers already obtained as `consumed_unused`); it is never retried: reserve again with a new `request_ref` |
 | `ERP_UNREACHABLE` on a database step | cannot connect or log in: run `{"action":"health"}` and read `db_dns`, `db_tcp`, `db_login` (certificate, host name, login) |
 
-## Property names checked against `docs/COJobCreationIDOs.xlsx`
+## Where the field names and values come from
 
-The first live saves showed which guessed names were wrong; the workbook settles these:
+They follow the PO OCR demo (`Intern-Demo/.../COMPLETE_OCR`, `sytline/syteline/forms/*.py` and `formatting.py`), which is known to work against this ERP, and `docs/COJobCreationIDOs.xlsx`. The rows are built in one place, `src/syteline/rowbuild.py`.
 
-- **CO header (`SLCos`)**: `CustPo`, `TermsCode`, `ShipCode`, `OrderDate`, `Stat` exist. There is **no received-date property**: the service refused `DateReceived`. The received date is therefore not written unless `SYTELINE_CO_RECEIVED_DATE_PROP` names the property to use (not yet a template parameter).
-- **Job (`CCTJobs`)**: no `CoNum` or `CoLine`; the job's link back to its order is `OrdNum` / `OrdLine` (`idos.JOB_LINK_PROPS`, also what the read-back checks). The engine and serial numbers are `uf_eng_sn` and `uf_sn`.
-- **Still unconfirmed** (not in the workbook): the line's teardown-date property (`SLCoitems` has none: the date is written only when `SYTELINE_LINE_TEARDOWN_PROP` names a property, a function setting that is not yet a template parameter, and otherwise the line carries a warning), the job's packing property (`Packing`), and what `OrdType` must hold (in `SLJobs` it is the type of the referencing order, not necessarily the configured "order type").
+- **Lines are written to `CCT_Coitems`** with lowercase column-style names (`co_num`, `co_line`, `u_m`, `ref_num` ...); the standard `SLCoitems` (PascalCase) is only **read back**. Writing PascalCase names to `CCT_Coitems` is why every name was refused there.
+- **Key values are padded** (right-justified) to the column widths, and filters on them use the padded value too: CoNum / Job / OrdNum / ref_num 10, CoLine 4, CustNum 7, CustSeq 4, CustPo 22, Item 30.
+- **SLCos has no received-date property**: the demo writes the received date as `OrderDate`.
+- **Dates** are ISO datetimes at midnight with the Eastern offset, for example `2026-10-19T00:00:00-04:00`.
+- **A job always links to its order**: `OrdType` is `O`; the configured order type is no longer written (`SYTELINE_DEFAULT_ORDTYPE` is not required any more).
+- **Not done yet** (the demo does them): the `R* ` prefix on item codes, the unit of measure and due period from the customer contract, the item description from the item master, and a default teardown date of the received date plus 7 days. A price is not written by the demo or here.
 
 ## Finding the right property names (read-only)
 
 When the service refuses a property ("error property [X] does not exist in [IDO] IDO"), ask it which names an IDO accepts instead of guessing, one failed save at a time:
 
 ```
-./invoke.sh '{"action": "probe_properties", "ido": "CCT_Coitems"}'
-./invoke.sh '{"action": "probe_properties", "ido": "CCT_Coitems", "properties": ["CoNum", "CoNumber", "OrdNum"]}'
+echo '{"action": "probe_properties", "ido": "CCT_Coitems"}' > /tmp/probe.json && ./invoke.sh /tmp/probe.json
 ```
 
 To list the names an IDO declares instead of guessing (names only, from the schema of a one-row read; the payload goes in a file, `./invoke.sh FILE`):
