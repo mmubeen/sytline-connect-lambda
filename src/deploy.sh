@@ -174,6 +174,10 @@ if [[ "${LOG_EVENTS:-false}" == "true" ]]; then
   echo "WARNING: LOG_EVENTS=true: the function logs the WHOLE incoming event, so its logs will hold document and order content (names, addresses, part numbers). Turn it off (LOG_EVENTS=false) and redeploy when you have finished debugging."
 fi
 [[ "${JOB_NUMBER:-}" =~ ^[A-Za-z0-9_-]{0,20}$ ]] || die "JOB_NUMBER must be empty or up to 20 letters, digits, - or _"
+[[ "${CO_NUMBER:-}" =~ ^[A-Za-z0-9_-]{0,10}$ ]] || die "CO_NUMBER must be empty or up to 10 letters, digits, - or _"
+if [[ -n "${CO_NUMBER:-}" ]]; then
+  echo "WARNING: CO_NUMBER=$CO_NUMBER: every reservation will use this CO number and none is allocated. If an order with this number already exists the ERP rejects the header. Empty it (CO_NUMBER=) and redeploy when the test is over."
+fi
 if [[ -n "${JOB_NUMBER:-}" ]]; then
   echo "WARNING: JOB_NUMBER=$JOB_NUMBER: every line of every reservation will use this job number and no new one is allocated. A PO with several lines gets the same number on each and the ERP will reject the second job. Empty it (JOB_NUMBER=) and redeploy when the test is over."
 fi
@@ -265,6 +269,7 @@ overrides=(
   "$(q SqlEncrypt "${SQL_ENCRYPT:-true}")"
   "$(q LogEvents "${LOG_EVENTS:-false}")"
   "$(q JobNumber "${JOB_NUMBER:-}")"
+  "$(q CoNumber "${CO_NUMBER:-}")"
   "$(q SqlVerifyHostname "${SQL_VERIFY_HOSTNAME:-true}")"
   "$(q SqlLoginTimeout "${SQL_LOGIN_TIMEOUT:-5}")"
   "$(q SqlTimeout "${SQL_TIMEOUT:-10}")"

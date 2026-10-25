@@ -55,6 +55,11 @@ def fixed_job_number():
     return os.environ.get("JOB_NUMBER", "").strip()
 
 
+def fixed_co_number():
+    """CO_NUMBER (deploy.env): a TEST setting. When set, every reservation uses this CO number and none is allocated."""
+    return os.environ.get("CO_NUMBER", "").strip()
+
+
 def live_writes_enabled():
     """True only when SYTELINE_LIVE_WRITES is explicitly on. Default: off (FR-016)."""
     return truthy(os.environ.get("SYTELINE_LIVE_WRITES", "false"))

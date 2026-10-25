@@ -81,8 +81,10 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source
             raise _Stop(errors.LIVE_WRITES_DISABLED, "live ERP writes are disabled; no number was reserved",
                         "live_writes_check")
 
-        co_num = allocate("next_co", "CO", "number_co")
-        consumed.append({"kind": "co", "number": co_num})
+        co_num = config.fixed_co_number()  # CO_NUMBER (a test setting): a number already consumed, reused, none allocated
+        if not co_num:
+            co_num = allocate("next_co", "CO", "number_co")
+            consumed.append({"kind": "co", "number": co_num})
         record(store.set_co_num, rid, co_num)
         jobs = []
         for i in range(1, len(details["lines"]) + 1):

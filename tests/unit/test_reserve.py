@@ -279,3 +279,31 @@ def test_an_empty_job_number_setting_changes_nothing(live_writes, monkeypatch):
     out, soap, _ = go()
     assert [j["source"] for j in out["reservation"]["job_numbers"]] == ["allocated"] * 3
     assert soap.calls.count(("invoke", "NextWOSp")) == 3
+
+
+# ---- CO_NUMBER: a reused CO number for tests (deploy.env) -------------------------------------------------------------
+def test_a_configured_co_number_is_used_and_none_is_allocated(live_writes, monkeypatch):
+    monkeypatch.setenv("CO_NUMBER", "129548")
+    out, soap, _ = go()
+    assert out["reservation"]["co_num"] == "129548" and out["reservation"]["state"] == rs.RESERVED
+    assert soap.calls.count(("invoke", "NextCoSp")) == 0 and soap.calls.count(("invoke", "NextWOSp")) == 3
+
+
+def test_with_both_settings_no_number_routine_is_called_at_all(live_writes, monkeypatch):
+    monkeypatch.setenv("CO_NUMBER", "129548")
+    monkeypatch.setenv("JOB_NUMBER", "TEST-001")
+    out, soap, _ = go()
+    assert out["reservation"]["state"] == rs.RESERVED and not [c for c in soap.calls if c[0] == "invoke"]
+
+
+def test_live_writes_off_still_reserves_nothing_with_a_configured_co_number(monkeypatch):
+    monkeypatch.setenv("CO_NUMBER", "129548")
+    out, soap, _ = go()
+    assert out["failure"]["code"] == errors.LIVE_WRITES_DISABLED and soap.writes() == []
+
+
+def test_a_reused_co_number_is_not_reported_as_consumed(live_writes, monkeypatch):
+    monkeypatch.setenv("CO_NUMBER", "129548")
+    soap = FakeSoap(customers=CUST, scenarios={("invoke", "NextWOSp", 2): "reject"})
+    out, _, _ = go(soap=soap)
+    assert out["consumed_unused"] == [{"kind": "job", "line": 1, "number": "5000"}]

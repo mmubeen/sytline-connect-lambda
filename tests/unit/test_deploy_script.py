@@ -504,3 +504,20 @@ def test_job_number_is_passed_with_a_warning(run):
 def test_job_number_must_be_a_plain_identifier(run):
     p, calls = run({**BASE, **NET, "JOB_NUMBER": "a b"})
     assert p.returncode != 0 and "JOB_NUMBER must be empty or" in (p.stdout + p.stderr) and not deployed(calls)
+
+
+# ---- CO_NUMBER: a reused CO number for tests ----------------------------------------------------------------------------
+def test_co_number_defaults_to_empty_and_is_always_passed(run):
+    p, calls = run({**BASE, **NET})
+    assert p.returncode == 0 and overrides(calls)["CoNumber"] == "" and "CO_NUMBER=" not in p.stdout
+
+
+def test_co_number_is_passed_with_a_warning(run):
+    p, calls = run({**BASE, **NET, "CO_NUMBER": "129548"})
+    assert p.returncode == 0 and overrides(calls)["CoNumber"] == "129548"
+    assert "CO_NUMBER=129548" in p.stdout and "none is allocated" in p.stdout
+
+
+def test_co_number_must_be_a_plain_identifier(run):
+    p, calls = run({**BASE, **NET, "CO_NUMBER": "a b"})
+    assert p.returncode != 0 and "CO_NUMBER must be empty or" in (p.stdout + p.stderr) and not deployed(calls)

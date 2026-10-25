@@ -67,6 +67,15 @@ Parameters:
       content are replaced by their size). "true": the whole event is logged (cut at 8000 characters), so the logs then hold
       document and order content; use it to debug a payload and turn it off again. Credentials in headers are never logged.
 
+  CoNumber:
+    Type: String
+    Default: ""
+    AllowedPattern: "^[A-Za-z0-9_-]{0,10}$"
+    Description: >-
+      TEST setting. Empty (default): the CO number is allocated by the ERP. A value: every reservation uses this CO number and
+      none is allocated, so tests reuse a number that was already consumed. Use a number that was consumed and never created
+      (if that order exists, the ERP rejects the header). Leave empty outside a test.
+
   JobNumber:
     Type: String
     Default: ""
@@ -360,6 +369,7 @@ Resources:
           SYTELINE_LIVE_WRITES: !Ref LiveWrites
           LOG_EVENTS: !Ref LogEvents
           JOB_NUMBER: !Ref JobNumber
+          CO_NUMBER: !Ref CoNumber
           SYTELINE_NEXT_CO_IDO: !Ref NextCoIdo
           SYTELINE_NEXT_JOB_IDO: !Ref NextJobIdo
           SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo

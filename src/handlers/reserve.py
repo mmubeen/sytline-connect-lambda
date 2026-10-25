@@ -50,7 +50,7 @@ def _body(item, duplicate):
                                                  "message": "the reservation never finished", "step": "reserve"}
         consumed = [{"kind": "job", "line": j["line"], "number": j["job"]} for j in report["jobs"]
                     if j["source"] == "allocated"]  # a number the document or JOB_NUMBER gave was not consumed here
-        if report["co_num"]:
+        if report["co_num"] and not config.fixed_co_number():  # a fixed CO number (CO_NUMBER) was reused, not consumed here
             consumed.insert(0, {"kind": "co", "number": report["co_num"]})
         if consumed:
             out["consumed_unused"] = consumed

@@ -45,6 +45,10 @@ A line item of the document may carry its own job number. Map it with `IDP_FIELD
 
 `JOB_NUMBER=TEST-001` (up to 20 letters, digits, `-`, `_`) makes **every line of every reservation** use that job number: no `NextWOSp` call, `"source": "configured"` in the response, and it wins over a job number the document carries. A PO with several lines gets the same number on each line and the ERP rejects the second job, so use it with single-line documents. Leave it empty (the default) outside a test; `deploy.sh` prints a warning while it is set.
 
+### `CO_NUMBER` in `deploy.env` (test only)
+
+`CO_NUMBER=129548` makes every reservation use that CO number and allocate none (no `NextCoSp` call). Use it to reuse a number that a failed test already consumed and never created, so repeated tests do not burn CO numbers. If an order with that number exists, the ERP rejects the header. With `JOB_NUMBER` as well, no number routine is called at all. Leave it empty outside a test; `deploy.sh` warns while it is set.
+
 ## Outcomes
 
 | `outcome` | Meaning | Anything reserved or written? |
