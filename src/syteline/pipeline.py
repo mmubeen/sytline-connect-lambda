@@ -176,7 +176,7 @@ class Upload:
             found, warning = defaults.read(self.customer, self.soap, self.cfg)  # never blocks the upload
             if warning:
                 log.warning("%s", warning)
-            header = {"CoNum": None, "CustNum": self.customer["cust_num"], "CustSeq": self.customer["cust_seq"],
+            header = {"CoNum": None, "CustNum": idos.erp_cust_num(self.customer["cust_num"]), "CustSeq": self.customer["cust_seq"],
                       "OrderDate": req.get("order_date") or today(), "Stat": "O"}
             for key in ("terms_code", "ship_code"):
                 if found and found[key]:

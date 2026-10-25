@@ -32,6 +32,17 @@ CUSTOMER_PROPS = {"cust_num": "CustNum", "cust_seq": "CustSeq", "name": "Name", 
 
 CUSTOMER_LOOKUP_CAP = 50
 
+# CustNum is a NumSortedString of length 7, right-aligned (docs/COJobCreationIDOs.xlsx): SyteLine stores a numeric customer
+# number right-justified and space-padded, while this service keeps customer numbers stripped. A write sends the stored form.
+CUSTNUM_WIDTH = 7
+
+
+def erp_cust_num(value):
+    """The customer number as SyteLine stores it: a numeric one right-justified to 7 characters; anything else unchanged."""
+    text = str(value).strip()
+    return text.rjust(CUSTNUM_WIDTH) if text.isdigit() and len(text) < CUSTNUM_WIDTH else text
+
+
 # Property names written by the job-reservation save (feature 004), following the PO OCR demo's field mapping
 # (JOB_NUMBER_RETRIEVAL.md). ALL UNCONFIRMED until the read-only discovery task has been run against the plant:
 # correct them here only.

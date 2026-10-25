@@ -276,3 +276,15 @@ def test_the_received_date_is_written_only_when_its_property_is_configured(monke
     monkeypatch.delenv("SYTELINE_CO_RECEIVED_DATE_PROP")
     _, soap = go(n=1, req=req)
     assert "2026-10-19" not in soap.rows["SLCos"][0].values()
+
+
+def test_a_numeric_customer_number_is_written_as_the_erp_stores_it(live_writes):
+    """CustNum is a right-aligned, 7-character NumSortedString: "1234" is sent as "   1234" (the read-back compares stripped)."""
+    assert idos.erp_cust_num("1234") == "   1234" and idos.erp_cust_num(" 1234567 ") == "1234567"
+    assert idos.erp_cust_num("C1") == "C1" and idos.erp_cust_num("") == ""
+    soap = FakeSoap(customers=CUST)
+    res = reservation(1)
+    res["customer_match"] = {"cust_num": "1234", "cust_seq": 0}
+    out = savewf.run_save(res, save_req(1), soap, CFG)
+    assert soap.rows["SLCos"][0]["CustNum"] == "   1234" and soap.rows["SLCos"][0]["CustSeq"] == 0
+    assert out["state"] == "succeeded"

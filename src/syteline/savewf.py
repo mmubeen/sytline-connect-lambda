@@ -122,7 +122,7 @@ class SaveRun(Upload):
             if not config.live_writes_enabled():
                 raise _Stop(self._failed(errors.LIVE_WRITES_DISABLED,
                                          "live ERP writes are disabled; nothing was written", "live_writes_check"))
-            header = {"CoNum": self.co_num, "CustNum": self.customer["cust_num"], "CustSeq": self.customer["cust_seq"],
+            header = {"CoNum": self.co_num, "CustNum": idos.erp_cust_num(self.customer["cust_num"]), "CustSeq": self.customer["cust_seq"],
                       "OrderDate": req.get("order_date") or today(), "Stat": "O",
                       idos.CO_HEADER_PROPS["cust_po"]: req["po_number"]}
             if req.get("received_date") and idos.received_date_prop():
