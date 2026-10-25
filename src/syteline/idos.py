@@ -11,7 +11,9 @@ import os
 
 # Confirmed by docs/COJobCreationIDOs.xlsx or the instruction sheet
 CO_IDO = "SLCos"
-LINE_IDO = "SLCoitems"  # in the workbook. (CCT_Coitems, named in the instruction sheet, has none of these properties in this ERP)
+LINE_IDO = "SLCoitems"          # the standard line IDO (PascalCase, in the workbook): lines are READ back through it
+LINE_WRITE_IDO = "CCT_Coitems"  # lines are WRITTEN here (lowercase column-style names, as the PO OCR demo does); see rowbuild.py
+UDF_IDO = "UserDefinedFields"   # holds a line's teardown date (UDFDT1), keyed by the line's RowPointer
 JOB_IDO = "CCTJobs"
 NOTE_IDO = "SpecificNotes"
 OBJECT_NOTE_IDO = "ObjectNotes"
@@ -32,46 +34,18 @@ CUSTOMER_PROPS = {"cust_num": "CustNum", "cust_seq": "CustSeq", "name": "Name", 
 
 CUSTOMER_LOOKUP_CAP = 50
 
-# CustNum is a NumSortedString of length 7, right-aligned (docs/COJobCreationIDOs.xlsx): SyteLine stores a numeric customer
-# number right-justified and space-padded, while this service keeps customer numbers stripped. A write sends the stored form.
-CUSTNUM_WIDTH = 7
-
-
-def erp_cust_num(value):
-    """The customer number as SyteLine stores it: a numeric one right-justified to 7 characters; anything else unchanged."""
-    text = str(value).strip()
-    return text.rjust(CUSTNUM_WIDTH) if text.isdigit() and len(text) < CUSTNUM_WIDTH else text
-
-
-# Property names written by the job-reservation save (feature 004), following the PO OCR demo's field mapping
-# (JOB_NUMBER_RETRIEVAL.md). ALL UNCONFIRMED until the read-only discovery task has been run against the plant:
-# correct them here only.
-# CustPo, TermsCode and ShipCode are confirmed by docs/COJobCreationIDOs.xlsx. SLCos has NO received-date property (the
-# service refused "DateReceived"): the received date is written only when SYTELINE_CO_RECEIVED_DATE_PROP names the property.
+# Property names of the job-reservation save (feature 004), following the PO OCR demo (Intern-Demo `sytline/`); the rows themselves
+# are built in rowbuild.py.
+# CustPo, TermsCode and ShipCode are confirmed by docs/COJobCreationIDOs.xlsx and the demo. SLCos has NO received-date property:
+# the demo writes the received date as OrderDate (rowbuild.py).
 CO_HEADER_PROPS = {"cust_po": "CustPo", "terms_code": "TermsCode", "ship_code": "ShipCode"}
-RECEIVED_DATE_SETTING = "SYTELINE_CO_RECEIVED_DATE_PROP"
-
-
-def received_date_prop():
-    """The CO header property that holds the date the PO was received, or None (not written)."""
-    return os.environ.get(RECEIVED_DATE_SETTING) or None
-
-
-
+# Read-back names on the standard SLCoitems (the lines themselves are written to CCT_Coitems with other names)
 LINE_LINK_PROPS = {"ref_type": "RefType", "ref_num": "RefNum", "ref_line_suf": "RefLineSuf", "ref_release": "RefRelease"}
 LINK_NUM_PROP = LINE_LINK_PROPS["ref_num"]  # read back to confirm the line references its job
-# The teardown date is set by a separate update after the line exists, as in the demo. SLCoitems has NO teardown property (the
-# workbook); the property that holds it, if any, is named by SYTELINE_LINE_TEARDOWN_PROP. Unset: the date is not written and the
-# line says so.
-LINE_TEARDOWN_SETTING = "SYTELINE_LINE_TEARDOWN_PROP"
-
-
-def line_teardown_prop():
-    return os.environ.get(LINE_TEARDOWN_SETTING) or None
 # The job's link back to its order is OrdNum / OrdLine (the workbook has no CoNum / CoLine on SLJobs or CCTJobs).
 JOB_LINK_PROPS = {"co_num": "OrdNum", "co_line": "OrdLine"}
-# RootJob, uf_eng_sn and uf_sn are confirmed by the workbook (CCTJobs); the property for `packing` is not in it (UNCONFIRMED).
-JOB_EXTRA_PROPS = {"root_job": "RootJob", "engine_sn": "uf_eng_sn", "serial_num": "uf_sn", "packing": "Packing"}
+# RootJob, uf_eng_sn and uf_sn are confirmed by the workbook (CCTJobs); uf_app (the packing code) is the demo's name for `packing`.
+JOB_EXTRA_PROPS = {"root_job": "RootJob", "engine_sn": "uf_eng_sn", "serial_num": "uf_sn", "packing": "uf_app"}
 
 
 # Route settings (feature 005): per operation, an IDO name keeps it on the web service; `database` or empty uses the

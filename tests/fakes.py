@@ -29,12 +29,26 @@ def _match(row, cond):
     assert m, f"unsupported filter condition: {cond}"
     prop, op, raw = m.groups()
     have = str(row.get(prop, "")).strip()
-    want = _unquote(raw)
+    want = _unquote(raw).strip()
     if op == "=":
         return have.upper() == want.upper()
     if op == ">=":
         return have >= want
     return re.match(_like_to_regex(want), have, re.I) is not None
+
+
+class _LineRead:
+    """CCT_Coitems (lowercase, padded) -> the PascalCase names SLCoitems answers with."""
+
+    NAMES = {"co_num": "CoNum", "co_line": "CoLine", "co_release": "CoRelease", "item": "Item", "qty_ordered": "QtyOrdered",
+             "u_m": "UM", "whse": "Whse", "ref_type": "RefType", "ref_num": "RefNum", "ref_line_suf": "RefLineSuf",
+             "ref_release": "RefRelease", "due_date": "DueDate"}
+
+    def get_all(self, values):
+        return {self.NAMES[k]: v for k, v in values.items() if k in self.NAMES}
+
+
+_LINE_READ = _LineRead()
 
 
 class FakeSoap:
@@ -95,6 +109,8 @@ class FakeSoap:
         if action == "unreachable":
             raise ErpUnreachable("connect failed")
         row = self.add_record(ido, **values)
+        if ido == idos.LINE_WRITE_IDO:  # the line written to CCT_Coitems is read back through the standard SLCoitems
+            self.add_record(idos.LINE_IDO, **_LINE_READ.get_all(values))
         if action == "timeout_after":
             raise ErpUncertain("timeout after insert")
         return row

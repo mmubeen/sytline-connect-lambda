@@ -7,12 +7,6 @@ CFG = {"SYTELINE_DEFAULT_WHSE": "MAIN", "SYTELINE_DEFAULT_ORDTYPE": "J"}
 CUST = [{"cust_num": "C1", "cust_seq": 0, "name": "ACME"}]
 
 
-@pytest.fixture(autouse=True)
-def teardown_property(monkeypatch):
-    """SLCoitems has no teardown property of its own: these tests name one."""
-    monkeypatch.setenv("SYTELINE_LINE_TEARDOWN_PROP", "Teardown")
-
-
 def req(n=2, **kw):
     r = {"request_ref": "r", "customer": {"name": "ACME"},
          "lines": [{"item": f"I{i}", "quantity": i + 1, "uom": "EA"} for i in range(n)]}
@@ -31,24 +25,26 @@ def test_happy_path_order_and_readback(live_writes):
     assert out["lines"] == [{"line": 1, "job": "5000"}, {"line": 2, "job": "5001"}]
     kinds = [(c[0], c[1]) for c in soap.calls if c[0] in ("insert", "invoke")]
     assert kinds == [("invoke", "NextCoSp"), ("insert", "SLCos"),
-                     ("invoke", "NextWOSp"), ("insert", "SLCoitems"), ("insert", "CCTJobs"),
-                     ("invoke", "NextWOSp"), ("insert", "SLCoitems"), ("insert", "CCTJobs")]
+                     ("invoke", "NextWOSp"), ("insert", "CCT_Coitems"), ("insert", "CCTJobs"),
+                     ("invoke", "NextWOSp"), ("insert", "CCT_Coitems"), ("insert", "CCTJobs")]
     first_write = soap.calls.index(("invoke", "NextCoSp"))
     assert all(c == ("load", "SLCustAddrs") or c[0] != "load" for c in soap.calls[:first_write])  # only the lookup precedes
     reads = [c for c in soap.calls[soap.calls.index(("insert", "CCTJobs")):] if c[0] == "load"]
     assert len(reads) == 4  # CO + lines + 2 jobs, after the last insert
-    assert soap.rows["CCTJobs"][1]["Item"] == "I1" and soap.rows["CCTJobs"][1]["QtyReleased"] == 2
-    assert soap.rows["CCTJobs"][0]["Whse"] == "MAIN" and soap.rows["CCTJobs"][0]["OrdType"] == "J"
-    assert soap.rows["SLCos"][0]["CustNum"] == "C1"
+    assert soap.rows["CCTJobs"][1]["Item"].strip() == "I1" and soap.rows["CCTJobs"][1]["QtyReleased"] == "2"
+    assert soap.rows["CCTJobs"][0]["Whse"] == "MAIN" and soap.rows["CCTJobs"][0]["OrdType"] == "O"  # a job always links to its order
+    assert soap.rows["SLCos"][0]["CustNum"].strip() == "C1"
 
 
-def test_request_overrides_defaults_and_teardown_is_written(live_writes):
-    r = req(1, warehouse="W9", order_type="S")
-    r["lines"][0]["teardown"] = "TD-7"
+def test_request_overrides_the_warehouse_and_the_teardown_date_is_a_userdefinedfields_row(live_writes):
+    r = req(1, warehouse="W9", order_type="S")  # order_type is accepted and ignored: OrdType is always O
+    r["lines"][0]["teardown"] = "2026-10-25"
     out, soap = run(r)
     assert out["state"] == "succeeded"
-    assert (soap.rows["CCTJobs"][0]["Whse"], soap.rows["CCTJobs"][0]["OrdType"]) == ("W9", "S")
-    assert soap.rows["SLCoitems"][0]["Teardown"] == "TD-7"
+    assert (soap.rows["CCTJobs"][0]["Whse"], soap.rows["CCTJobs"][0]["OrdType"]) == ("W9", "O")
+    assert soap.rows["CCT_Coitems"][0]["whse"] == "W9"
+    (udf,) = soap.rows["UserDefinedFields"]
+    assert udf["TableName"] == "coitem" and udf["UDFDT1"] == "2026-10-25T00:00:00-04:00"
 
 
 def test_live_writes_off_stops_after_the_lookup_with_no_write_attempt():
@@ -114,7 +110,7 @@ def test_the_upload_takes_its_numbers_from_the_database_and_writes_rows_through_
     assert out["lines"] == [{"line": 1, "job": "5000"}, {"line": 2, "job": "5001"}]
     assert f.committed == [100, 5000, 5001] and f.opened == f.closed == 1
     assert [c[1] for c in soap.calls if c[0] == "invoke"] == []  # no numbering call to the web service
-    assert [c[1] for c in soap.calls if c[0] == "insert"] == ["SLCos", "SLCoitems", "CCTJobs", "SLCoitems", "CCTJobs"]
+    assert [c[1] for c in soap.calls if c[0] == "insert"] == ["SLCos", "CCT_Coitems", "CCTJobs", "CCT_Coitems", "CCTJobs"]
 
 
 def test_an_unknown_database_outcome_for_the_first_number_is_failed_with_the_uncertain_code(monkeypatch, db_numbers,
@@ -140,7 +136,7 @@ def test_missing_database_settings_fail_the_upload_before_anything_is_written(mo
 
 def test_the_database_connection_is_closed_when_the_upload_ends_in_any_state(monkeypatch, db_numbers, live_writes):
     f = FakeSqlServer().install(monkeypatch)
-    soap = FakeSoap(customers=CUST, scenarios={("insert", "SLCoitems", 1): "timeout_after"})
+    soap = FakeSoap(customers=CUST, scenarios={("insert", "CCT_Coitems", 1): "timeout_after"})
     out, _ = run_db(soap=soap)
     assert out["state"] == "needs_reconciliation" and f.opened == f.closed == 1
 
@@ -159,11 +155,3 @@ def test_an_unreadable_default_never_blocks_the_upload(monkeypatch, live_writes)
     FakeSqlServer(connect_error="login_fail").install(monkeypatch)
     out, soap = run_db()
     assert out["state"] == "succeeded" and "TermsCode" not in soap.rows["SLCos"][0]
-
-
-def test_without_a_configured_teardown_property_the_date_is_not_written(live_writes, monkeypatch):
-    monkeypatch.delenv("SYTELINE_LINE_TEARDOWN_PROP")
-    r = req(1)
-    r["lines"][0]["teardown"] = "TD-7"
-    out, soap = run(r)
-    assert out["state"] == "succeeded" and "Teardown" not in soap.rows["SLCoitems"][0] and "TD-7" not in soap.rows["SLCoitems"][0].values()

@@ -3,13 +3,13 @@
 A save that names a property the IDO does not have fails halfway (after the CO header is created), leaving an order with no
 lines in SyteLine and burning the numbers. Each property name the save will write is therefore asked for first, alone, in a
 one-row READ; a name that is refused is reported (with every other missing name) and nothing is reserved or written. A name
-that passed is remembered for the life of the container. Teardown is not checked: a refused teardown date is only a warning.
-Switch off with SYTELINE_CHECK_PROPERTIES=false.
+that passed is remembered for the life of the container. The names come from the rows rowbuild builds, so the check cannot drift
+from the save. Switch off with SYTELINE_CHECK_PROPERTIES=false.
 """
 
 import os
 
-from . import idos
+from . import idos, rowbuild
 from .errors import ErpRejected
 
 _verified = set()  # (ido, property) pairs that were accepted in this container
@@ -20,16 +20,26 @@ def enabled():
 
 
 def needed(lines):
-    """{ido: [property names the save writes]} for these PO lines (dicts with the optional keys they carry)."""
-    has = lambda *keys: any(ln.get(k) for ln in lines or [] for k in keys)  # noqa: E731
-    co = ["CoNum", "CustNum", "CustSeq", "OrderDate", "Stat", *idos.CO_HEADER_PROPS.values()]
-    if idos.received_date_prop():
-        co.append(idos.received_date_prop())
-    line = ["CoNum", "CoLine", "Item", "UM", "QtyOrdered", *idos.LINE_LINK_PROPS.values()]
-    line += [p for p, keys in (("DueDate", ("due_date",)), ("Price", ("price",))) if has(*keys)]
-    job = ["Job", "OrdType", "Whse", "Item", "QtyReleased", *idos.JOB_LINK_PROPS.values(), idos.JOB_EXTRA_PROPS["root_job"]]
-    job += [idos.JOB_EXTRA_PROPS[k] for k in ("engine_sn", "serial_num", "packing") if has(k)]
-    return {idos.CO_IDO: co, idos.LINE_IDO: line, idos.JOB_IDO: job}
+    """{ido: [property names the save writes or reads back]} for these PO lines: the names of the rows rowbuild builds (the union
+    over the lines, so optional ones appear only when some line carries them), so the check cannot drift from the save."""
+    lines = lines or [{}]
+    sample = {"item": "I", "quantity": 1, "uom": "EA"}
+    req = {"po_number": "P", "received_date": "2026-01-01"}
+    cust = {"cust_num": "1", "cust_seq": 0}
+    found = {"terms_code": "T", "ship_code": "S"}
+    line_props, job_props = [], []
+    for ln in lines:
+        full = {**sample, **{k: v for k, v in ln.items() if k in ("due_date", "engine_sn", "serial_num", "packing") and v}}
+        for src, dst in ((rowbuild.co_line("1", 1, full, "1"), line_props), (rowbuild.job_row("1", 1, full, "1", req), job_props)):
+            dst += [k for k in src if k not in dst]
+    udf = any(ln.get("teardown") for ln in lines)
+    out = {idos.CO_IDO: list(rowbuild.co_header("1", cust, req, found)) + [],
+           idos.LINE_WRITE_IDO: line_props,
+           idos.LINE_IDO: ["CoNum", "CoLine", "Item", "QtyOrdered", *idos.LINE_LINK_PROPS.values()] + (["RowPointer"] if udf else []),
+           idos.JOB_IDO: job_props}
+    if udf:
+        out[idos.UDF_IDO] = ["RowId", "TableName", "UDFDT1"]
+    return out
 
 
 def check(soap, lines):

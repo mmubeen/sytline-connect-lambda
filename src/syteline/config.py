@@ -120,11 +120,11 @@ def match_settings():
 
 def event_defaults(event_date):
     """The values an event-started save needs that the IDP document does not hold (specs/006, research R7): both dates
-    are the event date; the warehouse and order type are the configured defaults. `missing` names the blank ones."""
+    are the event date; the warehouse is the configured default. `missing` names the blank ones. The order type is no longer
+    needed: a job always links to its customer order (OrdType O, as in the PO OCR demo); `order_type` stays in the result only
+    so records and requests that carry it keep their shape."""
     whse = os.environ.get("SYTELINE_DEFAULT_WHSE", "").strip()
     ordtype = os.environ.get("SYTELINE_DEFAULT_ORDTYPE", "").strip()
-    missing = [name for name, value in (("SYTELINE_DEFAULT_WHSE", whse), ("SYTELINE_DEFAULT_ORDTYPE", ordtype))
-               if not value]
+    missing = [name for name, value in (("SYTELINE_DEFAULT_WHSE", whse),) if not value]
     return {"order_date": event_date, "received_date": event_date, "warehouse": whse, "order_type": ordtype,
             "missing": missing}
-

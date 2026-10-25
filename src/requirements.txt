@@ -6,3 +6,4 @@ python-tds
 pyOpenSSL
 cryptography
 rapidfuzz
+tzdata

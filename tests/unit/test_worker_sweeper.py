@@ -55,7 +55,7 @@ def test_duplicate_invocation_never_reruns_an_upload(env, live_writes):
 
 def test_worker_maps_failed_and_needs_reconciliation(env, live_writes):
     store, soap, _, _ = env
-    soap.scenarios[("insert", "SLCoitems", 1)] = "timeout_after"
+    soap.scenarios[("insert", "CCT_Coitems", 1)] = "timeout_after"
     jid = new_job(store)
     worker.work_upload({"upload_id": jid}, None)
     j = store.get_job(jid)
@@ -77,7 +77,7 @@ def test_unexpected_exception_after_writes_is_parked_not_retried(env, live_write
     real = soap.insert
 
     def boom(ido, values):
-        if ido == "SLCoitems":
+        if ido == "CCT_Coitems":
             raise ValueError("bug")
         return real(ido, values)
 
@@ -180,7 +180,7 @@ def test_a_duplicate_save_invocation_never_reruns_it(renv, live_writes):
 
 def test_save_worker_maps_failed_and_needs_reconciliation(renv, live_writes):
     rstore, soap, _, _ = renv
-    soap.scenarios[("insert", "SLCoitems", 1)] = "timeout_after"
+    soap.scenarios[("insert", "CCT_Coitems", 1)] = "timeout_after"
     rid = accepted(rstore)
     worker.work_save({"reservation_id": rid}, None)
     item = rstore.get(rid)
@@ -202,9 +202,9 @@ def test_the_worker_writes_what_the_document_says_now_not_a_stored_copy(renv, li
     corrected["lines"][1]["quantity"] = 7  # a line corrected in review after the save was accepted
     rstore.fake_idp.add(DOC, corrected)
     assert worker.work_save({"reservation_id": rid}, None) == {"state": "saved"}
-    assert soap.rows["SLCoitems"][1]["QtyOrdered"] == 7.0
-    assert soap.rows["SLCos"][0]["OrderDate"] == "2026-10-20"
-    assert soap.rows["CCTJobs"][0]["Whse"] == "W9" and soap.rows["CCTJobs"][0]["OrdType"] == "S"
+    assert soap.rows["CCT_Coitems"][1]["qty_ordered"] == "7"
+    assert soap.rows["SLCos"][0]["OrderDate"] == "2026-10-20T00:00:00-04:00"
+    assert soap.rows["CCTJobs"][0]["Whse"] == "W9" and soap.rows["CCTJobs"][0]["OrdType"] == "O"
     assert [c for c in soap.calls if c[0] == "invoke"] == []
 
 

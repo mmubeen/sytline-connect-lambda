@@ -21,7 +21,7 @@ class StrictSoap(FakeSoap):
         self.lacks, self.asked = set(lacks), []
 
     def load(self, ido, properties, filter_="", record_cap=0):
-        if ido in (idos.CO_IDO, idos.LINE_IDO, idos.JOB_IDO) and filter_ == "":
+        if ido in (idos.CO_IDO, idos.LINE_IDO, idos.LINE_WRITE_IDO, idos.JOB_IDO) and filter_ == "":
             self.asked.append((ido, properties[0]))
             if (ido, properties[0]) in self.lacks:
                 raise ErpRejected(f"error property [{properties[0]}] does not exist in [{ido}] IDO.")
@@ -35,26 +35,26 @@ def on(monkeypatch):
     monkeypatch.setattr(idp, "_client_factory", lambda f=FakeIdp().add(DOC, po_fields(2)): f)
 
 
-def test_the_names_to_check_follow_what_the_save_will_write():
+def test_the_names_to_check_are_the_names_of_the_rows_the_save_builds():
     base = preflight.needed([{"item": "A", "quantity": 1, "uom": "EA"}])
-    assert {"CoNum", "CustNum", "CustSeq", "OrderDate", "Stat", "CustPo"} <= set(base[idos.CO_IDO])
-    assert {"CoNum", "CoLine", "Item", "UM", "QtyOrdered", "RefNum"} <= set(base[idos.LINE_IDO])
-    assert {"Job", "OrdType", "Whse", "OrdNum", "OrdLine", "RootJob"} <= set(base[idos.JOB_IDO])
-    assert "DueDate" not in base[idos.LINE_IDO] and "Price" not in base[idos.LINE_IDO] and "Teardown" not in base[idos.LINE_IDO]
-    assert "uf_eng_sn" not in base[idos.JOB_IDO]
-    more = preflight.needed([{"due_date": "2026-11-01", "price": 3.5, "engine_sn": "E1", "teardown": "x"}])
-    assert "DueDate" in more[idos.LINE_IDO] and "Price" in more[idos.LINE_IDO] and "uf_eng_sn" in more[idos.JOB_IDO]
-    assert "Teardown" not in more[idos.LINE_IDO]
+    assert {"CoNum", "CustNum", "CustSeq", "CustPo", "OrderDate", "Stat", "TermsCode", "ShipCode", "OrigSite"} <= set(base[idos.CO_IDO])
+    assert {"co_num", "co_line", "item", "qty_ordered", "u_m", "ref_num", "ref_type"} <= set(base[idos.LINE_WRITE_IDO])
+    assert {"CoNum", "CoLine", "Item", "QtyOrdered", "RefNum"} <= set(base[idos.LINE_IDO])  # read back through SLCoitems
+    assert {"Job", "OrdType", "Whse", "OrdNum", "OrdLine", "RootJob", "JobDate"} <= set(base[idos.JOB_IDO])
+    assert "due_date" not in base[idos.LINE_WRITE_IDO] and "uf_eng_sn" not in base[idos.JOB_IDO] and idos.UDF_IDO not in base
+    more = preflight.needed([{"due_date": "2026-11-01", "engine_sn": "E1", "packing": "Box", "teardown": "2026-11-02"}])
+    assert "due_date" in more[idos.LINE_WRITE_IDO] and {"uf_eng_sn", "uf_app"} <= set(more[idos.JOB_IDO])
+    assert more[idos.UDF_IDO] == ["RowId", "TableName", "UDFDT1"] and "RowPointer" in more[idos.LINE_IDO]
 
 
 def test_every_missing_name_is_reported_together_and_nothing_is_reserved(live_writes):
-    soap = StrictSoap(customers=CUST, lacks={(idos.LINE_IDO, "CoNum"), (idos.LINE_IDO, "CoLine"), (idos.JOB_IDO, "OrdNum")})
+    soap = StrictSoap(customers=CUST, lacks={(idos.LINE_WRITE_IDO, "co_num"), (idos.LINE_WRITE_IDO, "co_line"), (idos.JOB_IDO, "OrdNum")})
     store = ReservationStore(FakeJobsTable(), clock=lambda: 1000)
     out = run_reserve({"request_ref": "r1", "confirmed": True, "uploaded_by": "u", "document_id": DOC}, soap, store, "arn")
     f = out["failure"]
     assert f["code"] == errors.ERP_PROPERTIES_UNKNOWN and f["step"] == "check_properties"
-    assert "SLCoitems: CoNum, CoLine" in f["message"] and "CCTJobs: OrdNum" in f["message"] and "probe_properties" in f["message"]
-    assert [m["property"] for m in out["missing_properties"][idos.LINE_IDO]] == ["CoNum", "CoLine"]
+    assert "CCT_Coitems: co_num, co_line" in f["message"] and "CCTJobs: OrdNum" in f["message"] and "probe_properties" in f["message"]
+    assert [m["property"] for m in out["missing_properties"][idos.LINE_WRITE_IDO]] == ["co_num", "co_line"]
     assert out["reservation"]["state"] == rs.FAILED and out["reservation"]["job_numbers"] == [] and "consumed_unused" not in out
     assert soap.writes() == [] and not [c for c in soap.calls if c[0] == "invoke"]  # no number was consumed
 
@@ -84,18 +84,18 @@ def test_an_unreachable_erp_is_not_reported_as_a_missing_property(live_writes):
 
 def test_the_check_can_be_switched_off(live_writes, monkeypatch):
     monkeypatch.setenv("SYTELINE_CHECK_PROPERTIES", "false")
-    soap = StrictSoap(customers=CUST, lacks={(idos.LINE_IDO, "CoNum")})
+    soap = StrictSoap(customers=CUST, lacks={(idos.LINE_WRITE_IDO, "co_num")})
     store = ReservationStore(FakeJobsTable(), clock=lambda: 1000)
     out = run_reserve({"request_ref": "r1", "confirmed": True, "uploaded_by": "u", "document_id": DOC}, soap, store, "arn")
     assert out["reservation"]["state"] == rs.RESERVED and soap.asked == []
 
 
 def test_a_save_is_refused_before_the_order_header_is_written(live_writes):
-    soap = StrictSoap(lacks={(idos.LINE_IDO, "CoNum")})
+    soap = StrictSoap(lacks={(idos.LINE_WRITE_IDO, "co_num")})
     res = {"reservation_id": "res-1", "state": "saving", "co_num": "100", "customer_match": {"cust_num": "C1", "cust_seq": 0},
            "job_numbers": [{"line": 1, "job": "5000"}]}
     req = {"confirmed": True, "uploaded_by": "u", "customer": {"name": "ACME"}, "po_number": "PO-1",
            "lines": [{"item": "A", "quantity": 1, "uom": "EA"}]}
     out = savewf.run_save(res, req, soap, CFG)
     assert out["state"] == "failed" and out["code"] == errors.ERP_PROPERTIES_UNKNOWN and out["step"] == "check_properties"
-    assert soap.writes() == [] and "SLCoitems: CoNum" in out["message"]
+    assert soap.writes() == [] and "CCT_Coitems: co_num" in out["message"]
