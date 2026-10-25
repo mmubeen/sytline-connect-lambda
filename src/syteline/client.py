@@ -14,6 +14,7 @@ Safety rules (FR-004, FR-016):
 """
 
 import logging
+from xml.sax.saxutils import escape
 
 from . import config
 from .errors import (ErpError, ErpRejected, ErpUncertain, ErpUnreachable,  # noqa: F401
@@ -104,10 +105,11 @@ class SoapIdoClient:
 
     def _invoke(self, op, args):
         service = self._service()
-        if op == "save" and hasattr(self._zeep, "settings"):
-            # the response is a DataSet (schema + any): read it ourselves, zeep cannot parse the row part reliably
+        if op in ("load", "save", "call") and hasattr(self._zeep, "settings"):
+            # the responses hold a DataSet (schema + any) or an anyType: read them ourselves, zeep cannot parse them reliably
             with self._zeep.settings(raw_response=True):
-                return _dataset_result(getattr(service, OPS[op])(self._token, *args))
+                response = getattr(service, OPS[op])(self._token, *args)
+            return _method_result(response) if op == "call" else _dataset_result(response)
         return getattr(service, OPS[op])(self._token, *args)
 
     # -- operations ----------------------------------------------------------------------
@@ -153,7 +155,7 @@ class SoapIdoClient:
         """
         if not config.live_writes_enabled():
             raise LiveWritesDisabled("live ERP writes are disabled (SYTELINE_LIVE_WRITES)")
-        raw = self._call("call", ido, method, [str(p) for p in params], write=True)
+        raw = self._call("call", ido, method, _params_xml(params), write=True)
         return [str(v) for v in (raw or [])]
 
 
@@ -224,8 +226,8 @@ class Fault(Exception):
     """A SOAP fault read from a raw response (the name is what `_call` classifies on, as for zeep's own Fault)."""
 
 
-def _dataset_result(response):
-    """The rows of a raw SOAP response holding a DataSet result, as one XML string (the schema part is dropped)."""
+def _soap_response(response):
+    """The `<...Response>` element of a raw SOAP reply; a fault raises Fault, an HTTP error status its own error."""
     from lxml import etree
 
     body = etree.fromstring(response.content).find("{http://schemas.xmlsoap.org/soap/envelope/}Body")
@@ -236,10 +238,34 @@ def _dataset_result(response):
     if fault is not None:
         raise Fault((fault.findtext("faultstring") or "SOAP fault").strip())
     response.raise_for_status()
-    result = body[0][0] if len(body) and len(body[0]) else None
-    parts = [etree.tostring(c, encoding="unicode") for c in (result if result is not None else [])
+    return body[0] if len(body) else []
+
+
+def _dataset_result(response):
+    """The rows of a raw SOAP response holding a DataSet result, as one XML string (the schema part is dropped)."""
+    from lxml import etree
+
+    result = _soap_response(response)
+    result = result[0] if len(result) else []
+    parts = [etree.tostring(c, encoding="unicode") for c in result
              if isinstance(c.tag, str) and etree.QName(c).localname != "schema"]
     return "<DataSet>" + "".join(parts) + "</DataSet>"
+
+
+def _params_xml(params):
+    """CallMethod's `strMethodParameters`: ONE string, `<Parameters><Parameter>value</Parameter>...</Parameters>`
+    (ASSUMPTION, UNCONFIRMED against the live service: the shape of that string)."""
+    return "<Parameters>" + "".join(f"<Parameter>{escape(str(p))}</Parameter>" for p in params) + "</Parameters>"
+
+
+def _method_result(response):
+    """The output parameters of a raw CallMethod response (its `strMethodParameters`, same shape as the request's)."""
+    from lxml import etree
+
+    for el in _soap_response(response):
+        if isinstance(el.tag, str) and etree.QName(el).localname == "strMethodParameters" and (el.text or "").strip():
+            return [(p.text or "") for p in etree.fromstring(el.text.encode("utf-8")).iter("Parameter")]
+    return []
 
 
 def _root(raw):

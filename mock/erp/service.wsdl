@@ -1,35 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Mock of the SyteLine IDO web service (specs/008): only the four operations src/syteline/client.py uses.
-     SaveDataSet has the real signature (a DataSet: schema + any); the other operations are still simplified.
-     Names and shapes follow the assumptions in client.py; confirm against the real WSDL during discovery (T013 of feature 001).
-     `parameters` is a repeated string element on purpose: with a wrapper type (ArrayOfString) zeep silently sends NO
-     parameters when handed a plain list, which would hide a real problem if the production WSDL has that shape
-     (docs/MOCK_ENVIRONMENT.md, fidelity gaps). -->
+<!-- Mock of the SyteLine IDO web service (specs/008): the operations src/syteline/client.py uses (plus GetConfigurationNames).
+     Names, types and namespace follow the real service's WSDL (confirmed with `python -m zeep`): DataSet-typed
+     parameters and results are `schema + any`, CallMethod takes and returns its parameters as ONE string.
+     The real service also has a SOAP 1.2 port; the mock has only the SOAP 1.1 one. -->
 <wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
-                  xmlns:s="http://www.w3.org/2001/XMLSchema" xmlns:tns="http://tempuri.org/"
-                  targetNamespace="http://tempuri.org/">
+                  xmlns:s="http://www.w3.org/2001/XMLSchema" xmlns:tns="http://frontstep.com/IDOWebService"
+                  targetNamespace="http://frontstep.com/IDOWebService">
   <wsdl:types>
-    <s:schema elementFormDefault="qualified" targetNamespace="http://tempuri.org/">
+    <s:schema elementFormDefault="qualified" targetNamespace="http://frontstep.com/IDOWebService">
       <s:element name="CreateSessionToken"><s:complexType><s:sequence>
-        <s:element minOccurs="0" name="userId" type="s:string"/>
-        <s:element minOccurs="0" name="password" type="s:string"/>
-        <s:element minOccurs="0" name="configName" type="s:string"/>
+        <s:element minOccurs="0" name="strUserId" type="s:string"/>
+        <s:element minOccurs="0" name="strPswd" type="s:string"/>
+        <s:element minOccurs="0" name="strConfig" type="s:string"/>
       </s:sequence></s:complexType></s:element>
       <s:element name="CreateSessionTokenResponse"><s:complexType><s:sequence>
         <s:element minOccurs="0" name="CreateSessionTokenResult" type="s:string"/>
       </s:sequence></s:complexType></s:element>
 
+      <s:element name="GetConfigurationNames"><s:complexType/></s:element>
+      <s:element name="GetConfigurationNamesResponse"><s:complexType><s:sequence>
+        <s:element minOccurs="0" name="GetConfigurationNamesResult" type="tns:ArrayOfString"/>
+      </s:sequence></s:complexType></s:element>
+      <s:complexType name="ArrayOfString"><s:sequence>
+        <s:element minOccurs="0" maxOccurs="unbounded" name="string" nillable="true" type="s:string"/>
+      </s:sequence></s:complexType>
+
       <s:element name="LoadDataSet"><s:complexType><s:sequence>
-        <s:element minOccurs="0" name="sessionToken" type="s:string"/>
-        <s:element minOccurs="0" name="ido" type="s:string"/>
-        <s:element minOccurs="0" name="properties" type="s:string"/>
-        <s:element minOccurs="0" name="filter" type="s:string"/>
-        <s:element minOccurs="0" name="orderBy" type="s:string"/>
-        <s:element minOccurs="0" name="postQueryMethod" type="s:string"/>
-        <s:element name="recordCap" type="s:int"/>
+        <s:element minOccurs="0" name="strSessionToken" type="s:string"/>
+        <s:element minOccurs="0" name="strIDOName" type="s:string"/>
+        <s:element minOccurs="0" name="strPropertyList" type="s:string"/>
+        <s:element minOccurs="0" name="strFilter" type="s:string"/>
+        <s:element minOccurs="0" name="strOrderBy" type="s:string"/>
+        <s:element minOccurs="0" name="strPostQueryMethod" type="s:string"/>
+        <s:element name="iRecordCap" type="s:int"/>
       </s:sequence></s:complexType></s:element>
       <s:element name="LoadDataSetResponse"><s:complexType><s:sequence>
-        <s:element minOccurs="0" name="LoadDataSetResult" type="s:string"/>
+        <s:element minOccurs="0" name="LoadDataSetResult"><s:complexType><s:sequence>
+          <s:element ref="s:schema"/><s:any/></s:sequence></s:complexType></s:element>
       </s:sequence></s:complexType></s:element>
 
       <s:element name="SaveDataSet"><s:complexType><s:sequence>
@@ -46,23 +53,23 @@
           <s:element ref="s:schema"/><s:any/></s:sequence></s:complexType></s:element>
       </s:sequence></s:complexType></s:element>
 
-      <s:complexType name="ArrayOfString"><s:sequence>
-        <s:element minOccurs="0" maxOccurs="unbounded" name="string" nillable="true" type="s:string"/>
-      </s:sequence></s:complexType>
       <s:element name="CallMethod"><s:complexType><s:sequence>
-        <s:element minOccurs="0" name="sessionToken" type="s:string"/>
-        <s:element minOccurs="0" name="ido" type="s:string"/>
-        <s:element minOccurs="0" name="method" type="s:string"/>
-        <s:element minOccurs="0" maxOccurs="unbounded" name="parameters" type="s:string"/>
+        <s:element minOccurs="0" name="strSessionToken" type="s:string"/>
+        <s:element minOccurs="0" name="strIDOName" type="s:string"/>
+        <s:element minOccurs="0" name="strMethodName" type="s:string"/>
+        <s:element minOccurs="0" name="strMethodParameters" type="s:string"/>
       </s:sequence></s:complexType></s:element>
       <s:element name="CallMethodResponse"><s:complexType><s:sequence>
-        <s:element minOccurs="0" name="CallMethodResult" type="tns:ArrayOfString"/>
+        <s:element minOccurs="0" name="CallMethodResult" type="s:anyType"/>
+        <s:element minOccurs="0" name="strMethodParameters" type="s:string"/>
       </s:sequence></s:complexType></s:element>
     </s:schema>
   </wsdl:types>
 
   <wsdl:message name="CreateSessionTokenIn"><wsdl:part name="parameters" element="tns:CreateSessionToken"/></wsdl:message>
   <wsdl:message name="CreateSessionTokenOut"><wsdl:part name="parameters" element="tns:CreateSessionTokenResponse"/></wsdl:message>
+  <wsdl:message name="GetConfigurationNamesIn"><wsdl:part name="parameters" element="tns:GetConfigurationNames"/></wsdl:message>
+  <wsdl:message name="GetConfigurationNamesOut"><wsdl:part name="parameters" element="tns:GetConfigurationNamesResponse"/></wsdl:message>
   <wsdl:message name="LoadDataSetIn"><wsdl:part name="parameters" element="tns:LoadDataSet"/></wsdl:message>
   <wsdl:message name="LoadDataSetOut"><wsdl:part name="parameters" element="tns:LoadDataSetResponse"/></wsdl:message>
   <wsdl:message name="SaveDataSetIn"><wsdl:part name="parameters" element="tns:SaveDataSet"/></wsdl:message>
@@ -72,6 +79,7 @@
 
   <wsdl:portType name="IDOWebServiceSoap">
     <wsdl:operation name="CreateSessionToken"><wsdl:input message="tns:CreateSessionTokenIn"/><wsdl:output message="tns:CreateSessionTokenOut"/></wsdl:operation>
+    <wsdl:operation name="GetConfigurationNames"><wsdl:input message="tns:GetConfigurationNamesIn"/><wsdl:output message="tns:GetConfigurationNamesOut"/></wsdl:operation>
     <wsdl:operation name="LoadDataSet"><wsdl:input message="tns:LoadDataSetIn"/><wsdl:output message="tns:LoadDataSetOut"/></wsdl:operation>
     <wsdl:operation name="SaveDataSet"><wsdl:input message="tns:SaveDataSetIn"/><wsdl:output message="tns:SaveDataSetOut"/></wsdl:operation>
     <wsdl:operation name="CallMethod"><wsdl:input message="tns:CallMethodIn"/><wsdl:output message="tns:CallMethodOut"/></wsdl:operation>
@@ -79,13 +87,15 @@
 
   <wsdl:binding name="IDOWebServiceSoap" type="tns:IDOWebServiceSoap">
     <soap:binding transport="http://schemas.xmlsoap.org/soap/http"/>
-    <wsdl:operation name="CreateSessionToken"><soap:operation soapAction="http://tempuri.org/CreateSessionToken" style="document"/>
+    <wsdl:operation name="CreateSessionToken"><soap:operation soapAction="http://frontstep.com/IDOWebService/CreateSessionToken" style="document"/>
       <wsdl:input><soap:body use="literal"/></wsdl:input><wsdl:output><soap:body use="literal"/></wsdl:output></wsdl:operation>
-    <wsdl:operation name="LoadDataSet"><soap:operation soapAction="http://tempuri.org/LoadDataSet" style="document"/>
+    <wsdl:operation name="GetConfigurationNames"><soap:operation soapAction="http://frontstep.com/IDOWebService/GetConfigurationNames" style="document"/>
       <wsdl:input><soap:body use="literal"/></wsdl:input><wsdl:output><soap:body use="literal"/></wsdl:output></wsdl:operation>
-    <wsdl:operation name="SaveDataSet"><soap:operation soapAction="http://tempuri.org/SaveDataSet" style="document"/>
+    <wsdl:operation name="LoadDataSet"><soap:operation soapAction="http://frontstep.com/IDOWebService/LoadDataSet" style="document"/>
       <wsdl:input><soap:body use="literal"/></wsdl:input><wsdl:output><soap:body use="literal"/></wsdl:output></wsdl:operation>
-    <wsdl:operation name="CallMethod"><soap:operation soapAction="http://tempuri.org/CallMethod" style="document"/>
+    <wsdl:operation name="SaveDataSet"><soap:operation soapAction="http://frontstep.com/IDOWebService/SaveDataSet" style="document"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input><wsdl:output><soap:body use="literal"/></wsdl:output></wsdl:operation>
+    <wsdl:operation name="CallMethod"><soap:operation soapAction="http://frontstep.com/IDOWebService/CallMethod" style="document"/>
       <wsdl:input><soap:body use="literal"/></wsdl:input><wsdl:output><soap:body use="literal"/></wsdl:output></wsdl:operation>
   </wsdl:binding>
 

@@ -130,10 +130,11 @@ What the mock does differently from production, and what a pass therefore does *
   an older engine build and not what production runs).
 - **Numbering routines.** `NextCoSp` / `NextWOSp` in the mock database are stand-ins that hand out increasing numbers. SyteLine's own
   routines (site rules, number formats, locking) are not reproduced.
-- **Web-service shapes.** The WSDL and the SOAP shapes are the ones assumed in `src/syteline/client.py`, still unconfirmed against the real
-  service. One detail is deliberate: `CallMethod` takes its parameters as a repeated element. With a wrapper type (`ArrayOfString`)
-  zeep silently sends **no** parameters when handed a plain list; if the real WSDL has that shape, the function would call the numbering
-  methods without parameters. Check this at discovery.
+- **Web-service shapes.** The mock's WSDL has the real service's operations, names, types and namespace (taken from `python -m zeep` against
+  the real service); the real service's SOAP 1.2 port is not mocked. What is still assumed, and unconfirmed: the **row layout inside a DataSet**
+  (the diffgram `SaveDataSet` sends and the rows `LoadDataSet` returns) and the **`strMethodParameters` string** of `CallMethod`
+  (`<Parameters><Parameter>…</Parameter></Parameters>`, outputs returned in the same shape). The numbering methods are called with no output
+  placeholder, so against the real service they may return no number. Check these at discovery.
 - **Unreachable ERP** is HTTP 503, not a refused TCP connection (so a write fault counts as "may have been sent").
 - **Permissions.** The function role's statements from the template are enforced. Key policies, resource policies, permission boundaries,
   service control policies and condition keys are not: a denial caused only by the **key policy** of the IDP's KMS key does not reproduce.

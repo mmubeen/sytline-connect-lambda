@@ -20,7 +20,7 @@ from werkzeug.wrappers import Request, Response
 from edge import models
 
 SERVICE_PATH = "/IDORequestService/IDOWebService.asmx"
-NS = "http://tempuri.org/"
+NS = "http://frontstep.com/IDOWebService"
 HERE = os.path.dirname(__file__)
 
 
@@ -186,19 +186,8 @@ class ErpMock:
 
     @staticmethod
     def _values(args):
-        """Positional values; a name that repeats (the method parameters) becomes one list."""
-        out, index = [], {}
-        for name, el in args:
-            if name == "parameters":
-                if name not in index:
-                    index[name] = len(out)
-                    out.append([])
-                out[index[name]].append(el.text or "")
-            elif name == "updateDataSet":
-                out.append(el)  # the DataSet itself (schema + diffgram)
-            else:
-                out.append(ErpMock._arg(el))
-        return out
+        """Positional values; the DataSet argument of SaveDataSet stays an element."""
+        return [el if name == "updateDataSet" else ErpMock._arg(el) for name, el in args]
 
     @staticmethod
     def _arg(el):
@@ -208,12 +197,8 @@ class ErpMock:
     @staticmethod
     def _summary(op, args):
         """What the call log keeps: names and values, never the password or the session token."""
-        out = {}
-        for name, c in args:
-            value = "***" if name in ("password", "sessionToken", "strSessionToken") else (c.text if len(c) == 0 else "[list]")
-            out[name] = out[name] + [value] if name == "parameters" and name in out else \
-                ([value] if name == "parameters" else value)
-        return out
+        return {name: "***" if name in ("strPswd", "strSessionToken") else (c.text if len(c) == 0 else "[dataset]")
+                for name, c in args}
 
     def _check(self, token):
         if token not in self._sessions:
@@ -235,11 +220,17 @@ class ErpMock:
             rows = [{k: r[k] for k in wanted if k in r} if wanted else r for r in rows]
             if int(cap or 0):
                 rows = rows[:int(cap)]
-            return ("LoadDataSetResult", _rows_xml(ido, rows))
+            return ("LoadDataSetResult", _dataset_xml(_rows_xml(ido, rows)))
         if op == "SaveDataSet":
             return ("SaveDataSetResult", self._save(v[1]))
         if op == "CallMethod":
-            return ("CallMethodResult", self._call(v[1], v[2], v[3] if len(v) > 3 else []))
+            params = [(p.text or "") for p in etree.fromstring(v[3].encode("utf-8")).iter("Parameter")] if v[3] else []
+            outputs = self._call(v[1], v[2], params)
+            return [("CallMethodResult", "0"),
+                    ("strMethodParameters", "<Parameters>" + "".join(f"<Parameter>{escape(o)}</Parameter>" for o in outputs)
+                     + "</Parameters>")]
+        if op == "GetConfigurationNames":
+            return ("GetConfigurationNamesResult", [self.config])
         raise SoapFault(f"unknown operation {op}")
 
     def _select(self, ido, flt):
@@ -319,17 +310,19 @@ def _dataset_xml(rows):
 
 
 def _rows_xml(ido, rows):
-    return "<DataSet>" + "".join(_row_xml(ido, r) for r in rows) + "</DataSet>"
+    return "".join(_row_xml(ido, r) for r in rows)
 
 
 def _envelope(op, result):
-    name, value = result
-    if isinstance(value, list):
-        inner = "".join(f"<string>{escape(x)}</string>" for x in value)
-    else:
-        inner = value if isinstance(value, Raw) else escape(value)
+    out = ""
+    for name, value in (result if isinstance(result, list) else [result]):
+        if isinstance(value, list):
+            inner = "".join(f"<string>{escape(x)}</string>" for x in value)
+        else:
+            inner = value if isinstance(value, Raw) else escape(value)
+        out += f"<{name}>{inner}</{name}>"
     xml = ('<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">'
-           f'<soap:Body><{op}Response xmlns="{NS}"><{name}>{inner}</{name}></{op}Response></soap:Body></soap:Envelope>')
+           f'<soap:Body><{op}Response xmlns="{NS}">{out}</{op}Response></soap:Body></soap:Envelope>')
     return Response(xml, 200, {"Content-Type": "text/xml; charset=utf-8"})
 
 

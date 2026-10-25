@@ -40,3 +40,8 @@ def test_update_carries_the_key_in_a_before_row():
     assert changed.get(f"{{{sc.DIFFGR}}}hasChanges") == "modified"
     assert [c.tag for c in changed] == ["CoNum", "CoLine", "Teardown"] and [c.tag for c in before] == ["CoNum", "CoLine"]
 
+
+
+def test_method_parameters_are_one_string():
+    assert sc._params_xml(["a&b", 0]) == "<Parameters><Parameter>a&amp;b</Parameter><Parameter>0</Parameter></Parameters>"
+    assert sc._params_xml([]) == "<Parameters></Parameters>"
