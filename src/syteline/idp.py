@@ -168,8 +168,9 @@ def _details(read):
         raise _refuse(errors.DOCUMENT_NEEDS_REVIEW,
                       "fields the save needs are below their confidence threshold and must be reviewed in IDP first: "
                       + ", ".join(low), fields=low)
+    supplied = {i: line["job"] for i, line in enumerate(details["lines"], 1) if line.get("job")}
     return {"details": details, "fingerprint": validation.fingerprint(
-        details["customer"], details["po_number"], len(details["lines"]))}
+        details["customer"], details["po_number"], len(details["lines"]), supplied)}
 
 
 _STEP = re.compile(r"([^.\[\]]+)|\[(\d+)\]")

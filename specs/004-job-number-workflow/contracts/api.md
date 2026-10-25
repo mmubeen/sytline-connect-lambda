@@ -11,7 +11,7 @@ Request:
 ```
 | Status | Body |
 |---|---|
-| 201 | `{"reservation_id","state":"reserved","duplicate":false,"document_id","line_count","co_num":"…","jobs":[{"line":1,"job":"…"},…],"customer_match":{"cust_num","cust_seq"}}` |
+| 201 | `{"reservation_id","state":"reserved","duplicate":false,"document_id","line_count","co_num":"…","jobs":[{"line":1,"job":"…","source":"allocated|document"},…],"customer_match":{"cust_num","cust_seq"}}` |
 | 200 | same body with `"duplicate":true` — same `request_ref` and payload; no new numbers are reserved. If the earlier reservation failed, the body has `"state":"failed"`, `"failure"` and `"consumed_unused"` |
 | 400 | `{"errors":[{"code":"VALIDATION","field","message"}]}` — nothing reserved (`customer`, `po_number`, `line_count`, `lines` are refused: they come from the document) |
 | 409 | `REQUEST_REF_CONFLICT` — same ref, different payload |
@@ -42,7 +42,7 @@ Nothing is written to the ERP in any non-202 case. Checks run in this order: 400
 ## GET /job-reservations/{id}
 | Status | Body |
 |---|---|
-| 200 | `{"reservation_id","request_ref","document_id","uploaded_by","state","co_num","document_id","jobs":[{"line","job","usage":"reserved\|used\|consumed_unused\|unverified"}],"lines?":[{"line","job","co_line?","item?","status":"saved\|failed\|not_attempted\|unverified","warnings":[…],"error?"}],"failure?":{"code","message","step"},"possibly_written?":[{"kind","key"}],"created_at","updated_at"}` |
+| 200 | `{"reservation_id","request_ref","document_id","uploaded_by","state","co_num","document_id","jobs":[{"line","job","source":"allocated\|document","usage":"reserved\|used\|consumed_unused\|supplied_not_saved\|unverified"}],"lines?":[{"line","job","co_line?","item?","status":"saved\|failed\|not_attempted\|unverified","warnings":[…],"error?"}],"failure?":{"code","message","step"},"possibly_written?":[{"kind","key"}],"created_at","updated_at"}` |
 | 404 | `NOT_FOUND` |
 
 States: `reserving`, `reserved`, `save_accepted`, `saving`, `saved`, `partly_saved`, `failed`, `needs_reconciliation` (see [data-model.md](../data-model.md)). `lines` appears once a save was accepted. `possibly_written` appears on `needs_reconciliation`.

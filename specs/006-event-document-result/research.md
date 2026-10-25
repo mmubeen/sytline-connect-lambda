@@ -90,3 +90,26 @@ Everything else is kept: `source`, `detail-type`, `status`, ARNs, names, times, 
 **Decision**: template parameter `LogEvents` (`"false"` default, allowed `"true"`/`"false"`) -> function environment `LOG_EVENTS`; `deploy.sh` reads optional `LOG_EVENTS` from `deploy.env` (default `false`) and always passes it, like the other optional settings; the deploy notice warns when it is `true` that logs will hold document and order content.
 **Rationale**: one switch, visible in the deployment settings, off unless chosen; no new permission. The mock environment (feature 008) picks it up through the template rendering with no change.
 
+## R22. Where the supplied number is read
+**Decision**: a new optional line key `line.job` in the field map (`idp_fields.DEFAULT_MAP`, default document field `job_number`, UNCONFIRMED like the other defaults; override with `IDP_FIELD_MAP` `{"line.job": "<field>"}`). It is read as text (whitespace collapsed, as for `line.item`); a value that is absent, empty or only blanks means "not supplied". It is never required.
+**Rationale**: the clarified source is the document, per line (spec session 2026-10-25); reusing the mapping means no new setting and no code change when the real field name is known.
+**Alternatives**: a caller-supplied list in the reserve request (rejected in clarification; the event path has no caller); a header-level job number (a job belongs to one line).
+
+## R23. Reserve: use, do not allocate
+**Decision**: in `run_reserve`, for each line, if the line has `job` that value goes into the entry and `allocate("next_job", ...)` is not called; otherwise allocation is unchanged. The CO number is always allocated. The live-writes gate stays before the CO allocation, so it still guards every reservation. Supplied numbers are not added to `consumed` (the unused-numbers report in a failure lists only numbers this service consumed).
+**Rationale**: FR-006e/FR-023: no new job number when the value is set. A reservation with every job number supplied still reserves a CO number, which is a write, so the gate is kept.
+**Alternatives**: skipping the whole reservation when all numbers are supplied (the CO number is still needed).
+
+## R24. No check of the supplied number
+**Decision**: none, per the clarification: no read against the ERP, no comparison between lines. The save inserts the job with that number; an ERP rejection goes through the existing path (`pipeline._insert`/`savewf._insert`: a rejection after earlier rows were written parks the order as `needs_reconciliation`; never retried or replayed). The only check is the existing one on the whole field: a value over its confidence threshold unreviewed is refused (R25).
+**Rationale**: the owner's choice (option C). The cost is a possible partly written order, which the existing reconciliation runbook covers; it is stated in the spec, the quickstart and `docs/EVENT_INTAKE.md`.
+**Alternatives**: read-only existence check before reserving, refusing the document or only the line (options A, B; rejected).
+
+## R25. Confidence and the fingerprint
+**Decision**: the job field path is added to `used` in `map_fields`, so the existing confidence check covers it (a supplied number read below its threshold is `DOCUMENT_NEEDS_REVIEW` until a person has reviewed it). The reservation fingerprint gains the supplied numbers (`line=job` pairs) only when at least one is supplied, so a reservation without any keeps the fingerprint it had, and save refuses if the document's supplied numbers changed since the reserve.
+**Rationale**: an OCR-misread job number is the most damaging wrong value here, since it names an ERP record; binding it to the reservation keeps reserve and save on the same numbers.
+**Alternatives**: exempting the field from the confidence check (rejected: with no ERP check it is the only safeguard); always hashing the field (would invalidate in-flight reservations).
+
+## R26. Reporting
+**Decision**: each entry of `job_numbers` gets `"source": "document" | "allocated"` (entries stored before this change are read as `allocated`). `numbers_report` copies it to every `jobs[]` item (reserve, status, event outcome) and, for a supplied number whose line was not saved, reports `usage: supplied_not_saved` instead of `consumed_unused`.
+**Rationale**: FR-006e requires the response to show per line which it was; the old usage value would claim this service consumed a number it did not.

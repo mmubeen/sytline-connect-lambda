@@ -32,6 +32,15 @@ Because the intake lives in the one Lambda, its role can read and write the jobs
 
 The reservation is recorded as made by `event-intake:<execution name>` (`uploaded_by` `event-intake`); no person confirmed the PO, so the safeguards are the thresholds, the review requirement, the live-writes switch and the once-per-document rule.
 
+## A job number the document already carries (optional)
+
+A line item of the document may carry its own job number. Map it with `IDP_FIELD_MAP`, key `line.job` (the default document field is `job_number`; that name is unconfirmed, like the other defaults), for example `{"line.job": "work_order"}`.
+
+- For a line where it is present and not blank, the reservation **uses that number and does not allocate a new one**. Other lines are allocated as before. The CO number is always allocated.
+- The response, the reservation status and the reserve response show, per job, `"source": "document"` or `"allocated"`.
+- It is read like any other field the save uses: below its confidence threshold and not reviewed, the document is refused (`DOCUMENT_NEEDS_REVIEW`) and nothing is reserved.
+- **A supplied number is not checked**, neither against the ERP nor against the other lines. If the ERP rejects the job (for example the number is already in use), the order ends `needs_reconciliation` after the CO header and earlier lines were written; nothing is retried or removed. Follow [reconciliation-runbook.md](reconciliation-runbook.md). A supplied number whose line was not saved is reported with usage `supplied_not_saved` (this service did not consume it).
+
 ## Outcomes
 
 | `outcome` | Meaning | Anything reserved or written? |

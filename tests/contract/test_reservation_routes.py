@@ -53,7 +53,8 @@ def test_201_returns_the_numbers_in_line_order(env, live_writes):
     store, soap, _ = env
     status, out = call(reserve.handler, event(rbody()))
     assert status == 201 and out["state"] == "reserved" and out["duplicate"] is False
-    assert out["co_num"] == "100" and out["jobs"] == [{"line": 1, "job": "5000"}, {"line": 2, "job": "5001"}]
+    assert out["co_num"] == "100" and out["jobs"] == [{"line": 1, "job": "5000", "source": "allocated"},
+                                                             {"line": 2, "job": "5001", "source": "allocated"}]
     assert out["customer_match"] == {"cust_num": "C1", "cust_seq": 0}
     assert (out["document_id"], out["line_count"]) == (DOC, 2)  # counted from the document
     assert set(out) == {"reservation_id", "state", "duplicate", "document_id", "line_count", "co_num",
@@ -151,8 +152,8 @@ def db_route(monkeypatch):
 def test_201_with_numbers_from_the_database(monkeypatch, env, db_route, live_writes):
     f = FakeSqlServer().install(monkeypatch)
     status, out = call(reserve.handler, event(rbody()))
-    assert status == 201 and out["co_num"] == "100" and out["jobs"] == [{"line": 1, "job": "5000"},
-                                                                         {"line": 2, "job": "5001"}]
+    assert status == 201 and out["co_num"] == "100" and out["jobs"] == [
+        {"line": 1, "job": "5000", "source": "allocated"}, {"line": 2, "job": "5001", "source": "allocated"}]
     assert f.committed == [100, 5000, 5001] and env[1].calls.count(("invoke", "NextCoSp")) == 0
 
 
@@ -410,7 +411,8 @@ def test_status_reserved_has_the_numbers_and_no_lines(full, live_writes):
     rid = reserved(env_)
     status, out = get(rid)
     assert status == 200 and out["state"] == "reserved" and out["co_num"] == "100" and "lines" not in out
-    assert out["jobs"] == [{"line": 1, "job": "5000", "usage": "reserved"}, {"line": 2, "job": "5001", "usage": "reserved"}]
+    assert out["jobs"] == [{"line": 1, "job": "5000", "source": "allocated", "usage": "reserved"},
+                           {"line": 2, "job": "5001", "source": "allocated", "usage": "reserved"}]
     assert {"reservation_id", "request_ref", "document_id", "uploaded_by", "created_at", "updated_at"} <= set(out)
     assert "failure" not in out and "possibly_written" not in out
 
@@ -498,3 +500,16 @@ def test_status_404_and_no_internal_fields_leak(full, live_writes):
     text = json.dumps(get(rid)[1])
     for hidden in ("payload_hash", "fingerprint", "caller_identity", ARN, "save", '"customer"', "ACME", "attempts"):
         assert hidden not in text.replace('"saved"', "").replace("save_accepted", ""), hidden
+
+
+def test_a_supplied_job_number_is_shown_with_its_source_and_not_listed_as_consumed_on_failure(monkeypatch):
+    """FR-023: the reserve response says where each job number came from; a failed reservation lists only what it consumed."""
+    from handlers import reserve as h
+
+    item = {"reservation_id": "r1", "state": "failed", "document_id": "d", "line_count": 2, "co_num": "100",
+            "updated_at": 1000,
+            "failure": {"code": "ERP_REJECTED", "message": "m", "step": "number_job_3"},
+            "job_numbers": [{"line": 1, "job": "J-1", "source": "document"}, {"line": 2, "job": "5000", "source": "allocated"}]}
+    out = h._body(item, False)
+    assert [(j["job"], j["source"]) for j in out["jobs"]] == [("J-1", "document"), ("5000", "allocated")]
+    assert out["consumed_unused"] == [{"kind": "co", "number": "100"}, {"kind": "job", "line": 2, "number": "5000"}]

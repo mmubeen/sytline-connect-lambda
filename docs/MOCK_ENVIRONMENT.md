@@ -53,6 +53,7 @@ All data is synthetic (nothing from production, sanitized or not). Regenerate wi
 | Scenario | Starting state | Expected |
 |---|---|---|
 | `passes-review` | every field above its confidence threshold | `save_accepted`, numbers reserved, order written to the mock ERP |
+| `supplied-job` | line 2 carries its own `job_number` | `save_accepted`; line 2 keeps its number (`source: document`), no job number allocated for it |
 | `already-processed` | same event sent twice | second run `already_processed`, no second write |
 | `needs-review` | `cust_po` below its threshold | `refused` / `DOCUMENT_NEEDS_REVIEW`, nothing written |
 | `incomplete` | no PO number and no lines | `refused` / `DOCUMENT_INCOMPLETE` |

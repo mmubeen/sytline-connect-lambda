@@ -38,3 +38,17 @@ State transitions: `processing` -> `reserved` (numbers obtained) -> `save_accept
 
 Constraints: one JSON object per line; line length at most the cap plus a fixed envelope; header values `Authorization`, `X-Amz-Security-Token`, `Cookie`, `X-Api-Key` are `***` in both modes; no state, no persistence.
 
+## Document line item: optional job number (FR-006e)
+| Field | Rule |
+|---|---|
+| `job` (from the document field mapped by `line.job`, default `job_number`) | optional text; whitespace collapsed; absent, empty or blank = not supplied; not checked against the ERP or other lines (R24); counts in the confidence check when present (R25) |
+
+## Reservation job entry (feature 004 `job_numbers[]`), changed
+| Field | Rule |
+|---|---|
+| `line` | 1-based line number (unchanged) |
+| `job` | the job number, supplied or allocated (unchanged) |
+| `source` | NEW: `document` when the number came from the document, `allocated` when the ERP's numbering routine produced it; missing in older entries = `allocated` |
+
+Reservation `fingerprint`: unchanged unless a number was supplied; then it also covers the pairs `line=job`.
+Report `usage` gains `supplied_not_saved` (a supplied number whose line was not saved).

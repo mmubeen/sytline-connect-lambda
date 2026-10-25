@@ -13,6 +13,8 @@ Add a second way to start the job-number workflow (feature 004): a new function 
 **Addendum 2026-10-24 (FR-016, SC-009): entry log.** On entry to `lambda_handler` the function writes one JSON line holding the event: a redacted form by
 default, the whole event (size-capped) only when `LOG_EVENTS=true`. See research R17..R21 and `contracts/entry-log.md`.
 
+**Addendum 2026-10-25 (FR-006e; feature 004 FR-023): optional job number.** A line item of the document may carry a job number; the reserve step uses it for that line instead of allocating one. See research R22..R26, `data-model.md`, and the changes to both contracts.
+
 ## Technical Context
 
 **Language/Version**: Python 3.13 (Lambda; existing code), SAM/CloudFormation YAML
@@ -105,3 +107,17 @@ tests/unit/test_entry_log.py    # NEW  one line per invocation, run unchanged, f
 tests/unit/test_template_single.py, test_deploy_script.py   # the parameter and its pass-through
 docs/EVENT_INTAKE.md, docs/DEPLOYMENT.md   # what is logged, how to turn it on, who can read it
 ```
+
+## Addendum: files for the optional job number (FR-006e, feature 004 FR-023)
+
+```text
+src/syteline/idp_fields.py      # + "line.job" in DEFAULT_MAP (optional, text; default name `job_number`, UNCONFIRMED) and in _LINE_KINDS; the line dict gains "job"
+src/syteline/validation.py      # fingerprint(): + optional `supplied` ({line: job}); appended only when not empty, so existing fingerprints do not change
+src/syteline/idp.py             # _details(): passes the supplied numbers to the fingerprint; a low-confidence job field is "needs review" like any used field
+src/syteline/reserve.py         # per line: a supplied job is used as is (no allocate, not in `consumed`); entries carry "source": "document" | "allocated"
+src/syteline/reservations.py    # numbers_report(): + "source"; usage for a supplied number that was not saved is `supplied_not_saved`, not `consumed_unused`
+tests/unit/                     # test_idp_fields.py (mapping, blank, trimmed), test_reserve.py (mixed lines, all supplied, store failure), test_reservations.py (usage), test_event_intake.py (response shows source), test_idp.py (low confidence on the job field)
+docs/EVENT_INTAKE.md            # the optional field, the IDP_FIELD_MAP key `line.job`, and what happens if the ERP rejects the number
+```
+
+No template, permission, deploy-script or storage-key change: the supplied number is one more attribute of the existing reservation entries.

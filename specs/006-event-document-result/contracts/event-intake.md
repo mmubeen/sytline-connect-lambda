@@ -22,7 +22,7 @@ Environment of `DirectFunction`: its existing ERP, database and secret settings,
 
 ## Response
 ```json
-{"outcome": "save_accepted", "document_id": "159112.pdf", "reservation_id": "…", "co_num": "…", "jobs": [{"line": 1, "job": "…"}],
+{"outcome": "save_accepted", "document_id": "159112.pdf", "reservation_id": "…", "co_num": "…", "jobs": [{"line": 1, "job": "…", "source": "allocated|document"}],
  "summary": {"document_id": "159112.pdf", "state": "COMPLETED", "class": "purchase_order", "pages": 3, "issues": 1,
              "fields": [{"path": "po_number", "value": "…", "confidence": 0.97, "meets_threshold": true}],
              "below_threshold": ["line_items[0].material_code"]}}
@@ -47,3 +47,6 @@ Environment of `DirectFunction`: its existing ERP, database and secret settings,
 
 ## Deploy settings
 `deploy.env` (PLANT ONLY block): `IDP_STATE_MACHINE_ARN` -> `IdpStateMachineArn` (empty by default, always passed so an earlier value is cleared). The parity tests need no change (plant-only parameter).
+
+## Optional job number per line (FR-006e)
+A line item of the document may carry a job number (document field mapped by `line.job`). For such a line `jobs[i].source` is `"document"` and no number was allocated for it; the other lines are `"allocated"`. The function does not check a supplied number; if the ERP rejects it the save ends `needs_reconciliation` as for any rejection after earlier rows were written.

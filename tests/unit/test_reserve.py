@@ -40,7 +40,9 @@ def test_numbers_come_back_in_line_order_and_nothing_else_is_written(live_writes
     assert item["document_id"] == DOC and item["line_count"] == 3 and "po_number" not in item
     assert out["duplicate"] is False and "failure" not in out and item["state"] == rs.RESERVED
     assert item["co_num"] == "100"
-    assert item["job_numbers"] == [{"line": 1, "job": "5000"}, {"line": 2, "job": "5001"}, {"line": 3, "job": "5002"}]
+    assert item["job_numbers"] == [{"line": 1, "job": "5000", "source": "allocated"},
+                                   {"line": 2, "job": "5001", "source": "allocated"},
+                                   {"line": 3, "job": "5002", "source": "allocated"}]
     assert item["customer_match"] == {"cust_num": "C1", "cust_seq": 0}
     assert [c for c in soap.writes() if c[0] != "invoke"] == []  # no insert, no update: only number routines
     assert soap.calls.count(("invoke", "NextCoSp")) == 1 and soap.calls.count(("invoke", "NextWOSp")) == 3
@@ -84,7 +86,7 @@ def test_erp_failure_midway_reports_the_numbers_already_obtained_as_consumed(liv
     assert out["failure"]["code"] == errors.ERP_REJECTED and out["failure"]["step"] == "number_job_2"
     assert out["reservation"]["state"] == rs.FAILED
     assert out["consumed_unused"] == [{"kind": "co", "number": "100"}, {"kind": "job", "line": 1, "number": "5000"}]
-    assert out["reservation"]["job_numbers"] == [{"line": 1, "job": "5000"}]
+    assert out["reservation"]["job_numbers"] == [{"line": 1, "job": "5000", "source": "allocated"}]
 
 
 def test_uncertain_number_call_is_reported_as_an_erp_failure_not_a_success(live_writes):
@@ -168,7 +170,9 @@ def test_numbers_come_from_the_database_over_one_connection_and_the_service_is_n
     out, soap, _ = go(cfg=dict(DB_CFG))
     item = out["reservation"]
     assert item["state"] == rs.RESERVED and item["co_num"] == "100"
-    assert item["job_numbers"] == [{"line": 1, "job": "5000"}, {"line": 2, "job": "5001"}, {"line": 3, "job": "5002"}]
+    assert item["job_numbers"] == [{"line": 1, "job": "5000", "source": "allocated"},
+                                   {"line": 2, "job": "5001", "source": "allocated"},
+                                   {"line": 3, "job": "5002", "source": "allocated"}]
     assert db_numbers.committed == [100, 5000, 5001, 5002] and db_numbers.opened == db_numbers.closed == 1
     assert [c for c in soap.calls if c[0] in ("invoke", "insert", "update")] == []
 
@@ -203,3 +207,51 @@ def test_a_database_routine_error_reports_consumed_numbers_and_closes_the_connec
     assert out["failure"]["code"] == errors.ERP_REJECTED and out["failure"]["step"] == "number_job_1"
     assert [c["number"] for c in out["consumed_unused"]] == ["100"] and f.rolled_back == 1
     assert f.opened == f.closed == 1
+
+
+# ---- the optional job number of a line (FR-006e, research R23, R24) ---------------------------------------
+def doc_with_jobs(fake_idp, jobs):
+    """A 3-line document where jobs[i] (when not None) is the job number its line carries."""
+    lines = [{"part_number": chr(ord("A") + i), "quantity": i + 1, "uom": "EA", **({"job_number": j} if j else {})}
+             for i, j in enumerate(jobs)]
+    fake_idp.add(DOC, po_fields(0, lines=lines))
+
+
+def test_a_line_with_a_job_number_keeps_it_and_the_others_are_allocated(live_writes, fake_idp):
+    doc_with_jobs(fake_idp, [None, "J-77", None])
+    out, soap, _ = go()
+    item = out["reservation"]
+    assert item["state"] == rs.RESERVED and "failure" not in out
+    assert item["job_numbers"] == [{"line": 1, "job": "5000", "source": "allocated"},
+                                   {"line": 2, "job": "J-77", "source": "document"},
+                                   {"line": 3, "job": "5001", "source": "allocated"}]
+    assert soap.calls.count(("invoke", "NextCoSp")) == 1 and soap.calls.count(("invoke", "NextWOSp")) == 2
+
+
+def test_every_line_supplied_allocates_only_the_co_number(live_writes, fake_idp):
+    doc_with_jobs(fake_idp, ["J1", "J2", "J3"])
+    out, soap, _ = go()
+    assert out["reservation"]["state"] == rs.RESERVED and out["reservation"]["co_num"] == "100"
+    assert [j["job"] for j in out["reservation"]["job_numbers"]] == ["J1", "J2", "J3"]
+    assert soap.calls.count(("invoke", "NextWOSp")) == 0 and soap.calls.count(("invoke", "NextCoSp")) == 1
+
+
+def test_live_writes_off_allocates_nothing_even_when_every_job_number_is_supplied(fake_idp):
+    doc_with_jobs(fake_idp, ["J1", "J2", "J3"])
+    out, soap, _ = go()
+    assert out["failure"]["code"] == errors.LIVE_WRITES_DISABLED and soap.writes() == []
+
+
+def test_a_supplied_job_number_is_never_reported_as_consumed(live_writes, fake_idp):
+    doc_with_jobs(fake_idp, ["J1", None, None])
+    soap = FakeSoap(customers=CUST, scenarios={("invoke", "NextWOSp", 2): "reject"})
+    out, _, _ = go(soap=soap)
+    assert out["failure"]["step"] == "number_job_3"
+    assert out["consumed_unused"] == [{"kind": "co", "number": "100"}, {"kind": "job", "line": 2, "number": "5000"}]
+
+
+def test_the_same_job_number_on_two_lines_is_not_checked_here(live_writes, fake_idp):
+    doc_with_jobs(fake_idp, ["J1", "J1", None])
+    out, _, _ = go()
+    assert out["reservation"]["state"] == rs.RESERVED
+    assert [j["job"] for j in out["reservation"]["job_numbers"]][:2] == ["J1", "J1"]

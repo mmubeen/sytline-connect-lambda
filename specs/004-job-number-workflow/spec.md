@@ -23,6 +23,11 @@ Feature 001 already saves a confirmed order in one step and obtains its numbers 
 - Q: Does the document ID go to reserve, to save, or both? → A: Both. Reserve fetches the result, resolves the customer and binds the document (customer, PO number, line count) to the reservation; save names the same document, fetches the result again and refuses it if it no longer matches.
 - Pending: the IDP document class and the field names for customer, PO number and line items are to be supplied; until they are, the mapping is configurable and its names are unconfirmed.
 
+### Session 2026-10-25 (optional job number)
+
+- Q: Where should the optional job number come from, so that no new job number is allocated for a line when it is set? → A: Per line, from the document: an optional job-number field on each line item. Present and non-empty means that line keeps it and no new job number is allocated for it. Callers do not send one.
+- Q: When a line's supplied job number already exists in the ERP, or appears twice in the same document, what should the function do? → A: Nothing special: no check is made. The save tries to create the job with that number and the ERP's own rejection decides. The existing rules then apply unchanged: a rejection after earlier rows were written leaves the order needing manual reconciliation, and it is never retried or replayed.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Get job numbers from the ERP (Priority: P1)
@@ -130,6 +135,7 @@ The caller can ask for the state of a reservation and its save at any time: rese
 - **FR-020**: Reserve MUST bind the document to the reservation (document ID and a fingerprint of the customer, PO number and line count). Save MUST name the same document, obtain its result again, and refuse, writing nothing, if the document or its result no longer matches what was reserved.
 - **FR-021**: The system MUST NOT store the PO details (customer, PO number, lines) in its own records; it MUST store only the document ID, the fingerprint, the reserved numbers and the per-line results.
 - **FR-022**: An unavailable or failing IDP source MUST be reported clearly and MUST NOT cause any number to be reserved or any record to be written.
+- **FR-023**: When a line item of the document carries a job number (an optional field), reserve MUST use it for that line instead of allocating a new one, and MUST allocate for every other line as before. The reservation MUST record per line whether the job number was supplied or allocated; a supplied one is not a number this service consumed. No check of a supplied job number is made, neither against the ERP nor between lines: if the ERP rejects the job (for example because the number is already in use), the existing rules for a rejection after earlier rows were written apply unchanged (the order is left needing manual reconciliation, never retried or replayed).
 
 ### Key Entities
 

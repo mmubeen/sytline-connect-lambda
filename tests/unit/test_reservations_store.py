@@ -143,7 +143,8 @@ def test_numbers_are_reserved_until_saved_and_then_used():
     s.finish_saved(rid, [{"line": 1, "status": "saved"}, {"line": 2, "status": "saved"}])
     assert usage(s.get(rid)) == ["used", "used"]
     assert rs.numbers_report(s.get(rid), 1000) == {"co_num": "100", "jobs": [
-        {"line": 1, "job": "5000", "usage": "used"}, {"line": 2, "job": "5001", "usage": "used"}]}
+        {"line": 1, "job": "5000", "source": "allocated", "usage": "used"},
+        {"line": 2, "job": "5001", "source": "allocated", "usage": "used"}]}
 
 
 def test_a_failed_reservation_reports_every_number_consumed_unused():
@@ -181,7 +182,7 @@ def test_decimals_from_the_table_are_handled():
 
     item = {"state": "reserved", "updated_at": Decimal(1000), "co_num": "100",
             "job_numbers": [{"line": Decimal(1), "job": "5000"}]}
-    assert rs.numbers_report(item, 1000)["jobs"] == [{"line": 1, "job": "5000", "usage": "reserved"}]
+    assert rs.numbers_report(item, 1000)["jobs"] == [{"line": 1, "job": "5000", "source": "allocated", "usage": "reserved"}]
 
 
 def test_release_claim_returns_a_run_that_wrote_nothing_to_save_accepted():
@@ -199,3 +200,43 @@ def test_no_po_details_are_ever_stored():
     text = repr(s._t.items)
     for detail in ("ACME", "'PO-1'", "po_number", "lines", "quantity"):
         assert detail not in text
+
+
+# ---- supplied job numbers (FR-006e, research R26) ---------------------------------------------
+def with_supplied(s, ref="s1"):
+    """Two lines: line 1 allocated (an older entry without `source`), line 2 supplied by the document."""
+    rid = s.create_reservation({"request_ref": ref, "document_id": "d", "line_count": 2}, "h", "f", "u", "a")[0]["reservation_id"]
+    s.set_co_num(rid, "100")
+    s.add_job_number(rid, [{"line": 1, "job": "5000"}, {"line": 2, "job": "J-77", "source": "document"}])
+    return rid
+
+
+def sources(item):
+    return [j["source"] for j in rs.numbers_report(item, 1000)["jobs"]]
+
+
+def test_the_report_shows_the_source_and_reads_an_entry_without_one_as_allocated():
+    s = mk()
+    rid = with_supplied(s)
+    s.mark_reserved(rid)
+    assert sources(s.get(rid)) == ["allocated", "document"] and usage(s.get(rid)) == ["reserved", "reserved"]
+    s.accept_save(rid, {"document_id": "d"}); s.claim(rid)
+    s.finish_saved(rid, [{"line": 1, "status": "saved"}, {"line": 2, "status": "saved"}])
+    assert usage(s.get(rid)) == ["used", "used"]
+
+
+def test_a_supplied_number_that_was_not_saved_is_not_reported_as_consumed():
+    s = mk()
+    failed = with_supplied(s, "f1")
+    s.mark_failed(failed, "ERP_REJECTED", "m", "number_job_3")
+    assert usage(s.get(failed)) == ["consumed_unused", "supplied_not_saved"]
+    partly = with_supplied(s, "p1")
+    s.mark_reserved(partly); s.accept_save(partly, {"document_id": "d"}); s.claim(partly)
+    s.finish_partly_saved(partly, "ERP_REJECTED", "m", "create_line_1", [
+        {"line": 1, "status": "failed"}, {"line": 2, "status": "not_attempted"}])
+    assert usage(s.get(partly)) == ["consumed_unused", "supplied_not_saved"]
+    recon = with_supplied(s, "r1")
+    s.mark_reserved(recon); s.accept_save(recon, {"document_id": "d"}); s.claim(recon)
+    s.park(recon, "UNCERTAIN_OUTCOME", "m", "create_job_2", [], [{"line": 1, "status": "saved"},
+                                                               {"line": 2, "status": "unverified"}])
+    assert usage(s.get(recon)) == ["used", "unverified"]

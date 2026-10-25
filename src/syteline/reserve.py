@@ -86,9 +86,13 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source
         record(store.set_co_num, rid, co_num)
         jobs = []
         for i in range(1, len(details["lines"]) + 1):
-            job = allocate("next_job", "job", f"number_job_{i}")
-            consumed.append({"kind": "job", "line": i, "number": job})
-            jobs.append({"line": i, "job": job})
+            job = details["lines"][i - 1].get("job")  # a job number the document carries is used, not allocated
+            if job:
+                source = "document"
+            else:
+                job, source = allocate("next_job", "job", f"number_job_{i}"), "allocated"
+                consumed.append({"kind": "job", "line": i, "number": job})
+            jobs.append({"line": i, "job": job, "source": source})
             record(store.add_job_number, rid, list(jobs))
         record(store.mark_reserved, rid)
         return {"duplicate": False, "reservation": store.get(rid)}

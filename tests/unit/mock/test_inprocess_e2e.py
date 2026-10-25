@@ -94,6 +94,18 @@ def test_a_passing_document_reserves_and_the_background_save_writes_the_order(wo
     assert any(r.get("CustPo") == "MOCK-PO-0001" for r in erp.rows("SLCos"))
 
 
+def test_a_job_number_the_document_supplies_is_kept_and_not_allocated(world):
+    w, edge, erp, runtime = world
+    _, out = run(world, "supplied-job")
+    assert out["outcome"] in ("reserved", "save_accepted"), out
+    assert [j["source"] for j in out["jobs"]] == ["allocated", "document"] and out["jobs"][1]["job"] == "MOCK-JOB-77"
+    runtime.wait()
+    assert not any("exception" in r for r in runtime.results), runtime.results
+    assert [r["Job"] for r in erp.rows("CCTJobs")] == [out["jobs"][0]["job"], "MOCK-JOB-77"]
+    ops = [c["operation"] for c in erp.calls_since(0)]
+    assert ops.count("CallMethod") == 2  # the CO number and one job number; none for line 2
+
+
 def test_the_same_event_twice_is_processed_once(world):
     w, edge, erp, runtime = world
     event, first = run(world, "already-processed")

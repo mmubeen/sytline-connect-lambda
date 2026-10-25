@@ -304,3 +304,30 @@ def test_the_debug_detail_is_shortened_and_exists_only_for_idp_failures(world):
     world.idp.raise_for.clear()
     world.idp.update(DOC, low={"cust_po"})  # a normal refusal has no underlying message to show
     assert "detail" not in ei.process(ev(), None, debug=True)
+
+
+# ---- a job number the document supplies for a line (FR-006e) --------------------------------------------------------
+def with_supplied_job(world, line=2, job="J-77"):
+    fields = po_fields(3)
+    fields["lines"][line - 1]["job_number"] = job
+    world.idp.add(DOC, fields, document_class="purchase_order", pages=3, issues=1)
+
+
+def test_a_supplied_job_number_is_kept_and_the_response_says_where_each_came_from(live):
+    with_supplied_job(live)
+    out = live.run()
+    assert out["outcome"] == "save_accepted"
+    assert out["jobs"] == [{"line": 1, "job": "5000", "source": "allocated"},
+                           {"line": 2, "job": "J-77", "source": "document"},
+                           {"line": 3, "job": "5001", "source": "allocated"}]
+    assert live.soap.calls.count(("invoke", "NextWOSp")) == 2
+    again = live.run()  # a second delivery returns the first outcome, without reserving again
+    assert again["outcome"] == "already_processed" and live.soap.calls.count(("invoke", "NextWOSp")) == 2
+
+
+def test_a_supplied_job_number_below_its_threshold_is_refused_for_review_and_reserves_nothing(live):
+    with_supplied_job(live)
+    live.idp.update(DOC, low={"lines"})
+    out = live.run()
+    assert out["outcome"] == "refused" and out["errors"][0]["code"] == errors.DOCUMENT_NEEDS_REVIEW
+    assert "lines[1].job_number" in json.dumps(out) and live.soap.calls.count(("invoke", "NextCoSp")) == 0

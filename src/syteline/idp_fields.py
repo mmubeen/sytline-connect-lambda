@@ -33,6 +33,7 @@ DEFAULT_MAP = {
     "line.engine_sn": "engine_sn",
     "line.serial_num": "serial_num",
     "line.packing": "packing",
+    "line.job": "job_number",               # optional: a job number the document already carries for the line (FR-006e)
 }
 REQUIRED = ("customer.name", "po_number", "lines")
 REQUIRED_LINE = ("line.item", "line.quantity", "line.uom")
@@ -94,7 +95,7 @@ def _date(v):
 
 _CONVERT = {"text": _text, "number": _number, "date": _date}
 _LINE_KINDS = {"item": "text", "quantity": "number", "uom": "text", "due_date": "date", "price": "number",
-               "teardown": "text", "engine_sn": "text", "serial_num": "text", "packing": "text"}
+               "teardown": "text", "engine_sn": "text", "serial_num": "text", "packing": "text", "job": "text"}
 
 
 def _present(raw):

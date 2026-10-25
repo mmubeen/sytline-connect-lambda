@@ -77,7 +77,7 @@ def _refused(exc, document_id=None, summary=None, debug=False):
 def _numbers(item):
     report = numbers_report(item, int(time.time()))
     return {"reservation_id": item["reservation_id"], "state": effective_state(item, int(time.time())),
-            "co_num": report["co_num"], "jobs": [{"line": j["line"], "job": j["job"]} for j in report["jobs"]]}
+            "co_num": report["co_num"], "jobs": [{"line": j["line"], "job": j["job"], "source": j["source"]} for j in report["jobs"]]}
 
 
 def _final(item):

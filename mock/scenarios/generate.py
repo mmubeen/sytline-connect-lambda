@@ -50,6 +50,11 @@ SQL = ("INSERT dbo.custaddr (cust_num, cust_seq, name, [addr##1], city, state, z
 SCENARIOS = {
     "passes-review": ("A document whose every field is above its confidence threshold: job numbers are reserved and the save starts.",
                       "mock-pass-001.pdf", idp("mock-pass-001.pdf", good_fields()), {"outcome": "save_accepted"}, False),
+    "supplied-job": ("Line 2 of the document carries its own job number: it is kept and no job number is allocated for it.",
+                     "mock-supplied-001.pdf",
+                     idp("mock-supplied-001.pdf", dict(good_fields(), lines=[
+                         dict(lines()[0]), dict(lines()[1], job_number="MOCK-JOB-77")])),
+                     {"outcome": "save_accepted", "jobs": ["allocated", "document"]}, False),
     "already-processed": ("The same event sent twice: the second run must report the document as already processed.",
                           "mock-twice-001.pdf", idp("mock-twice-001.pdf", good_fields()),
                           {"outcome": "save_accepted", "second": "already_processed"}, True),

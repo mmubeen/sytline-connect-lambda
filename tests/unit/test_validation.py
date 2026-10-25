@@ -128,3 +128,19 @@ def test_fingerprint_binds_customer_po_and_line_count_and_ignores_case_and_spaci
     assert base != validation.fingerprint({"name": "ACME INC", "city": "Tucson"}, "PO-1", 2)
     assert base != validation.fingerprint({"name": "ACME INC", "city": "Phoenix"}, "PO-2", 2)
     assert base != validation.fingerprint({"name": "ACME INC", "city": "Phoenix"}, "PO-1", 3)
+
+
+def test_fingerprint_without_supplied_job_numbers_is_unchanged():
+    """Pinned: reservations made before the optional job number keep matching their document."""
+    assert validation.fingerprint({"name": "ACME"}, "PO-1", 2) == \
+        validation.fingerprint({"name": "ACME"}, "PO-1", 2, None) == validation.fingerprint({"name": "ACME"}, "PO-1", 2, {})
+    assert validation.fingerprint({"name": "ACME"}, "PO-1", 2) == \
+        "9ab68cd6d6039c6a055c27d24c20872f1238ff0f8166ecf47dff178b2de79196"
+
+
+def test_fingerprint_covers_supplied_job_numbers_in_any_order():
+    base = validation.fingerprint({"name": "ACME"}, "PO-1", 3)
+    a = validation.fingerprint({"name": "ACME"}, "PO-1", 3, {1: "J1", 3: "J3"})
+    assert a != base and a == validation.fingerprint({"name": "ACME"}, "PO-1", 3, {3: "J3", 1: "J1"})
+    assert a != validation.fingerprint({"name": "ACME"}, "PO-1", 3, {1: "J1", 3: "J4"})
+    assert a != validation.fingerprint({"name": "ACME"}, "PO-1", 3, {1: "J1", 2: "J3"})

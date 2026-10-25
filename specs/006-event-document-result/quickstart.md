@@ -35,3 +35,9 @@ Set `IDP_STATE_MACHINE_ARN` in `deploy.env`, redeploy, upload a document to the 
 3. Odd input: invoke with a plain string or `null`: the run behaves as before and the line says what arrived.
 4. Turn it off again (`LOG_EVENTS=false`) when finished: it exposes document and order content to whoever can read the logs.
 
+## Optional job number (FR-006e)
+
+1. Unit run: the fixtures with and without a `job_number` on a line (`tests/unit/test_reserve.py`, `test_event_intake.py`): a line with it keeps it and `jobs[i].source` is `document`; the other lines are `allocated` and the numbering routine is called once per allocated line.
+2. Mock environment: set `MOCK_IDP_FIELD_MAP` to include `"line.job": "<field>"` for a real document, or use a seeded document with the field, run the intake with live writes on, and read the job numbers from the response: the supplied one appears as given, and the mock ERP's job counter did not move for that line.
+3. Rejection: seed the mock ERP with a job of the same number (or supply the same number on two lines) and run the intake: the save ends `needs_reconciliation` after the earlier rows (this is the specified behaviour, not a defect); follow `docs/reconciliation-runbook.md`.
+4. A supplied number below its confidence threshold is refused `DOCUMENT_NEEDS_REVIEW` and names the field; nothing is reserved.

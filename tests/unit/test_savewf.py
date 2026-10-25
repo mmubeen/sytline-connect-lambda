@@ -241,3 +241,26 @@ def test_the_defaults_are_not_read_when_live_writes_are_off(monkeypatch):
     monkeypatch.setenv(idos.DEFAULTS_SETTING, "database")
     out = savewf.run_save(reservation(), save_req(), FakeSoap(customers=CUST), dict(CFG, **DB_CFG))
     assert out["state"] == "failed" and f.connect_kwargs == []
+
+
+# ---- a job number the document supplied (FR-006e, research R24) --------------------------------------------
+def supplied_reservation(n=2):
+    r = reservation(n)
+    r["job_numbers"][1] = {"line": 2, "job": "J-77", "source": "document"}
+    return r
+
+
+def test_a_supplied_job_number_is_saved_like_any_reserved_one_without_a_numbering_call(live_writes):
+    soap = FakeSoap(customers=CUST)
+    out = savewf.run_save(supplied_reservation(), save_req(2), soap, CFG)
+    assert out["state"] == "succeeded" and [r["job"] for r in out["results"]] == ["5000", "J-77"]
+    assert soap.rows["CCTJobs"][1]["Job"] == "J-77" and soap.rows["CCT_Coitems"][1][idos.LINE_LINK_PROPS["ref_num"]] == "J-77"
+    assert not any(c[0] == "invoke" for c in soap.calls)
+
+
+def test_the_erp_rejecting_a_supplied_job_number_needs_reconciliation_and_nothing_is_retried(live_writes):
+    soap = FakeSoap(customers=CUST, scenarios={("insert", "CCTJobs", 2): "reject"})  # for example: the job exists
+    out = savewf.run_save(supplied_reservation(), save_req(2), soap, CFG)
+    assert out["state"] == "needs_reconciliation" and out["step"] == "create_job_2"
+    assert {"kind": "line", "key": "100/2"} in out["possibly_written"] and {"kind": "co", "key": "100"} in out["possibly_written"]
+    assert [c for c in soap.calls if c[:2] == ("insert", "CCTJobs")].__len__() == 2  # no retry

@@ -273,3 +273,42 @@ def test_a_full_authorization_sentence_with_a_key_arn_fits_the_log_message(fake,
     with pytest.raises(IntegrationError):
         idp.read_document(DOC)
     assert key in caplog.text and "kms:Decrypt action" in caplog.text
+
+
+# ---- the optional job number of a line (FR-006e) ---------------------------------------------------------
+def test_a_line_may_carry_a_job_number_which_is_trimmed(fake):
+    fake.add(DOC, po_fields(0, lines=[{"part_number": "A", "quantity": 1, "uom": "EA", "job_number": "  J123  "},
+                                      {"part_number": "B", "quantity": 1, "uom": "EA"}]))
+    out = idp.po_details(DOC)
+    assert [ln.get("job") for ln in out["details"]["lines"]] == ["J123", None]
+    _, _, used = idp_fields.map_fields(fake.docs[DOC]["fields"])
+    assert "lines[0].job_number" in used and "lines[1].job_number" not in used
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", {"a": 1}, ["x"]])
+def test_an_empty_or_unusable_job_number_means_not_supplied_and_is_never_required(fake, value):
+    fake.add(DOC, po_fields(0, lines=[{"part_number": "A", "quantity": 1, "uom": "EA", "job_number": value}]))
+    assert "job" not in idp.po_details(DOC)["details"]["lines"][0]
+
+
+def test_the_job_number_field_name_can_be_overridden(fake, monkeypatch):
+    monkeypatch.setenv("IDP_FIELD_MAP", '{"line.job": "work_order"}')
+    fake.add(DOC, po_fields(0, lines=[{"part_number": "A", "quantity": 1, "uom": "EA", "job_number": "ignored",
+                                       "work_order": "W9"}]))
+    assert idp.po_details(DOC)["details"]["lines"][0]["job"] == "W9"
+
+
+def test_a_supplied_job_number_read_with_low_confidence_needs_review(fake):
+    fake.add(DOC, po_fields(0, lines=[{"part_number": "A", "quantity": 1, "uom": "EA", "job_number": "J1"}]),
+             low={"lines"})
+    e = refused()
+    assert e.err["code"] == errors.DOCUMENT_NEEDS_REVIEW and "lines[0].job_number" in e.extra["fields"]
+
+
+def test_the_fingerprint_covers_the_supplied_job_numbers(fake):
+    plain = [{"part_number": "A", "quantity": 1, "uom": "EA"}, {"part_number": "B", "quantity": 1, "uom": "EA"}]
+    fake.add(DOC, po_fields(0, lines=plain))
+    base = idp.po_details(DOC)["fingerprint"]
+    assert base == validation.fingerprint({"name": "ACME"}, "PO-1", 2)
+    fake.add(DOC, po_fields(0, lines=[plain[0], dict(plain[1], job_number="J2")]))
+    assert idp.po_details(DOC)["fingerprint"] == validation.fingerprint({"name": "ACME"}, "PO-1", 2, {2: "J2"}) != base

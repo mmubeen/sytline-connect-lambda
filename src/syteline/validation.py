@@ -165,9 +165,13 @@ def _norm(v):
     return " ".join(str(v or "").split()).upper()
 
 
-def fingerprint(customer, po_number, line_count):
-    """SHA-256 binding a reservation to one PO: normalized customer identity, PO number and line count."""
+def fingerprint(customer, po_number, line_count, supplied=None):
+    """SHA-256 binding a reservation to one PO: normalized customer identity, PO number and line count.
+
+    `supplied` ({line: job number} the document carries) is part of it only when not empty, so a reservation
+    without any keeps the fingerprint it always had."""
     c = customer or {}
     parts = [_norm(c.get(k)) for k in ("name", "address1", "city", "state", "postal_code")]
     parts += [_norm(po_number), str(line_count)]
+    parts += [f"{line}={job}" for line, job in sorted((supplied or {}).items())]
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()

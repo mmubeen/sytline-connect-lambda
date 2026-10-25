@@ -41,14 +41,15 @@ def _body(item, duplicate):
     report = numbers_report(item, now)
     out = {"reservation_id": item["reservation_id"], "state": effective_state(item, now), "duplicate": duplicate,
            "document_id": item["document_id"], "line_count": int(item["line_count"]),
-           "co_num": report["co_num"], "jobs": [{"line": j["line"], "job": j["job"]} for j in report["jobs"]]}
+           "co_num": report["co_num"], "jobs": [{"line": j["line"], "job": j["job"], "source": j["source"]} for j in report["jobs"]]}
     if item.get("customer_match"):
         out["customer_match"] = {k: item["customer_match"][k] for k in ("cust_num", "cust_seq")
                                  if k in item["customer_match"]}
     if out["state"] == "failed":
         out["failure"] = item.get("failure") or {"code": errors.UNCERTAIN_OUTCOME,
                                                  "message": "the reservation never finished", "step": "reserve"}
-        consumed = [{"kind": "job", "line": j["line"], "number": j["job"]} for j in report["jobs"]]
+        consumed = [{"kind": "job", "line": j["line"], "number": j["job"]} for j in report["jobs"]
+                    if j["source"] != "document"]  # a number the document supplied was not consumed here
         if report["co_num"]:
             consumed.insert(0, {"kind": "co", "number": report["co_num"]})
         if consumed:
