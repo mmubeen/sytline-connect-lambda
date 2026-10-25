@@ -103,3 +103,34 @@ def test_columns_asks_with_star_then_empty_and_never_returns_a_value():
 
     c = SoapIdoClient({"SYTELINE_USER": "u", "SYTELINE_PASS": "p", "SYTELINE_CONFIG": "C"}, zeep_client=Z())
     assert c.columns("CCT_Coitems") == ("*", ["co_num", "item"]) and asked == ["*"]
+
+
+def test_columns_reports_why_each_property_list_was_refused():
+    class Z:
+        class settings:  # noqa: N801
+            def __init__(self, **kw):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        class service:  # noqa: N801
+            @staticmethod
+            def CreateSessionToken(*a):
+                return "tok"
+
+            @staticmethod
+            def LoadDataSet(token, ido, plist, *rest):
+                class Fault(Exception):
+                    pass
+
+                Fault.__name__ = "Fault"
+                raise Fault("star is bad" if plist == "*" else "empty is bad")
+
+    c = SoapIdoClient({"SYTELINE_USER": "u", "SYTELINE_PASS": "p", "SYTELINE_CONFIG": "C"}, zeep_client=Z())
+    with pytest.raises(sc.ErpRejected) as ei:
+        c.columns("CCT_Coitems")
+    assert "'*': star is bad" in str(ei.value) and "'': empty is bad" in str(ei.value)

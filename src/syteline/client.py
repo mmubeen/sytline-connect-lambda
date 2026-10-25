@@ -128,13 +128,13 @@ class SoapIdoClient:
         """(property list used, [property names]) of an IDO, from the schema of a one-row read (names only, no values).
 
         Read-only. Tries the property list "*" and then an empty one; raises ErpRejected when the service refuses both."""
-        last = None
+        refused = []
         for plist in ("*", ""):
             self._with_schema = True
             try:
                 raw = self._call("load", ido, plist, "", "", "", 1)
             except ErpRejected as exc:
-                last = exc
+                refused.append(f"property list {plist!r}: {str(exc)[:160]}")
                 continue
             finally:
                 self._with_schema = False
@@ -142,10 +142,8 @@ class SoapIdoClient:
             names = _schema_columns(raw) or sorted({k for row in parse_rows(raw) for k in row})
             if names and not err:
                 return plist, names
-            last = ErpRejected(err) if err else last
-        if last:
-            raise last
-        return None, []
+            refused.append(f"property list {plist!r}: {err or 'no columns in the answer'}")
+        raise ErpRejected(" | ".join(refused))
 
     def insert(self, ido, values):
         """Insert one row; return the stored row. Row-level rejections raise ErpRejected."""
