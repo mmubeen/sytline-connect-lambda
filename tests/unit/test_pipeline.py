@@ -7,6 +7,12 @@ CFG = {"SYTELINE_DEFAULT_WHSE": "MAIN", "SYTELINE_DEFAULT_ORDTYPE": "J"}
 CUST = [{"cust_num": "C1", "cust_seq": 0, "name": "ACME"}]
 
 
+@pytest.fixture(autouse=True)
+def teardown_property(monkeypatch):
+    """SLCoitems has no teardown property of its own: these tests name one."""
+    monkeypatch.setenv("SYTELINE_LINE_TEARDOWN_PROP", "Teardown")
+
+
 def req(n=2, **kw):
     r = {"request_ref": "r", "customer": {"name": "ACME"},
          "lines": [{"item": f"I{i}", "quantity": i + 1, "uom": "EA"} for i in range(n)]}
@@ -153,3 +159,11 @@ def test_an_unreadable_default_never_blocks_the_upload(monkeypatch, live_writes)
     FakeSqlServer(connect_error="login_fail").install(monkeypatch)
     out, soap = run_db()
     assert out["state"] == "succeeded" and "TermsCode" not in soap.rows["SLCos"][0]
+
+
+def test_without_a_configured_teardown_property_the_date_is_not_written(live_writes, monkeypatch):
+    monkeypatch.delenv("SYTELINE_LINE_TEARDOWN_PROP")
+    r = req(1)
+    r["lines"][0]["teardown"] = "TD-7"
+    out, soap = run(r)
+    assert out["state"] == "succeeded" and "Teardown" not in soap.rows["SLCoitems"][0] and "TD-7" not in soap.rows["SLCoitems"][0].values()

@@ -17,6 +17,8 @@ _NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 DEFAULTS = {
     "CCT_Coitems": ["CoNum", "CoLine", "CoRelease", "Item", "UM", "QtyOrdered", "DueDate", "Price", "RefType", "RefNum",
                     "RefLineSuf", "RefRelease", "Teardown", "CustNum", "Whse", "CoCoNum", "OrdNum", "CoNumber", "Co_Num"],
+    "SLCoitems": ["CoNum", "CoLine", "CoRelease", "Item", "UM", "QtyOrdered", "DueDate", "Price", "RefType", "RefNum",
+                  "RefLineSuf", "RefRelease", "CustNum", "Whse"],
     "CCTJobs": ["Job", "OrdType", "Whse", "Item", "QtyReleased", "OrdNum", "OrdLine", "OrdRelease", "RootJob", "uf_eng_sn",
                 "uf_sn", "Packing", "CoNum", "CoLine"],
     "SLCos": ["CoNum", "CustNum", "CustSeq", "OrderDate", "Stat", "CustPo", "TermsCode", "ShipCode", "DateReceived", "Datefld"],

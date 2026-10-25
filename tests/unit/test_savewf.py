@@ -7,6 +7,12 @@ CFG = {"SYTELINE_DEFAULT_WHSE": "MAIN", "SYTELINE_DEFAULT_ORDTYPE": "J"}
 CUST = [{"cust_num": "C1", "cust_seq": 0, "name": "ACME"}]
 
 
+@pytest.fixture(autouse=True)
+def teardown_property(monkeypatch):
+    """SLCoitems has no teardown property of its own: these tests name one (the setting is covered at the end of the file)."""
+    monkeypatch.setenv("SYTELINE_LINE_TEARDOWN_PROP", "Teardown")
+
+
 def reservation(n=2):
     return {"reservation_id": "res-1", "state": "saving", "co_num": "100",
             "job_numbers": [{"line": i, "job": str(5000 + i - 1)} for i in range(1, n + 1)],
@@ -46,7 +52,7 @@ def test_happy_path_order_links_and_per_line_results(live_writes):
     assert head["OrderDate"] == "2026-10-20" and "DateReceived" not in head  # SLCos has no received-date property
     line1 = soap.rows["SLCoitems"][0]
     assert line1[idos.LINE_LINK_PROPS["ref_num"]] == "5000" and line1[idos.LINE_LINK_PROPS["ref_type"]] == "J"
-    assert line1[idos.LINE_TEARDOWN_PROP] == "2026-10-25"  # set by the separate update
+    assert line1["Teardown"] == "2026-10-25"  # set by the separate update
     job1 = soap.rows["CCTJobs"][0]
     link = idos.JOB_LINK_PROPS
     assert job1["Job"] == "5000" and job1[link["co_num"]] == "100" and job1[link["co_line"]] == 1 and job1["RootJob"] == "5000"
@@ -288,3 +294,12 @@ def test_a_numeric_customer_number_is_written_as_the_erp_stores_it(live_writes):
     out = savewf.run_save(res, save_req(1), soap, CFG)
     assert soap.rows["SLCos"][0]["CustNum"] == "   1234" and soap.rows["SLCos"][0]["CustSeq"] == 0
     assert out["state"] == "succeeded"
+
+
+def test_without_a_configured_teardown_property_no_update_is_made_and_the_line_says_so(live_writes, monkeypatch):
+    monkeypatch.delenv("SYTELINE_LINE_TEARDOWN_PROP")
+    req = save_req(1)
+    req["lines"][0]["teardown"] = "2026-10-25"
+    out, soap = go(n=1, req=req)
+    assert out["state"] == "succeeded" and ("update", "SLCoitems") not in soap.calls
+    assert any("teardown date not written" in w and "SYTELINE_LINE_TEARDOWN_PROP" in w for w in out["results"][0]["warnings"])
