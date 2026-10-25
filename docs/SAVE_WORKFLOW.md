@@ -160,3 +160,14 @@ The first live saves showed which guessed names were wrong; the workbook settles
 - **CO header (`SLCos`)**: `CustPo`, `TermsCode`, `ShipCode`, `OrderDate`, `Stat` exist. There is **no received-date property**: the service refused `DateReceived`. The received date is therefore not written unless `SYTELINE_CO_RECEIVED_DATE_PROP` names the property to use (not yet a template parameter).
 - **Job (`CCTJobs`)**: no `CoNum` or `CoLine`; the job's link back to its order is `OrdNum` / `OrdLine` (`idos.JOB_LINK_PROPS`, also what the read-back checks). The engine and serial numbers are `uf_eng_sn` and `uf_sn`.
 - **Still unconfirmed** (not in the workbook): the line's teardown-date property (`Teardown`, on `CCT_Coitems`), the job's packing property (`Packing`), and what `OrdType` must hold (in `SLJobs` it is the type of the referencing order, not necessarily the configured "order type").
+
+## Finding the right property names (read-only)
+
+When the service refuses a property ("error property [X] does not exist in [IDO] IDO"), ask it which names an IDO accepts instead of guessing, one failed save at a time:
+
+```
+./invoke.sh '{"action": "probe_properties", "ido": "CCT_Coitems"}'
+./invoke.sh '{"action": "probe_properties", "ido": "CCT_Coitems", "properties": ["CoNum", "CoNumber", "OrdNum"]}'
+```
+
+Each name is requested alone in a one-row read; the answer lists `exists` and `missing` (with the service's message) and never a value. `CCT_Coitems`, `CCTJobs` and `SLCos` have a default list of the names the save uses plus likely alternatives. Nothing is written, so live writes need not be on.
