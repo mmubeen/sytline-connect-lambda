@@ -1,7 +1,8 @@
 """SaveDataSet is sent as the real WSDL declares it (updateDataSet = schema + any), not as a string.
 
 The WSDL fixture reproduces the real service's SaveDataSet signature (confirmed from `python -m zeep` against the plant
-service). The row layout inside the DataSet is still unconfirmed against the live service."""
+service). The DataSet is named after the IDO (the service refused "DataSet" as an IDO name); the rest of the row layout is still
+unconfirmed against the live service."""
 import os
 
 import pytest
@@ -26,8 +27,8 @@ def test_insert_is_a_dataset_with_schema_and_an_inserted_row():
     msg = message(sc._dataset("SLCos", "Insert", {"CoNum": "129548", "CustNum": "7"}))
     body = msg.find(".//s:updateDataSet", NS)
     assert [etree.QName(c).localname for c in body] == ["schema", "diffgram"]
-    assert body.xpath("x:schema//x:element[@name='SLCos']//x:element/@name", namespaces=NS) == ["CoNum", "CustNum"]
-    row = body.find("d:diffgram/DataSet/SLCos", NS)
+    assert body.xpath("x:schema/x:element[@name='SLCos']//x:element[@name='IDO']//x:element/@name", namespaces=NS) == ["CoNum", "CustNum"]
+    row = body.find("d:diffgram/SLCos/IDO", NS)
     assert row.get(f"{{{sc.DIFFGR}}}hasChanges") == "inserted"
     assert [(c.tag, c.text) for c in row] == [("CoNum", "129548"), ("CustNum", "7")]
     assert msg.findtext(".//s:refreshAfterSave", namespaces=NS) == "true"
@@ -35,8 +36,8 @@ def test_insert_is_a_dataset_with_schema_and_an_inserted_row():
 
 def test_update_carries_the_key_in_a_before_row():
     msg = message(sc._dataset("CCT_Coitems", "Update", {"CoNum": "1", "CoLine": 2, "Teardown": "x"}, {"CoNum": "1", "CoLine": 2}))
-    changed = msg.find(".//d:diffgram/DataSet/CCT_Coitems", NS)
-    before = msg.find(".//d:diffgram/d:before/CCT_Coitems", NS)
+    changed = msg.find(".//d:diffgram/CCT_Coitems/IDO", NS)
+    before = msg.find(".//d:diffgram/d:before/IDO", NS)
     assert changed.get(f"{{{sc.DIFFGR}}}hasChanges") == "modified"
     assert [c.tag for c in changed] == ["CoNum", "CoLine", "Teardown"] and [c.tag for c in before] == ["CoNum", "CoLine"]
 

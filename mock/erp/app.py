@@ -220,7 +220,7 @@ class ErpMock:
             rows = [{k: r[k] for k in wanted if k in r} if wanted else r for r in rows]
             if int(cap or 0):
                 rows = rows[:int(cap)]
-            return ("LoadDataSetResult", _dataset_xml(_rows_xml(ido, rows)))
+            return ("LoadDataSetResult", _dataset_xml(ido, _rows_xml(rows)))
         if op == "SaveDataSet":
             return ("SaveDataSetResult", self._save(v[1]))
         if op == "CallMethod":
@@ -246,22 +246,22 @@ class ErpMock:
         """The rows of a SaveDataSet DataSet (diffgram rows marked inserted or modified) -> the saved rows, as a DataSet."""
         if self.faults.take("erp.row_rejected"):
             self._row_fault = "erp.row_rejected"  # _soap records the one call with this fault
-            return _dataset_xml('<Row diffgr:hasErrors="true" diffgr:Error="Row rejected by the mock ERP (erp.row_rejected)"/>')
+            return _dataset_xml("SLCos", '<IDO diffgr:hasErrors="true" diffgr:Error="Row rejected by the mock ERP (erp.row_rejected)"/>')
         out = []
         for el in dataset.iter():
             change = el.get(f"{{{DIFFGR}}}hasChanges")
             if change not in ("inserted", "modified") or any(
                     etree.QName(a).localname == "before" for a in el.iterancestors() if isinstance(a.tag, str)):
                 continue
-            ido = etree.QName(el).localname
+            ido = etree.QName(el.getparent()).localname  # the DataSet is named after the IDO; its rows are `IDO`
             values = {etree.QName(c).localname: (c.text or "") for c in el}
             if change == "inserted":
                 stored = self._add(ido, values)
             else:
                 stored = self._best_match(ido, values)
                 stored.update(values)
-            out.append(_row_xml(ido, stored))
-        return _dataset_xml("".join(out))
+            out.append(_row_xml(stored))
+        return _dataset_xml(ido, "".join(out))
 
     def _best_match(self, ido, values):
         best, score = None, 0
@@ -293,8 +293,8 @@ class ErpMock:
         raise SoapFault(f"unknown method {method}")
 
 
-def _row_xml(ido, row):
-    return f"<{ido}>" + "".join(f"<{k}>{escape(str(v))}</{k}>" for k, v in row.items()) + f"</{ido}>"
+def _row_xml(row):
+    return "<IDO>" + "".join(f"<{k}>{escape(str(v))}</{k}>" for k, v in row.items()) + "</IDO>"
 
 
 DIFFGR = "urn:schemas-microsoft-com:xml-diffgram-v1"
@@ -304,13 +304,14 @@ class Raw(str):
     """A result that is already XML: _envelope puts it in as is."""
 
 
-def _dataset_xml(rows):
-    return Raw('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" id="DataSet"/>'
-               f'<diffgr:diffgram xmlns:diffgr="{DIFFGR}"><DataSet xmlns="">{rows}</DataSet></diffgr:diffgram>')
+def _dataset_xml(ido, rows):
+    """A DataSet as the real service shapes it: named after the IDO, one `IDO` element per row."""
+    return Raw(f'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" id="{ido}"/>'
+               f'<diffgr:diffgram xmlns:diffgr="{DIFFGR}"><{ido} xmlns="">{rows}</{ido}></diffgr:diffgram>')
 
 
-def _rows_xml(ido, rows):
-    return "".join(_row_xml(ido, r) for r in rows)
+def _rows_xml(rows):
+    return "".join(_row_xml(r) for r in rows)
 
 
 def _envelope(op, result):

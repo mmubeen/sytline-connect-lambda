@@ -164,12 +164,13 @@ class SoapIdoClient:
 # The real WSDL (confirmed): SaveDataSet(strSessionToken, updateDataSet: {schema, _value_1: ANY}, refreshAfterSave: boolean,
 # strCustomInsert, strCustomUpdate, strCustomDelete). updateDataSet is a .NET DataSet: an XML schema, then a diffgram.
 # ASSUMPTION (UNCONFIRMED against the live service): the row layout inside it (the standard DataSet diffgram, the table
-# named after the IDO; an update carries the key columns in a `diffgr:before` row). Only this function builds it.
+# named after the IDO, rows called `IDO`; an update carries the key columns in a `diffgr:before` row). Only this function builds it.
 SAVE_TAIL = (True, "", "", "")  # refreshAfterSave, strCustomInsert, strCustomUpdate, strCustomDelete
 
 XS = "http://www.w3.org/2001/XMLSchema"
 MSDATA = "urn:schemas-microsoft-com:xml-msdata"
 DIFFGR = "urn:schemas-microsoft-com:xml-diffgram-v1"
+TABLE = "IDO"  # the name of the table (row element) inside an IDO DataSet
 
 
 def _enable_dataset_render():
@@ -190,35 +191,38 @@ def _enable_dataset_render():
 
 
 def _dataset(ido, action, values, key=None):
-    """The `updateDataSet` argument: {"schema": <xs:schema>, "_value_1": <diffgr:diffgram>} for one row of `ido`."""
+    """The `updateDataSet` argument: {"schema": <xs:schema>, "_value_1": <diffgr:diffgram>} for one row of `ido`.
+
+    The DataSet is NAMED AFTER THE IDO and its table is called `IDO` (the service reads the IDO name from the DataSet's name;
+    a DataSet named "DataSet" is refused with "DataSet is not a valid IDO name")."""
     from lxml import etree
 
     cols = list(values)
     ns = {"xs": XS, "msdata": MSDATA, "diffgr": DIFFGR}
-    schema = etree.Element(f"{{{XS}}}schema", nsmap=ns, id="DataSet")
-    root = etree.SubElement(schema, f"{{{XS}}}element", name="DataSet")
+    schema = etree.Element(f"{{{XS}}}schema", nsmap=ns, id=ido)
+    root = etree.SubElement(schema, f"{{{XS}}}element", name=ido)
     root.set(f"{{{MSDATA}}}IsDataSet", "true")
     table = etree.SubElement(etree.SubElement(etree.SubElement(root, f"{{{XS}}}complexType"), f"{{{XS}}}choice",
-                                              minOccurs="0", maxOccurs="unbounded"), f"{{{XS}}}element", name=ido)
+                                              minOccurs="0", maxOccurs="unbounded"), f"{{{XS}}}element", name=TABLE)
     seq = etree.SubElement(etree.SubElement(table, f"{{{XS}}}complexType"), f"{{{XS}}}sequence")
     for c in cols:
         etree.SubElement(seq, f"{{{XS}}}element", name=c, type="xs:string", minOccurs="0")
 
     diffgram = etree.Element(f"{{{DIFFGR}}}diffgram", nsmap={"msdata": MSDATA, "diffgr": DIFFGR})
-    data = etree.SubElement(diffgram, "DataSet")
+    data = etree.SubElement(diffgram, ido)
 
     def row(parent, props, **attrs):
-        el = etree.SubElement(parent, ido)
+        el = etree.SubElement(parent, TABLE)
         for name, val in attrs.items():
             el.set(f"{{{DIFFGR if name != 'rowOrder' else MSDATA}}}{name}", val)
         for k, v in props.items():
             etree.SubElement(el, k).text = str(v)
 
     if action == "Insert":
-        row(data, values, id=f"{ido}1", rowOrder="0", hasChanges="inserted")
+        row(data, values, id=f"{TABLE}1", rowOrder="0", hasChanges="inserted")
     else:
-        row(data, values, id=f"{ido}1", rowOrder="0", hasChanges="modified")
-        row(etree.SubElement(diffgram, f"{{{DIFFGR}}}before"), key or {}, id=f"{ido}1", rowOrder="0")
+        row(data, values, id=f"{TABLE}1", rowOrder="0", hasChanges="modified")
+        row(etree.SubElement(diffgram, f"{{{DIFFGR}}}before"), key or {}, id=f"{TABLE}1", rowOrder="0")
     return {"schema": schema, "_value_1": diffgram}
 
 
