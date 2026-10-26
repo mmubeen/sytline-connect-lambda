@@ -16,7 +16,7 @@ Safety rules (FR-004, FR-016):
 import logging
 from xml.sax.saxutils import escape
 
-from . import config
+from . import config, idos
 from .errors import (ErpError, ErpRejected, ErpUncertain, ErpUnreachable,  # noqa: F401
                      LiveWritesDisabled)
 
@@ -160,17 +160,27 @@ class SoapIdoClient:
         """Update one existing row (identified by `key`, a property -> value dict); return the stored row.
 
         Same safety classification as `insert`: gated by live writes, a row-level rejection raises ErpRejected,
-        a transport failure after the request may have been sent raises ErpUncertain. ASSUMPTION (UNCONFIRMED,
-        discovery task): an Update change carries the key properties plus the changed ones.
+        a transport failure after the request may have been sent raises ErpUncertain. The change carries the row's `_ItemId`
+        (read first), the key properties and the changed ones. UNCONFIRMED against the live service.
         """
         if not config.live_writes_enabled():
             raise LiveWritesDisabled("live ERP writes are disabled (SYTELINE_LIVE_WRITES)")
+        key = {"_ItemId": self._item_id(ido, key), **key}  # the row's own identifier: without it an update changes nothing, silently
         raw = self._call("save", _dataset(ido, "Update", {**key, **values}, key), *SAVE_TAIL, write=True)
         err = row_error(raw)
         if err:
             raise ErpRejected(err)
         rows = parse_rows(raw)
         return rows[0] if rows else {**key, **values}
+
+    def _item_id(self, ido, key):
+        """The `_ItemId` of the one row `key` names (a read). ErpRejected when there is no such row or the service gives no id."""
+        flt = " AND ".join(f"{k} = {v}" if isinstance(v, int) else f"{k} = {idos.quote(v)}" for k, v in key.items())
+        rows = self.load(ido, ["_ItemId", *key], flt, record_cap=1)
+        item_id = str((rows[0].get("_ItemId") if rows else "") or "").strip()
+        if not item_id:
+            raise ErpRejected(f"cannot update {ido}: no row with {flt} (or the service returned no _ItemId)")
+        return item_id
 
     def invoke(self, ido, method, params):
         """Call an IDO method (e.g. NextCoSp) through the web service; return its output values.

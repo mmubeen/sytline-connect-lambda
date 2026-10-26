@@ -220,7 +220,7 @@ class ErpMock:
         self._check(v[0])
         if op == "LoadDataSet":
             _, ido, props, flt, _order, _post, cap = v
-            rows = self._select(ido, flt)
+            rows = [dict(r, _ItemId=f"{ido}#{id(r)}") for r in self._rows.get(ido, []) if any(r is q for q in self._select_rows(ido, flt))]
             wanted = [p for p in props.split(",") if p and p != "*"]
             rows = [{k: r[k] for k in wanted if k in r} if wanted else r for r in rows]
             if int(cap or 0):
@@ -237,6 +237,16 @@ class ErpMock:
         if op == "GetConfigurationNames":
             return ("GetConfigurationNamesResult", [self.config])
         raise SoapFault(f"unknown operation {op}")
+
+    def _select_rows(self, ido, flt):
+        """The stored rows (not copies) matching the filter."""
+        rows = list(self._rows.get(ido, []))
+        for cond in [c for c in re.split(r"\s+AND\s+", flt or "") if c.strip()]:
+            try:
+                rows = [r for r in rows if _match(r, cond)]
+            except ValueError as exc:
+                raise SoapFault(str(exc))
+        return rows
 
     def _select(self, ido, flt):
         rows = [dict(r) for r in self._rows.get(ido, [])]
@@ -265,7 +275,10 @@ class ErpMock:
                 if ido == "CCT_Coitems":  # lines are written to CCT_Coitems (lowercase names) and read through SLCoitems
                     self._add("SLCoitems", {LINE_READ[k]: v for k, v in values.items() if k in LINE_READ})
             else:
-                stored = self._best_match(ido, values)
+                item_id = values.pop("_ItemId", "")  # an update names its row by the _ItemId a read handed out
+                stored = next((r for r in self._rows.get(ido, []) if f"{ido}#{id(r)}" == item_id), None)
+                if stored is None:
+                    raise SoapFault(f"{ido} row not found for update (no valid _ItemId)")
                 stored.update(values)
                 if ido == "CCT_Coitems":  # keep the standard SLCoitems read in step
                     for r in self._rows.get("SLCoitems", []):

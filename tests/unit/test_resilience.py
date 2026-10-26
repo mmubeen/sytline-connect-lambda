@@ -99,18 +99,25 @@ def test_update_refused_when_live_writes_off():
 
 def test_update_classification_matches_insert(live_writes):
     key, vals = {"CoNum": "1", "CoLine": 1}, {"Teardown": "x"}
-    assert client(Svc(save=[OK_ROW])).update("CCT_Coitems", key, vals)
+    found = "<r><_ItemId>PBT=[coitem] coi.DET=[abc]</_ItemId></r>"
+    assert client(Svc(load=[found], save=[OK_ROW])).update("CCT_Coitems", key, vals)
     with pytest.raises(ErpUncertain):
-        client(Svc(save=[TimeoutError("read timed out")])).update("CCT_Coitems", key, vals)
+        client(Svc(load=[found], save=[TimeoutError("read timed out")])).update("CCT_Coitems", key, vals)
     with pytest.raises(ErpUnreachable):
-        client(Svc(save=[ConnectionError("Failed to establish a new connection")])).update("CCT_Coitems", key, vals)
+        client(Svc(load=[found], save=[ConnectionError("Failed to establish a new connection")])).update("CCT_Coitems", key, vals)
     with pytest.raises(ErpRejected):
-        client(Svc(save=[Fault("no such row")])).update("CCT_Coitems", key, vals)
+        client(Svc(load=[found], save=[Fault("no such row")])).update("CCT_Coitems", key, vals)
+    with pytest.raises(ErpRejected, match="no row"):  # no row, no id: refused before anything is written
+        svc = Svc(load=["<r/>"], save=[OK_ROW])
+        try:
+            client(svc).update("CCT_Coitems", key, vals)
+        finally:
+            assert svc.save_results == [OK_ROW]
     diffgram = ('<diffgram xmlns:diffgr="urn:schemas-microsoft-com:xml-diffgram-v1"><DataSet>'
                 '<CCT_Coitems diffgr:hasErrors="true" diffgr:Error="locked"><CoNum>1</CoNum></CCT_Coitems>'
                 '</DataSet></diffgram>')
     with pytest.raises(ErpRejected, match="locked"):
-        client(Svc(save=[diffgram])).update("CCT_Coitems", key, vals)
+        client(Svc(load=[found], save=[diffgram])).update("CCT_Coitems", key, vals)
 
 
 def test_row_error_variants_and_clean_response():

@@ -43,6 +43,26 @@ def test_update_carries_the_key_in_a_before_row():
     assert [c.tag for c in changed] == ["CoNum", "CoLine", "Teardown"] and [c.tag for c in before] == ["CoNum", "CoLine"]
 
 
+def test_a_client_update_sends_the_row_identifier_in_both_rows(live_writes):
+    sent = []
+
+    class Soap(sc.SoapIdoClient):
+        def __init__(self):
+            pass
+
+        def load(self, ido, props, flt="", record_cap=0):
+            assert props[0] == "_ItemId" and flt == "co_num = '1' AND co_line = 2"
+            return [{"_ItemId": "ID-1"}]
+
+        def _call(self, op, *args, **kw):
+            sent.append(args[0] if op == "save" else None)
+            return "<r><co_num>1</co_num></r>"
+
+    Soap().update("CCT_Coitems", {"co_num": "1", "co_line": 2}, {"item": "R* A"})
+    msg = message(sent[0])
+    assert [c.tag for c in msg.find(".//d:diffgram/CCT_Coitems/IDO", NS)][0] == "_ItemId"
+    assert [c.tag for c in msg.find(".//d:diffgram/d:before/IDO", NS)] == ["_ItemId", "co_num", "co_line"]
+
 
 def test_method_parameters_are_one_string():
     assert sc._params_xml(["a&b", 0]) == "<Parameters><Parameter>a&amp;b</Parameter><Parameter>0</Parameter></Parameters>"
