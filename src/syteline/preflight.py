@@ -30,7 +30,7 @@ def needed(lines):
     line_props, job_props = [], []
     for ln in lines:
         full = {**sample, **{k: v for k, v in ln.items() if k in ("due_date", "engine_sn", "serial_num", "packing") and v}}
-        for src, dst in ((rowbuild.co_line("1", 1, full, "1"), line_props), (rowbuild.job_row("1", 1, full, "1", req), job_props)):
+        for src, dst in ((rowbuild.co_line("1", 1, full, "1", description=""), line_props), (rowbuild.job_row("1", 1, full, "1", req, description=""), job_props)):
             dst += [k for k in src if k not in dst]
     udf = any(ln.get("teardown") for ln in lines)
     out = {idos.CO_IDO: list(rowbuild.co_header("1", cust, req, found)) + [],

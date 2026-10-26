@@ -10,7 +10,7 @@ feature 001): stop at the first problem, record a row as possibly written BEFORE
 never retry. Outcome states: saved | partly_saved | failed | needs_reconciliation (research.md R7, R8).
 """
 
-from . import config, defaults, devmode, errors, idos, preflight, rowbuild
+from . import config, defaults, devmode, errors, idos, itemdesc, preflight, rowbuild
 from .errors import ErpError, ErpRejected, ErpUncertain, ErpUnreachable, IntegrationError, LiveWritesDisabled
 from .pipeline import CO_IDO, JOB_IDO, LINE_IDO, Upload, _Stop
 
@@ -68,6 +68,16 @@ class SaveRun(Upload):
         except ErpUncertain as exc:
             raise _Stop(self._park(errors.UNCERTAIN_OUTCOME, f"{step}: {exc}", step))
 
+    def _description(self, i, ln):
+        """The line's description from the item master ("" and a warning on the line when there is none). A read: it is not a write,
+        is never retried and never changes the outcome."""
+        code = rowbuild.repair_item(ln["item"])
+        text = itemdesc.lookup(self.soap, code)
+        if text is None:
+            self.results[i - 1]["warnings"].append(
+                f'no description found in the item master for "{code}" (the line was saved with a blank description)')
+        return text or ""
+
     def _read(self, ido, props, filter_, step):
         """A read made during an overwrite: a failure stops the run (nothing written yet: failed; otherwise: to reconcile)."""
         try:
@@ -90,7 +100,8 @@ class SaveRun(Upload):
         whse = req.get("warehouse") or self.cfg.get("SYTELINE_DEFAULT_WHSE", "")
         for entry, ln in zip(self.jobs, req["lines"]):
             i, job = entry["line"], entry["job"]
-            row = rowbuild.co_line(self.co_num, i, ln, job, whse, repair=True)
+            desc = self._description(i, ln)
+            row = rowbuild.co_line(self.co_num, i, ln, job, whse, repair=True, description=desc)
             if i in existing:
                 lkey = {k: row[k] for k in ("co_num", "co_line", "co_release")}
                 self._update(idos.LINE_WRITE_IDO, lkey, {k: v for k, v in row.items() if k not in lkey}, "line",
@@ -101,7 +112,7 @@ class SaveRun(Upload):
                 self.results[i - 1]["action"] = "inserted"
             if "teardown" in ln:
                 self._teardown(i, ln["teardown"])
-            jrow = rowbuild.job_row(self.co_num, i, ln, job, req, whse, repair=True)
+            jrow = rowbuild.job_row(self.co_num, i, ln, job, req, whse, repair=True, description=desc)
             if config.fixed_job_number() and self._read(JOB_IDO, ["Job"], rowbuild.job_filter(job), f"read_job_{i}"):
                 jkey = {k: jrow[k] for k in ("Job", "Suffix")}
                 self._update(JOB_IDO, jkey, {k: v for k, v in jrow.items() if k not in jkey}, "job", job, f"update_job_{i}")
@@ -234,11 +245,12 @@ class SaveRun(Upload):
                 whse = req.get("warehouse") or self.cfg.get("SYTELINE_DEFAULT_WHSE", "")
                 for entry, ln in zip(self.jobs, req["lines"]):
                     i, job = entry["line"], entry["job"]
-                    self._insert(idos.LINE_WRITE_IDO, rowbuild.co_line(self.co_num, i, ln, job, whse, repair=True), "line",
+                    desc = self._description(i, ln)
+                    self._insert(idos.LINE_WRITE_IDO, rowbuild.co_line(self.co_num, i, ln, job, whse, repair=True, description=desc), "line",
                                  f"{self.co_num}/{i}", f"create_line_{i}")
                     if "teardown" in ln:
                         self._teardown(i, ln["teardown"])
-                    self._insert(JOB_IDO, rowbuild.job_row(self.co_num, i, ln, job, req, whse, repair=True), "job", job, f"create_job_{i}")
+                    self._insert(JOB_IDO, rowbuild.job_row(self.co_num, i, ln, job, req, whse, repair=True, description=desc), "job", job, f"create_job_{i}")
                     self._written.add(i)
                     self.results[i - 1]["co_line"] = i
 

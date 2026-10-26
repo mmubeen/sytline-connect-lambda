@@ -162,7 +162,7 @@ They follow the PO OCR demo (`Intern-Demo/.../COMPLETE_OCR`, `sytline/syteline/f
 - **SLCos has no received-date property**: the demo writes the received date as `OrderDate`.
 - **Dates** are ISO datetimes at midnight with the Eastern offset, for example `2026-10-19T00:00:00-04:00`.
 - **A job always links to its order**: `OrdType` is `O`; the configured order type is no longer written (`SYTELINE_DEFAULT_ORDTYPE` is not required any more).
-- **Not done yet** (the demo does them): the unit of measure and due period from the customer contract, the item description from the item master, and a default teardown date of the received date plus 7 days. A price is not written by the demo or here.
+- **Not done yet** (the demo does them): the unit of measure and due period from the customer contract, a default teardown date of the received date plus 7 days. A price is not written by the demo or here.
 
 ## Finding the right property names (read-only)
 
@@ -191,3 +191,7 @@ With `DEV_TARGET_CO` set the save does not insert the order: step `check_target`
 ## The `R* ` item prefix
 
 The save writes each line's item as the repair item code, as the demo does: `PW1234` becomes `R* PW1234`; an item that already starts with `R*` (any case) is left as it is, so it is never prefixed twice. The same code goes into the order line and the job, is what the read-back compares, and is what the status shows as the line's `item`. It is always on (no setting). The one-step upload does not add it. A code longer than 30 characters with its prefix is refused with `ITEM_TOO_LONG` (step `check_items`, naming the line) before a number is reserved and again before the first write; it is never truncated.
+
+## The line description
+
+Each order line and job carries a description read from the item master for the `R* ` item code, as the demo does: `SLItemcusts` is read for `Item,ItmDescription` (`Item = '<code>'`, one row; the demo uses it because `SLItems` may not be granted to the service account) and the text is written as `description` on the `CCT_Coitems` row and `Description` on the `CCTJobs` row. It is never taken from the document. When there is no description (the item is not found, it has none, or the read fails), the line is **still saved** with a blank description and that line's result carries the warning `no description found in the item master for "R* ..." (the line was saved with a blank description)`; the order outcome and the line's status are not affected, and the read is never retried. The description is not part of the read-back comparison. The IDO and property names are the demo's and have not been confirmed against this ERP: a wrong name shows up as that warning on every line. The one-step upload does not write a description.

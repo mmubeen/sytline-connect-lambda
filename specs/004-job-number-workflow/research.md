@@ -91,3 +91,17 @@ Decision: port it as `rowbuild.repair_item()` with the same rule, trimming the v
 Length: the code is at most 30 characters (the ERP item width). A prefixed item longer than 30 is refused by the save's pre-write validation as a validation failure naming the line, never truncated. Alternative: truncate (rejected: a wrong item silently).
 
 Out of scope: the existence check against the item master (the demo's L9 probe of `SLItems`), the item description from the master, and the one-step upload. Alternatives considered: a deploy setting (rejected by the clarification); applying the prefix in the IDP field mapping (rejected: the saved document value should stay as the document has it).
+
+## R19. The line description (FR-025)
+
+Findings (demo `lookups.lookup_item_description`, `forms/customer_order_lines.py`, `forms/job_orders.py`; its CURRENT_STATE rule 46: the line description is SyteLine-authoritative and never seeded from the OCR): the demo reads `SLItemcusts` properties `Item,ItmDescription` with `Item = '<code>'` (cap 1; the code is the R*-prefixed one, trimmed), uses `ItmDescription` when non-empty, else `None` -> `""`; any exception is logged and treated as none. It then writes `description` on the `CCT_Coitems` row and `Description` on the `CCTJobs` row. `SLItemcusts` is used instead of `SLItems` because the service account may not be granted `SLItems`.
+
+Decision: port it as `itemdesc.lookup(soap, code)` with the same IDO, properties and filter (trimmed code via `idos.quote`; if no row comes back and the code has a prefix, no second attempt: keep it simple); `ErpError`/any exception -> `None`. In `savewf`, per line, before the line row: look up `rowbuild.repair_item(item)`; pass the text to `co_line`/`job_row` (property omitted when blank is NOT used: the demo always sends `description`, so send `""`); when `None`, append a warning to that line's `warnings`: `no description found in the item master for "R* ..." (the line was saved with a blank description)`. The warning does not change the line status. A lookup that raised is not retried.
+
+Not in the read-back comparison (the description is informational). Dry runs and development mode behave the same (the dev-mode update rows include the description).
+
+Pre-check: add `description` (`CCT_Coitems`) and `Description` (`CCTJobs`) to `preflight.needed`; the `SLItemcusts` read is not pre-checked (its failure is a warning, never a refusal).
+
+Alternatives: take the description from the document (rejected by the demo's rule and the clarification); refuse when none (rejected: option A chosen); read `SLItems` (rejected: grant not confirmed).
+
+Caveat recorded: the item code itself may still come back blank from the ERP when the code is not in the item master; this feature does not change that, it makes the reason visible. A read-only item probe is the next step if it persists.

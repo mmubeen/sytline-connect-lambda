@@ -61,3 +61,9 @@ reserving ──► reserved ──► save_accepted ──► saving ──► 
 
 - **Line item (as written)**: `"R* " + item.strip()` unless `item.strip()` already starts with `R*` (case-insensitive), in which case `item.strip()` unchanged. Empty stays empty (refused by the existing validation). Maximum 30 characters after the prefix; longer is refused, naming the line.
 - **Line Result.item**: the code as written. The document's own item is not stored (FR-021).
+
+## Revision 2026-10-26: description
+
+- **Line description**: `str`, from `SLItemcusts.ItmDescription` for the `R* ` item code (trimmed); `""` when none; never from the document and never stored by this service.
+- **Rows**: `CCT_Coitems.description`, `CCTJobs.Description` (always sent; blank allowed).
+- **Line Result**: `warnings` gains `no description found in the item master for "<code>" ...` when blank; `status` unaffected.

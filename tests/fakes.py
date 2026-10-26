@@ -64,7 +64,8 @@ class FakeSoap:
     """
 
     def __init__(self, scenarios=None, read_fail=False, corrupt=None, customers=None, enforce_live_gate=True,
-                 readback_fail=False):
+                 readback_fail=False, item_master=True):
+        self.item_master = item_master  # True: the item master answers any item with "Description of <item>" unless a row is stored
         self.rows = {}
         self.scenarios = dict(scenarios or {})
         self.read_fail = read_fail
@@ -173,6 +174,10 @@ class FakeSoap:
         if self.read_fail or (self.readback_fail and ido != idos.customer_ido()):
             raise ErpUnreachable("read failed")
         rows = [dict(r) for r in self.rows.get(ido, [])]
+        if ido == "SLItemcusts" and self.item_master:
+            m = re.search(r"Item = '((?:[^']|'')*)'", filter_ or "")
+            if m and not any(str(r.get("Item", "")).strip() == m.group(1).replace("''", "'") for r in rows):
+                rows.append({"Item": m.group(1), "ItmDescription": f"Description of {m.group(1)}"})
         for cond in [c for c in re.split(r"\s+AND\s+", filter_) if c.strip()] if filter_ else []:
             rows = [r for r in rows if _match(r, cond)]
         for (c_ido, prop), value in self.corrupt.items():

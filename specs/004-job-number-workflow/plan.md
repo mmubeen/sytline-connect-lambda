@@ -94,3 +94,7 @@ tests/
 ## Revision 2026-10-26: the `R* ` item prefix (FR-024)
 
 Clarified: the save always writes a line's item as the repair item code `R* <item>` (an item already starting with `R*`, any case, is left as it is), with no setting. Design: one function `rowbuild.repair_item(item)` (port of the demo's `to_repair_item`) is the single source of the code; `co_line`, `job_row`, the save's read-back comparison and the per-line result use it. No new files, settings or dependencies. The one-step upload (`pipeline.py`, feature 001) is out of scope (FR-017). See research R18, data-model, quickstart step 7.
+
+## Revision 2026-10-26: the line description from the item master (FR-025)
+
+Clarified: the save writes a description on each order line and job, read from the item master for the `R* ` item code (never from the document); when there is none the line is still saved blank with a warning. Design: a new small module `src/syteline/itemdesc.py` (`lookup(soap, code)` -> description or None) used by `savewf` once per line before the line row is built; `rowbuild.co_line`/`job_row` take an optional `description` (lowercase `description` on `CCT_Coitems`, `Description` on `CCTJobs`, the demo's names); the property pre-check includes both names. The lookup is read-only and its failure never changes the outcome. See research R19, data-model, quickstart step 8.

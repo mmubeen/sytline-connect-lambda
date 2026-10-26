@@ -31,6 +31,7 @@ Feature 001 already saves a confirmed order in one step and obtains its numbers 
 ### Session 2026-10-26 (item prefix)
 
 - Q: Should the save add the `R* ` prefix to each line's item code, as the PO OCR demo does? → A: Yes, always, with no setting: the save writes the item as `R* <item>`; an item that already starts with `R*` (any case) is left as it is. The prefix is applied wherever the item is written to the ERP (the order line and the job) and when it is read back and compared, so the read-back matches what was written.
+- Q: When a line's item (with its `R* ` prefix) is not found in the item master, what should the save do? → A: Save the line anyway, as the demo does: the description is left blank and a warning is added to that line's result. Nothing is refused for it. (Reported: the item and description came out empty on the order lines, which an item unknown to the ERP is the suspected cause of; this keeps the order but makes the reason visible.)
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -104,7 +105,7 @@ The caller can ask for the state of a reservation and its save at any time: rese
 - ERP unreachable or timing out during reservation: report that clearly; if the outcome is unknown (the number may have been reserved), say so rather than reserving a second set silently.
 - A PO with a single line, or with many lines: one job number per line in every case; the request is refused if it exceeds the maximum lines per PO.
 - Customer match is only low-confidence or ambiguous (two close candidates): refuse and write nothing, never book against a guessed customer.
-- Item on a line not found in SyteLine: that line fails with a clear message; earlier saved lines are reported and kept.
+- Item on a line not found in the item master: the line is still saved, with a blank description and a warning on that line's result naming the item (FR-025); nothing is refused for it. (This replaces the earlier rule that such a line fails.)
 - Reservation requested but never saved: numbers stay consumed (a gap) and are listed as unused; they are never handed to another request.
 - Save requested after a long delay: the reservation is still valid, because the ERP never takes reserved numbers back.
 - Caller sends the same save twice (retry): no duplicate records are created.
@@ -141,12 +142,13 @@ The caller can ask for the state of a reservation and its save at any time: rese
 - **FR-022**: An unavailable or failing IDP source MUST be reported clearly and MUST NOT cause any number to be reserved or any record to be written.
 - **FR-023**: When a line item of the document carries a job number (an optional field), reserve MUST use it for that line instead of allocating a new one, and MUST allocate for every other line as before. The reservation MUST record per line whether the job number was supplied or allocated; a supplied one is not a number this service consumed. No check of a supplied job number is made, neither against the ERP nor between lines: if the ERP rejects the job (for example because the number is already in use), the existing rules for a rejection after earlier rows were written apply unchanged (the order is left needing manual reconciliation, never retried or replayed).
 - **FR-024**: The save MUST write each line's item to the ERP as the repair item code `R* <item>`: a document item that already starts with `R*` (any case, optional space) MUST be left unchanged, so it is never prefixed twice. The same code MUST be used for the order line and the job and when reading the saved rows back to confirm them. The prefix is always applied; there is no setting to turn it off.
+- **FR-025**: The save MUST write each line's description to the order line and the job, taken from the ERP's item master for the line's repair item code (the code with its `R* ` prefix, FR-024), as the demo does; it MUST NOT take the description from the document. When the item master has no description for the code (item not found, no description, or the lookup cannot be made), the line MUST still be saved with a blank description and its result MUST carry a warning naming the item; the order is not refused or parked for it. A failed lookup MUST NOT be retried as a write and MUST NOT change the line's outcome.
 
 ### Key Entities
 
 - **Reservation**: The set of numbers obtained from the ERP for one PO: one CO number and one job number per line, tied to the PO, the caller and the time. It has a state (reserved, saving, saved, partly saved, failed, needs reconciliation) and can be used for one save.
 - **Job Number**: The ERP's work order number for one CO line, reserved before the line and job are saved and used as the link between them.
-- **Line Result**: For one PO line: job number, CO line number, item (as written to the ERP, with its `R* ` prefix), saved or failed, and any warning (such as the teardown date).
+- **Line Result**: For one PO line: job number, CO line number, item (as written to the ERP, with its `R* ` prefix), description (from the item master, blank with a warning when none), saved or failed, and any warning (such as the teardown date).
 - **Document Result**: The inference result of one IDP document (its status, extracted fields and per-field confidence), identified by the document ID. It is the only source of the PO details.
 - **PO Details**: The purchase order data taken from the document result: customer details, PO number, received date and the lines (item, quantity, serial and engine details, packing).
 - **Customer Match**: The result of resolving the PO's customer details to exactly one ERP customer.

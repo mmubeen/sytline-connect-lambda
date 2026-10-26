@@ -9,8 +9,7 @@ What the demo shows and this module follows:
   * the job is CCTJobs, linked to its order by OrdNum / OrdLine, with Type J, Stat F and OrdType O;
   * the teardown date is a UserDefinedFields row for the line's RowPointer (TableName coitem, UDFDT1), not a property of the line;
   * dates are ISO datetimes with the Eastern offset.
-The save (not the one-step upload) writes the item as the repair item code ("R* " prefix, repair_item, `repair=True`). Not done here (the demo does them, not yet asked for): UOM / due period from the customer contract, the item
-description from the item master, and a default teardown date of the received date plus 7 days.
+The save (not the one-step upload) writes the item as the repair item code ("R* " prefix, repair_item, `repair=True`) and the description read from the item master (itemdesc, `description=`). Not done here (the demo does them, not yet asked for): UOM / due period from the customer contract, and a default teardown date of the received date plus 7 days.
 """
 
 import re
@@ -103,18 +102,20 @@ def co_header(co_num, customer, req, found=None):
     return row
 
 
-def co_line(co_num, line_no, ln, job, whse=None, repair=False):
+def co_line(co_num, line_no, ln, job, whse=None, repair=False, description=None):
     qty = number(ln["quantity"])
     row = {"co_num": rjust(co_num, CO_NUM_WIDTH), "co_line": rjust(line_no, CO_LINE_WIDTH), "co_release": "0",
            "item": rjust(repair_item(ln["item"]) if repair else ln["item"], ITEM_WIDTH), "qty_ordered": qty, "qty_ordered_conv": qty, "u_m": ln["uom"],
            "whse": whse or DEFAULT_WHSE, "stat": "P", "ship_site": "CCT",
            "ref_type": "J", "ref_num": rjust(job, JOB_NUM_WIDTH), "ref_line_suf": "0", "ref_release": "0"}
+    if description is not None:  # the save always sends one ("" when the item master has none); the one-step upload sends none
+        row["description"] = description
     if ln.get("due_date"):
         row["due_date"] = erp_datetime(ln["due_date"])
     return row
 
 
-def job_row(co_num, line_no, ln, job, req, whse=None, repair=False):
+def job_row(co_num, line_no, ln, job, req, whse=None, repair=False, description=None):
     job_date = erp_datetime(_received(req))
     start_end = erp_datetime(ln["due_date"]) if ln.get("due_date") else job_date
     link = idos.JOB_LINK_PROPS
@@ -123,6 +124,8 @@ def job_row(co_num, line_no, ln, job, req, whse=None, repair=False):
            link["co_num"]: rjust(co_num, CO_NUM_WIDTH), link["co_line"]: int(line_no), "OrdRelease": 0,
            idos.JOB_EXTRA_PROPS["root_job"]: rjust(job, JOB_NUM_WIDTH), "RootSuf": 0,
            "JobDate": job_date, "JschStartDate": start_end, "JschEndDate": start_end}
+    if description is not None:
+        row["Description"] = description
     if ln.get("engine_sn"):
         row[idos.JOB_EXTRA_PROPS["engine_sn"]] = str(ln["engine_sn"]).strip()
     if ln.get("serial_num"):

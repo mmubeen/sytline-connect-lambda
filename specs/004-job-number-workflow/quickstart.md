@@ -33,3 +33,7 @@ Property names and IDO methods are UNCONFIRMED until discovery; correct them in 
 ## 7. The `R* ` item prefix (FR-024)
 
 Save a reservation whose document lines carry `PW1234` and `R* PW5678`: the order lines and jobs carry `R* PW1234` and `R* PW5678` (never `R* R* PW5678`), the read-back confirms them, and the status lists those codes. A 28-character item (31 with the prefix) is refused before anything is written, naming the line. `pytest tests/unit/test_rowbuild.py tests/unit/test_savewf.py`.
+
+## 8. The line description (FR-025)
+
+Save a document whose items exist in the item master: each order line and job carries that item's description. Save one whose item is not found: the line is saved with a blank description and the status line shows the warning `no description found in the item master for "R* ..."`; the order still ends `saved`. `pytest tests/unit/test_itemdesc.py tests/unit/test_savewf.py`.

@@ -447,3 +447,56 @@ def test_an_item_too_long_with_its_prefix_refuses_the_save_before_any_write(live
     out, soap = go(req=req)
     assert out["state"] == "failed" and out["code"] == errors.ITEM_TOO_LONG and out["step"] == "check_items"
     assert "2" in out["message"] and soap.writes() == []
+
+
+# ---- the line description from the item master (feature 004, FR-025) ---------------------------------------------------
+def test_the_description_from_the_item_master_is_written_on_the_line_and_the_job(live_writes):
+    soap = FakeSoap(customers=CUST, item_master=False)
+    soap.add_record("SLItemcusts", Item="R* I0", ItmDescription="Turbine blade")
+    soap.add_record("SLItemcusts", Item="R* I1", ItmDescription="Vane")
+    out, _ = go(2, soap=soap)
+    assert out["state"] == "succeeded" and all(r["warnings"] == [] for r in out["results"])
+    assert [r["description"] for r in soap.rows["CCT_Coitems"]] == ["Turbine blade", "Vane"]
+    assert [r["Description"] for r in soap.rows["CCTJobs"]] == ["Turbine blade", "Vane"]
+
+
+def test_an_item_without_a_description_is_saved_blank_with_a_warning_on_its_line(live_writes):
+    soap = FakeSoap(customers=CUST, item_master=False)
+    soap.add_record("SLItemcusts", Item="R* I0", ItmDescription="Turbine blade")
+    out, _ = go(2, soap=soap)
+    assert out["state"] == "succeeded" and [r["status"] for r in out["results"]] == ["saved", "saved"]
+    assert out["results"][0]["warnings"] == []
+    assert out["results"][1]["warnings"] == ['no description found in the item master for "R* I1" (the line was saved with a blank description)']
+    assert [r["description"] for r in soap.rows["CCT_Coitems"]] == ["Turbine blade", ""]
+    assert [r["Description"] for r in soap.rows["CCTJobs"]] == ["Turbine blade", ""]
+
+
+def test_a_failed_description_read_changes_nothing_but_the_warning(live_writes):
+    from syteline.errors import ErpUnreachable
+
+    class NoMaster(FakeSoap):
+        def load(self, ido, properties, filter_="", record_cap=0):
+            if ido == "SLItemcusts":
+                raise ErpUnreachable("no grant")
+            return super().load(ido, properties, filter_, record_cap)
+
+        read_back = load
+
+    out, soap = go(1, soap=NoMaster(customers=CUST))
+    assert out["state"] == "succeeded" and any("no description found" in w for w in out["results"][0]["warnings"])
+    assert soap.rows["CCT_Coitems"][0]["description"] == ""
+
+
+def test_the_description_is_looked_up_once_per_line_and_is_not_compared_at_read_back(live_writes):
+    soap = FakeSoap(customers=CUST, corrupt={("SLCoitems", "Description"): "other"})
+    out, _ = go(2, soap=soap)
+    assert out["state"] == "succeeded"
+    assert [c for c in soap.calls if c == ("load", "SLItemcusts")] == [("load", "SLItemcusts")] * 2
+
+
+def test_development_mode_updates_carry_the_description_too(devmode):
+    soap = FakeSoap(customers=CUST, item_master=False)
+    soap.add_record("SLItemcusts", Item="R* I0", ItmDescription="Turbine blade")
+    out, _ = dev_go(soap=soap, lines_before=1)
+    assert out["state"] == "succeeded"
+    assert soap.rows["CCT_Coitems"][0]["description"] == "Turbine blade"

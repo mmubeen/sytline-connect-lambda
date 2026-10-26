@@ -41,6 +41,7 @@ def test_the_names_to_check_are_the_names_of_the_rows_the_save_builds():
     assert {"co_num", "co_line", "item", "qty_ordered", "u_m", "ref_num", "ref_type"} <= set(base[idos.LINE_WRITE_IDO])
     assert {"CoNum", "CoLine", "Item", "QtyOrdered", "RefNum"} <= set(base[idos.LINE_IDO])  # read back through SLCoitems
     assert {"Job", "OrdType", "Whse", "OrdNum", "OrdLine", "RootJob", "JobDate"} <= set(base[idos.JOB_IDO])
+    assert "description" in base[idos.LINE_WRITE_IDO] and "Description" in base[idos.JOB_IDO]  # the item-master description
     assert "due_date" not in base[idos.LINE_WRITE_IDO] and "uf_eng_sn" not in base[idos.JOB_IDO] and idos.UDF_IDO not in base
     more = preflight.needed([{"due_date": "2026-11-01", "engine_sn": "E1", "packing": "Box", "teardown": "2026-11-02"}])
     assert "due_date" in more[idos.LINE_WRITE_IDO] and {"uf_eng_sn", "uf_app"} <= set(more[idos.JOB_IDO])
