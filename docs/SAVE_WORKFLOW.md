@@ -178,6 +178,8 @@ To list the names an IDO declares instead of guessing (names only, from the sche
 {"action": "probe_properties", "ido": "CCT_Coitems", "list": true}
 ```
 
+`probe_item` is a read-only look at how the ERP holds one item: `{"action": "probe_item", "item": "3810727-6", "co_num": "129556"}` (`co_num` is optional). It reads the item master (`SLItemcusts`) for `R* <item>` exactly, padded to 30 characters and with a `LIKE` on the part number, and with `co_num` the `Item` and `Description` of that order's lines. Each read returns up to 3 rows or the ERP's own refusal; nothing is written. Use it when a line saves with a blank item or description.
+
 Each name below is requested alone in a one-row read; the answer lists `exists` and `missing` (with the service's message) and never a value. `CCT_Coitems`, `CCTJobs` and `SLCos` have a default list of the names the save uses plus likely alternatives. Nothing is written, so live writes need not be on.
 
 ## The property pre-check

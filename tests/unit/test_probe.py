@@ -75,3 +75,32 @@ def test_list_reports_a_refusal_and_bad_input():
     assert out["ok"] is False and out["errors"][0]["code"] == errors.ERP_REJECTED and out["ido"] == "Nope"
     assert probe.probe(Lister(), {"ido": "a b", "list": True})["errors"][0]["code"] == errors.VALIDATION
     assert probe.probe(Soap(set()), {"ido": "SLCos", "list": True})["errors"][0]["code"] == errors.NOT_IMPLEMENTED
+
+
+# ---- probe_item: how the ERP holds one item -------------------------------------------------------------------------------
+class ItemSoap:
+    def __init__(self):
+        self.calls = []
+
+    def load(self, ido, props, flt="", record_cap=0):
+        self.calls.append((ido, tuple(props), flt, record_cap))
+        if "Description" in props:
+            raise ErpRejected("property [Description] does not exist")
+        return [{"Item": "R* 3810727-6", "ItmDescription": "MAT_OUT 3810727-6"}] if "LIKE" in flt else []
+
+
+def test_probe_item_reads_the_item_master_three_ways_and_the_order_lines_without_writing():
+    soap = ItemSoap()
+    out = probe.probe_item(soap, {"item": "3810727-6", "co_num": "129556"})
+    assert out["ok"] and out["code"] == "R* 3810727-6"
+    im = out["item_master"]
+    assert im["exact"]["rows"] == [] and im["padded"]["filter"] == "Item = '" + "R* 3810727-6".rjust(30) + "'"
+    assert im["like"]["rows"][0]["ItmDescription"] == "MAT_OUT 3810727-6"
+    assert "error" in out["order_lines"] and all(c[3] == 3 for c in soap.calls)
+
+
+def test_probe_item_refuses_bad_input_and_is_reachable_from_the_handler(monkeypatch):
+    assert probe.probe_item(ItemSoap(), {"item": "a%b"})["ok"] is False
+    assert probe.probe_item(ItemSoap(), {"item": "A", "co_num": "1; drop"})["ok"] is False
+    monkeypatch.setattr(lambda_function, "_client_factory", lambda: ItemSoap())
+    assert lambda_function.lambda_handler({"action": "probe_item", "item": "3810727-6"}, None)["ok"]

@@ -7,7 +7,7 @@ With "list": true it instead returns the property names the IDO declares (read f
 
 import re
 
-from . import errors
+from . import errors, idos, itemdesc, rowbuild
 from .errors import ErpRejected, ErpUncertain, ErpUnreachable, failure
 
 MAX_PROPERTIES = 60
@@ -76,3 +76,40 @@ def probe(soap, event):
             return failure("probe_properties", errors.error(errors.ERP_UNREACHABLE, str(exc)[:240]),
                            ido=ido, exists=exists, missing=missing, not_tried=props[len(exists) + len(missing):])
     return {"ok": True, "action": "probe_properties", "ido": ido, "exists": exists, "missing": missing}
+
+
+MAX_ROWS = 3
+
+
+def _read(soap, ido, props, flt):
+    try:
+        return {"ido": ido, "filter": flt, "rows": [{k: str(v)[:120] for k, v in r.items()} for r in soap.load(ido, props, flt, record_cap=MAX_ROWS)]}
+    except ErpRejected as exc:
+        return {"ido": ido, "filter": flt, "error": str(exc)[:240]}
+
+
+def probe_item(soap, event):
+    """{"action": "probe_item", "item": "3810727-6"[, "co_num": "129556"]}: how the ERP holds one item, read-only.
+
+    Tries the item master (SLItemcusts: the lookup the save uses) under the exact repair code, the 30-wide padded code and a LIKE on the
+    part number, and with "co_num" also the Item and Description of that order's lines (SLCoitems), so the stored form can be compared with
+    what the save writes. Each read is reported as rows (capped, values cut at 120 characters) or the ERP's own refusal. Nothing is written.
+    """
+    item, co_num = event.get("item"), event.get("co_num")
+    if not isinstance(item, str) or not item.strip() or len(item) > 60 or "%" in item or (co_num is not None and not re.match(r"^\d{1,10}$", str(co_num))):
+        return failure("probe_item", errors.error(errors.VALIDATION, "give `item` (the part number, up to 60 characters, no %) and optionally "
+                                                  "`co_num` (digits)", step="item"))
+    part = item.strip()
+    code = rowbuild.repair_item(part)
+    props = [itemdesc.ITEM_PROP, itemdesc.DESCRIPTION_PROP]
+    like = f"{itemdesc.ITEM_PROP} LIKE {idos.quote('%' + part + '%')}"
+    reads = [("exact", f"{itemdesc.ITEM_PROP} = {idos.quote(code)}"), ("padded", f"{itemdesc.ITEM_PROP} = {idos.quote(rowbuild.rjust(code, rowbuild.ITEM_WIDTH))}"),
+             ("like", like)]
+    try:
+        out = {"ok": True, "action": "probe_item", "code": code,
+               "item_master": {name: _read(soap, itemdesc.ITEM_DESC_IDO, props, flt) for name, flt in reads}}
+        if co_num is not None:
+            out["order_lines"] = _read(soap, idos.LINE_IDO, ["CoLine", "Item", "Description"], rowbuild.co_filter(co_num))
+    except (ErpUnreachable, ErpUncertain) as exc:
+        return failure("probe_item", errors.error(errors.ERP_UNREACHABLE, str(exc)[:240]))
+    return out
