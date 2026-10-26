@@ -90,3 +90,7 @@ tests/
 | A new client `update` operation | The demo sets the teardown date as a separate step after the line exists, and the spec makes its failure a warning (FR-007) | Writing teardown inside the line insert (as feature 001 does) cannot fail separately, so FR-007 could not be met |
 | `IdpSource` wrapper over the SDK, fetched three times (reserve, save intake, worker) | the PO data must not be stored (FR-021) yet must be current at write time and checked against what was reserved (FR-020) | storing a copy at reserve is exactly the duplication being removed |
 | SDK packaged in the Lambda, with a direct-read fallback | the SDK is the requested interface; its weight (idp_common) may exceed layer limits | direct reads only would bypass the SDK the owner asked for |
+
+## Revision 2026-10-26: the `R* ` item prefix (FR-024)
+
+Clarified: the save always writes a line's item as the repair item code `R* <item>` (an item already starting with `R*`, any case, is left as it is), with no setting. Design: one function `rowbuild.repair_item(item)` (port of the demo's `to_repair_item`) is the single source of the code; `co_line`, `job_row`, the save's read-back comparison and the per-line result use it. No new files, settings or dependencies. The one-step upload (`pipeline.py`, feature 001) is out of scope (FR-017). See research R18, data-model, quickstart step 7.

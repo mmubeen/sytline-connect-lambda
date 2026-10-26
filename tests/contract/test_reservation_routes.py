@@ -426,8 +426,8 @@ def test_status_saved_shows_used_numbers_and_per_line_results(full, live_writes)
     assert status == 200 and out["state"] == "saved"
     assert [j["usage"] for j in out["jobs"]] == ["used", "used"]
     assert out["lines"] == [
-        {"line": 1, "job": "5000", "status": "saved", "warnings": [], "co_line": 1, "item": "A"},
-        {"line": 2, "job": "5001", "status": "saved", "warnings": [], "co_line": 2, "item": "B"}]
+        {"line": 1, "job": "5000", "status": "saved", "warnings": [], "co_line": 1, "item": "R* A"},
+        {"line": 2, "job": "5001", "status": "saved", "warnings": [], "co_line": 2, "item": "R* B"}]
 
 
 def test_status_accepted_save_has_empty_lines_until_the_run_records_some(full, live_writes):

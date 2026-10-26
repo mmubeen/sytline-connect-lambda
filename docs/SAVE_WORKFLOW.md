@@ -162,7 +162,7 @@ They follow the PO OCR demo (`Intern-Demo/.../COMPLETE_OCR`, `sytline/syteline/f
 - **SLCos has no received-date property**: the demo writes the received date as `OrderDate`.
 - **Dates** are ISO datetimes at midnight with the Eastern offset, for example `2026-10-19T00:00:00-04:00`.
 - **A job always links to its order**: `OrdType` is `O`; the configured order type is no longer written (`SYTELINE_DEFAULT_ORDTYPE` is not required any more).
-- **Not done yet** (the demo does them): the `R* ` prefix on item codes, the unit of measure and due period from the customer contract, the item description from the item master, and a default teardown date of the received date plus 7 days. A price is not written by the demo or here.
+- **Not done yet** (the demo does them): the unit of measure and due period from the customer contract, the item description from the item master, and a default teardown date of the received date plus 7 days. A price is not written by the demo or here.
 
 ## Finding the right property names (read-only)
 
@@ -187,3 +187,7 @@ Before a reservation takes any number (and before a save writes the order header
 ## Development mode (`DEV_TARGET_CO`)
 
 With `DEV_TARGET_CO` set the save does not insert the order: step `check_target` confirms the pre-created order exists and belongs to the document's customer; then `update_co` overwrites the header, each line is updated (`update_line_N`) or inserted when missing (`create_line_N`), and the job is updated (`update_job_N`) when `JOB_NUMBER` is set and the job exists, else created. A rejected first update means nothing changed (`failed`); a later one is `needs_reconciliation`. See [EVENT_INTAKE.md](EVENT_INTAKE.md#dev_target_co-in-deployenv-development-mode).
+
+## The `R* ` item prefix
+
+The save writes each line's item as the repair item code, as the demo does: `PW1234` becomes `R* PW1234`; an item that already starts with `R*` (any case) is left as it is, so it is never prefixed twice. The same code goes into the order line and the job, is what the read-back compares, and is what the status shows as the line's `item`. It is always on (no setting). The one-step upload does not add it. A code longer than 30 characters with its prefix is refused with `ITEM_TOO_LONG` (step `check_items`, naming the line) before a number is reserved and again before the first write; it is never truncated.

@@ -29,3 +29,7 @@ Expected: no new failures versus before this feature (existing behavior unchange
 4. Poll `GET` → `saved`, each line `saved`, jobs `used`. Check in SyteLine that the CO, two lines (reference = job number) and two jobs exist.
 5. Repeat step 3 → 409 `RESERVATION_USED`; nothing new in SyteLine.
 Property names and IDO methods are UNCONFIRMED until discovery; correct them in `src/syteline/idos.py`.
+
+## 7. The `R* ` item prefix (FR-024)
+
+Save a reservation whose document lines carry `PW1234` and `R* PW5678`: the order lines and jobs carry `R* PW1234` and `R* PW5678` (never `R* R* PW5678`), the read-back confirms them, and the status lists those codes. A 28-character item (31 with the prefix) is refused before anything is written, naming the line. `pytest tests/unit/test_rowbuild.py tests/unit/test_savewf.py`.

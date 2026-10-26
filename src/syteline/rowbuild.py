@@ -9,7 +9,7 @@ What the demo shows and this module follows:
   * the job is CCTJobs, linked to its order by OrdNum / OrdLine, with Type J, Stat F and OrdType O;
   * the teardown date is a UserDefinedFields row for the line's RowPointer (TableName coitem, UDFDT1), not a property of the line;
   * dates are ISO datetimes with the Eastern offset.
-Not done here (the demo does them, not yet asked for): the "R* " item prefix, UOM / due period from the customer contract, the item
+The save (not the one-step upload) writes the item as the repair item code ("R* " prefix, repair_item, `repair=True`). Not done here (the demo does them, not yet asked for): UOM / due period from the customer contract, the item
 description from the item master, and a default teardown date of the received date plus 7 days.
 """
 
@@ -73,6 +73,20 @@ def packing_code(value):
     return PACKING_TO_UF_APP.get(key, str(value).strip())
 
 
+def repair_item(item):
+    """The SyteLine repair item code, as the demo's formatting.to_repair_item: 'PW1234' -> 'R* PW1234'; a value that already
+    starts with 'R*' (any case) is left alone, so it is never prefixed twice; empty stays empty."""
+    value = "" if item is None else str(item).strip()
+    if not value or value.upper().startswith("R*"):
+        return value
+    return f"R* {value}"
+
+
+def item_too_long(lines):
+    """The 1-based numbers of the lines whose repair item code is longer than the ERP's item width."""
+    return [i for i, ln in enumerate(lines, start=1) if len(repair_item(ln.get("item"))) > ITEM_WIDTH]
+
+
 def _received(req):
     return req.get("received_date") or req.get("order_date") or today()
 
@@ -89,10 +103,10 @@ def co_header(co_num, customer, req, found=None):
     return row
 
 
-def co_line(co_num, line_no, ln, job, whse=None):
+def co_line(co_num, line_no, ln, job, whse=None, repair=False):
     qty = number(ln["quantity"])
     row = {"co_num": rjust(co_num, CO_NUM_WIDTH), "co_line": rjust(line_no, CO_LINE_WIDTH), "co_release": "0",
-           "item": rjust(ln["item"], ITEM_WIDTH), "qty_ordered": qty, "qty_ordered_conv": qty, "u_m": ln["uom"],
+           "item": rjust(repair_item(ln["item"]) if repair else ln["item"], ITEM_WIDTH), "qty_ordered": qty, "qty_ordered_conv": qty, "u_m": ln["uom"],
            "whse": whse or DEFAULT_WHSE, "stat": "P", "ship_site": "CCT",
            "ref_type": "J", "ref_num": rjust(job, JOB_NUM_WIDTH), "ref_line_suf": "0", "ref_release": "0"}
     if ln.get("due_date"):
@@ -100,11 +114,11 @@ def co_line(co_num, line_no, ln, job, whse=None):
     return row
 
 
-def job_row(co_num, line_no, ln, job, req, whse=None):
+def job_row(co_num, line_no, ln, job, req, whse=None, repair=False):
     job_date = erp_datetime(_received(req))
     start_end = erp_datetime(ln["due_date"]) if ln.get("due_date") else job_date
     link = idos.JOB_LINK_PROPS
-    row = {"Job": rjust(job, JOB_NUM_WIDTH), "Suffix": 0, "Type": "J", "Stat": "F", "Item": rjust(ln["item"], ITEM_WIDTH),
+    row = {"Job": rjust(job, JOB_NUM_WIDTH), "Suffix": 0, "Type": "J", "Stat": "F", "Item": rjust(repair_item(ln["item"]) if repair else ln["item"], ITEM_WIDTH),
            "Whse": whse or DEFAULT_WHSE, "QtyReleased": number(ln["quantity"]), "OrdType": "O",
            link["co_num"]: rjust(co_num, CO_NUM_WIDTH), link["co_line"]: int(line_no), "OrdRelease": 0,
            idos.JOB_EXTRA_PROPS["root_job"]: rjust(job, JOB_NUM_WIDTH), "RootSuf": 0,

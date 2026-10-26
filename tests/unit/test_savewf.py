@@ -39,8 +39,8 @@ def test_happy_path_order_links_and_per_line_results(live_writes):
                            ("insert", "CCTJobs"), ("insert", "CCT_Coitems"), ("insert", "CCTJobs")]
     assert not any(c == ("invoke", "NextWOSp") or c == ("invoke", "NextCoSp") for c in soap.calls)  # FR-005
     assert out["results"] == [
-        {"line": 1, "job": "5000", "item": "I0", "status": "saved", "warnings": [], "co_line": 1},
-        {"line": 2, "job": "5001", "item": "I1", "status": "saved", "warnings": [], "co_line": 2}]
+        {"line": 1, "job": "5000", "item": "R* I0", "status": "saved", "warnings": [], "co_line": 1},
+        {"line": 2, "job": "5001", "item": "R* I1", "status": "saved", "warnings": [], "co_line": 2}]
     head = soap.rows["SLCos"][0]
     assert head["CoNum"] == "       100" and head["CustNum"] == "     C1" and head["CustSeq"] == "   0"  # padded to the ERP's widths
     assert head["CustPo"] == "PO-1".rjust(22) and head["OrderDate"] == "2026-10-19T00:00:00-04:00"  # the received date, Eastern
@@ -48,7 +48,7 @@ def test_happy_path_order_links_and_per_line_results(live_writes):
         "Stat": "P", "Whse": "MAIN", "TaxCode1": "R", "FrtTaxCode1": "N", "MscTaxCode1": "N", "OrigSite": "CCT"}
     assert "DateReceived" not in head
     line1 = soap.rows["CCT_Coitems"][0]  # lines are written to CCT_Coitems with lowercase names
-    assert line1["co_num"] == "       100" and line1["co_line"] == "   1" and line1["item"] == "I0".rjust(30)
+    assert line1["co_num"] == "       100" and line1["co_line"] == "   1" and line1["item"] == "R* I0".rjust(30)
     assert line1["ref_num"] == "      5000" and line1["ref_type"] == "J" and line1["ref_line_suf"] == "0" and line1["u_m"] == "EA"
     assert (line1["qty_ordered"], line1["qty_ordered_conv"], line1["stat"], line1["ship_site"], line1["whse"]) == ("1", "1", "P", "CCT", "MAIN")
     assert "Teardown" not in line1 and "teardown" not in line1
@@ -423,3 +423,27 @@ def test_a_target_without_a_customer_is_overwritten_and_the_customer_is_set(devm
     out, _ = dev_go(soap=soap)
     assert out["state"] == "succeeded" and any("no customer yet" in w for w in out["warnings"])
     assert soap.rows[idos.CO_IDO][0]["CustNum"].strip() == "C1"
+
+
+# ---- the R* item prefix (feature 004, FR-024) ---------------------------------------------------------------------------
+def test_an_item_already_prefixed_is_written_once_and_the_job_carries_the_code(live_writes):
+    req = save_req(2)
+    req["lines"][1]["item"] = "R* PW9"
+    out, soap = go(req=req)
+    assert out["state"] == "succeeded" and [r["item"] for r in out["results"]] == ["R* I0", "R* PW9"]
+    assert [r["item"].strip() for r in soap.rows["CCT_Coitems"]] == ["R* I0", "R* PW9"]
+    assert [r["Item"].strip() for r in soap.rows["CCTJobs"]] == ["R* I0", "R* PW9"]
+
+
+def test_a_changed_item_at_read_back_is_still_caught(live_writes):
+    soap = FakeSoap(customers=CUST, corrupt={("SLCoitems", "Item"): "I0"})  # the ERP answers without the prefix
+    out, _ = go(1, soap=soap)
+    assert out["state"] == "needs_reconciliation" and any("item differs" in w for r in out["results"] for w in r["warnings"])
+
+
+def test_an_item_too_long_with_its_prefix_refuses_the_save_before_any_write(live_writes):
+    req = save_req(2)
+    req["lines"][1]["item"] = "A" * 28
+    out, soap = go(req=req)
+    assert out["state"] == "failed" and out["code"] == errors.ITEM_TOO_LONG and out["step"] == "check_items"
+    assert "2" in out["message"] and soap.writes() == []

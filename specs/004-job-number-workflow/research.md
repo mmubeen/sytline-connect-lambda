@@ -79,3 +79,15 @@
 
 ## R17. Failures
 **Decision**: IDP errors map to refusals before any ERP work: `DOCUMENT_NOT_FOUND` (SDK `IDPResourceNotFoundError`), `DOCUMENT_NOT_READY` (state named), `DOCUMENT_INCOMPLETE` (missing fields named), `DOCUMENT_NEEDS_REVIEW` (low-confidence fields named), `DOCUMENT_CHANGED` (save only), `IDP_UNAVAILABLE` (any other SDK or network failure, FR-022). None reserves a number or writes a record.
+
+## Revision 2026-10-26: the `R* ` item prefix (R18)
+
+## R18. Where and how the prefix is applied
+
+Findings (demo `sytline/syteline/formatting.py::to_repair_item`): `PW1234 -> "R* PW1234"`; a value whose stripped form starts with `R*` (case-insensitive) is returned unchanged; empty stays empty. The demo's part-number rules also tolerate the prefix present or absent.
+
+Decision: port it as `rowbuild.repair_item()` with the same rule, trimming the value first. Apply it in exactly the places the item reaches the ERP or is compared with it: `rowbuild.co_line` (`item`), `rowbuild.job_row` (`Item`), the save's read-back comparison (`savewf._read_back`, expected value) and the line result's `item` (so the status shows what was written). The padded item width (30) is applied after the prefix (`R* ` + a 27-character part still fits only up to 30 characters in total; a longer result is refused before any write, see below). Always on, no setting (clarification).
+
+Length: the code is at most 30 characters (the ERP item width). A prefixed item longer than 30 is refused by the save's pre-write validation as a validation failure naming the line, never truncated. Alternative: truncate (rejected: a wrong item silently).
+
+Out of scope: the existence check against the item master (the demo's L9 probe of `SLItems`), the item description from the master, and the one-step upload. Alternatives considered: a deploy setting (rejected by the clarification); applying the prefix in the IDP field mapping (rejected: the saved document value should stay as the document has it).

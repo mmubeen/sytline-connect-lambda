@@ -24,7 +24,7 @@ class SaveRun(Upload):
         self.customer = reservation.get("customer_match") or {}
         self.co_num = str(reservation["co_num"])
         self.jobs = [{"line": int(j["line"]), "job": str(j["job"])} for j in reservation["job_numbers"]]
-        self.results = [{"line": j["line"], "job": j["job"], "item": ln["item"], "status": NOT_ATTEMPTED,
+        self.results = [{"line": j["line"], "job": j["job"], "item": rowbuild.repair_item(ln["item"]), "status": NOT_ATTEMPTED,
                          "warnings": []} for j, ln in zip(self.jobs, request["lines"])]
         self._written = set()  # lines whose line row and job row were both accepted (not yet read back)
         self.warnings = []     # order-level warnings (for example: customer defaults not available)
@@ -90,7 +90,7 @@ class SaveRun(Upload):
         whse = req.get("warehouse") or self.cfg.get("SYTELINE_DEFAULT_WHSE", "")
         for entry, ln in zip(self.jobs, req["lines"]):
             i, job = entry["line"], entry["job"]
-            row = rowbuild.co_line(self.co_num, i, ln, job, whse)
+            row = rowbuild.co_line(self.co_num, i, ln, job, whse, repair=True)
             if i in existing:
                 lkey = {k: row[k] for k in ("co_num", "co_line", "co_release")}
                 self._update(idos.LINE_WRITE_IDO, lkey, {k: v for k, v in row.items() if k not in lkey}, "line",
@@ -101,7 +101,7 @@ class SaveRun(Upload):
                 self.results[i - 1]["action"] = "inserted"
             if "teardown" in ln:
                 self._teardown(i, ln["teardown"])
-            jrow = rowbuild.job_row(self.co_num, i, ln, job, req, whse)
+            jrow = rowbuild.job_row(self.co_num, i, ln, job, req, whse, repair=True)
             if config.fixed_job_number() and self._read(JOB_IDO, ["Job"], rowbuild.job_filter(job), f"read_job_{i}"):
                 jkey = {k: jrow[k] for k in ("Job", "Suffix")}
                 self._update(JOB_IDO, jkey, {k: v for k, v in jrow.items() if k not in jkey}, "job", job, f"update_job_{i}")
@@ -151,7 +151,7 @@ class SaveRun(Upload):
             if row is None:
                 p.append("CO line missing")
             else:
-                if str(row.get("Item", "")).strip() != ln["item"].strip():
+                if str(row.get("Item", "")).strip() != rowbuild.repair_item(ln["item"]):
                     p.append("item differs")
                 try:
                     if float(row.get("QtyOrdered")) != float(ln["quantity"]):
@@ -193,6 +193,10 @@ class SaveRun(Upload):
             if not config.live_writes_enabled():
                 raise _Stop(self._failed(errors.LIVE_WRITES_DISABLED,
                                          "live ERP writes are disabled; nothing was written", "live_writes_check"))
+            long_lines = rowbuild.item_too_long(req["lines"])
+            if long_lines:  # the item code would not fit the ERP's item width: refused, never truncated
+                raise _Stop(self._failed(errors.ITEM_TOO_LONG, "item code longer than 30 characters (with the R* prefix) on line "
+                                         + ", ".join(map(str, long_lines)), "check_items"))
             self.dev = self.reservation.get("dev_target") or ""  # the reservation was made in development mode
             try:
                 current = config.dev_target_co()
@@ -230,11 +234,11 @@ class SaveRun(Upload):
                 whse = req.get("warehouse") or self.cfg.get("SYTELINE_DEFAULT_WHSE", "")
                 for entry, ln in zip(self.jobs, req["lines"]):
                     i, job = entry["line"], entry["job"]
-                    self._insert(idos.LINE_WRITE_IDO, rowbuild.co_line(self.co_num, i, ln, job, whse), "line",
+                    self._insert(idos.LINE_WRITE_IDO, rowbuild.co_line(self.co_num, i, ln, job, whse, repair=True), "line",
                                  f"{self.co_num}/{i}", f"create_line_{i}")
                     if "teardown" in ln:
                         self._teardown(i, ln["teardown"])
-                    self._insert(JOB_IDO, rowbuild.job_row(self.co_num, i, ln, job, req, whse), "job", job, f"create_job_{i}")
+                    self._insert(JOB_IDO, rowbuild.job_row(self.co_num, i, ln, job, req, whse, repair=True), "job", job, f"create_job_{i}")
                     self._written.add(i)
                     self.results[i - 1]["co_line"] = i
 

@@ -56,3 +56,8 @@ reserving ──► reserved ──► save_accepted ──► saving ──► 
 - **PO Details (not stored)**: `{customer:{name,address1,city,state,postal_code}, po_number, received_date?, order_date?, lines:[{item, quantity, uom, due_date?, price?, teardown?, engine_sn?, serial_num?, packing?}]}`.
 - Validation (verbatim from the spec): document status must be `COMPLETED`; every needed field present; every needed field at or above its threshold unless reviewed; at most 25 lines; fingerprint of the mapped details must equal the stored fingerprint at save and at write.
 - New failure codes: `DOCUMENT_NOT_FOUND`, `DOCUMENT_NOT_READY`, `DOCUMENT_INCOMPLETE`, `DOCUMENT_NEEDS_REVIEW`, `DOCUMENT_CHANGED`, `IDP_UNAVAILABLE`.
+
+## Revision 2026-10-26: item code
+
+- **Line item (as written)**: `"R* " + item.strip()` unless `item.strip()` already starts with `R*` (case-insensitive), in which case `item.strip()` unchanged. Empty stays empty (refused by the existing validation). Maximum 30 characters after the prefix; longer is refused, naming the line.
+- **Line Result.item**: the code as written. The document's own item is not stored (FR-021).

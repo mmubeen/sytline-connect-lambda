@@ -8,7 +8,7 @@ step fails (SyteLine's own behavior), so failures report the numbers already obt
 
 import logging
 
-from . import config, devmode, errors, idp, numbers, preflight, resolver, validation
+from . import config, devmode, errors, idp, numbers, preflight, resolver, rowbuild, validation
 from .errors import ErpError, ErpRejected, ErpUncertain, IntegrationError, LiveWritesDisabled
 from .pipeline import MIN_REMAINING_MS
 
@@ -83,6 +83,11 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source
         if not config.live_writes_enabled():  # reserving a number is itself a write (FR-014)
             raise _Stop(errors.LIVE_WRITES_DISABLED, "live ERP writes are disabled; no number was reserved",
                         "live_writes_check")
+
+        long_lines = rowbuild.item_too_long(details["lines"])
+        if long_lines:  # refused before a number is consumed
+            raise _Stop(errors.ITEM_TOO_LONG, "item code longer than 30 characters (with the R* prefix) on line "
+                        + ", ".join(map(str, long_lines)), "check_items")
 
         if preflight.enabled():  # no number is consumed for a save the ERP would refuse halfway
             try:

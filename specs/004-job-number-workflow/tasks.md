@@ -139,7 +139,22 @@ description: "Task list for Job Number Reservation and Save Workflow"
 
 ---
 
+## Phase 9: Revision 2026-10-26 - the `R* ` item prefix (US2, FR-024)
+
+**Goal**: the save writes each line's item as the repair item code `R* <item>` (never `R* R* ...`), confirms it on read-back and reports it; always on, no setting (spec FR-024, research R18).
+**Independent test**: save a reservation whose lines carry `PW1234` and `R* PW5678`: order lines and jobs carry `R* PW1234` and `R* PW5678`, read-back passes, the status lists those codes; a prefixed item over 30 characters is refused before any write.
+
+- [X] T050 [P] [US2] Tests first in `tests/unit/test_rowbuild.py` (new): `repair_item("PW1234") == "R* PW1234"`; `"R* PW1234"`, `"r*PW1234"`, `" R* PW1234 "` are returned unchanged apart from trimming (never `R* R* `); `"  PW1234 "` -> `"R* PW1234"`; `""`/`None` stay empty; a 27-character item gives exactly 30 characters, a 28-character item gives 31 (the caller refuses it); `co_line(...)["item"]` and `job_row(...)["Item"]` hold the padded repair code
+- [X] T051 [US2] In `src/syteline/rowbuild.py` add `repair_item(item)` (port of the demo's `formatting.to_repair_item`: trim; empty stays empty; if the trimmed value starts with `R*` case-insensitively return it unchanged, else `"R* " + value`) and `item_too_long(lines)` returning the 1-based line numbers whose repair code exceeds `ITEM_WIDTH` (30); use `repair_item` in `co_line` (`item`) and `job_row` (`Item`) before `rjust`; update the module docstring and `docs/SAVE_WORKFLOW.md` "Not done yet" list (remove the prefix)
+- [X] T052 [P] [US2] Add `ITEM_TOO_LONG = "ITEM_TOO_LONG"` to `src/syteline/errors.py`; tests in `tests/unit/test_savewf.py`: the order line row in `CCT_Coitems` and the job row hold `"R* I0".rjust(30)` (existing assertions on `item` updated), an item already prefixed is written once, the read-back confirms the saved rows (no "item differs"), `results[i]["item"]` is `"R* I0"`, a 28-character item refuses the save with `ITEM_TOO_LONG` naming the line before any write (`soap.writes() == []`), development-mode updates also write the prefixed item
+- [X] T053 [US2] In `src/syteline/savewf.py`: compare the read-back `Item` with `rowbuild.repair_item(ln["item"])` in `_read_back`; set `results[..]["item"]` to the repair code; before the first write (after the live-writes check) refuse with `ITEM_TOO_LONG` (`self._failed(..., "check_items")`, message `line N: item code "R* ..." is longer than 30 characters`) when `rowbuild.item_too_long(req["lines"])` is non-empty; in `src/syteline/reserve.py` do the same check before any number is allocated (`_Stop(ITEM_TOO_LONG, ..., "check_items")`) with a test in `tests/unit/test_reserve.py`
+- [ ] T054 [P] [US2] (not done: needs Docker, not run here) Mock environment: make the ERP mock's seeded items and the mock-env scenarios' expectations in `mock/` and `tests/mock_env/` use the prefixed code where they compare an item (run only if Docker is available; otherwise leave unchecked)
+- [X] T055 Run `PYENV_VERSION=3.12.14 python -m pytest tests -q --deselect tests/unit/mock/test_make_guards.py`; confirm every pre-existing test passes (item assertions updated only where they compare the written item)
+- [ ] T056 Deployment-only check (unchecked until deployed): a real save of a document whose items are bare part numbers writes `R* ` items that exist in the ERP item master; record any item the ERP refuses
+
 ## Dependencies and order
+
+- Phase 9 (T050-T056): T050 first (fails), T051 makes it pass, T052 then T053 (savewf and reserve), T054 beside them, T055 last; T050, T052 and T054 are in different files and can be written together.
 
 - Phase 1 and 2 first; T003 before T004, T011, T018 to T020, T026; T005 before T006 tests and T018; T007 before T012 and T023.
 - US1 (T008-T014) has no dependency on later stories: it is the MVP.

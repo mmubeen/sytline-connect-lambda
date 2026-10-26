@@ -335,3 +335,11 @@ def test_the_reused_target_is_not_reported_as_consumed(live_writes, monkeypatch)
     soap = with_target(FakeSoap(customers=CUST, scenarios={("invoke", "NextWOSp", 2): "reject"}))
     out, _, _ = go(soap=soap)
     assert out["consumed_unused"] == [{"kind": "job", "line": 1, "number": "5000"}]
+
+
+def test_an_item_too_long_with_its_prefix_reserves_nothing(live_writes, monkeypatch):
+    from syteline import rowbuild
+    monkeypatch.setattr(rowbuild, "item_too_long", lambda lines: [2])
+    out, soap, _ = go()
+    assert out["failure"]["code"] == errors.ITEM_TOO_LONG and out["failure"]["step"] == "check_items"
+    assert "consumed_unused" not in out and soap.writes() == [] and ("invoke", "NextCoSp") not in soap.calls

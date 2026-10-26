@@ -28,6 +28,10 @@ Feature 001 already saves a confirmed order in one step and obtains its numbers 
 - Q: Where should the optional job number come from, so that no new job number is allocated for a line when it is set? → A: Per line, from the document: an optional job-number field on each line item. Present and non-empty means that line keeps it and no new job number is allocated for it. Callers do not send one.
 - Q: When a line's supplied job number already exists in the ERP, or appears twice in the same document, what should the function do? → A: Nothing special: no check is made. The save tries to create the job with that number and the ERP's own rejection decides. The existing rules then apply unchanged: a rejection after earlier rows were written leaves the order needing manual reconciliation, and it is never retried or replayed.
 
+### Session 2026-10-26 (item prefix)
+
+- Q: Should the save add the `R* ` prefix to each line's item code, as the PO OCR demo does? → A: Yes, always, with no setting: the save writes the item as `R* <item>`; an item that already starts with `R*` (any case) is left as it is. The prefix is applied wherever the item is written to the ERP (the order line and the job) and when it is read back and compared, so the read-back matches what was written.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Get job numbers from the ERP (Priority: P1)
@@ -136,12 +140,13 @@ The caller can ask for the state of a reservation and its save at any time: rese
 - **FR-021**: The system MUST NOT store the PO details (customer, PO number, lines) in its own records; it MUST store only the document ID, the fingerprint, the reserved numbers and the per-line results.
 - **FR-022**: An unavailable or failing IDP source MUST be reported clearly and MUST NOT cause any number to be reserved or any record to be written.
 - **FR-023**: When a line item of the document carries a job number (an optional field), reserve MUST use it for that line instead of allocating a new one, and MUST allocate for every other line as before. The reservation MUST record per line whether the job number was supplied or allocated; a supplied one is not a number this service consumed. No check of a supplied job number is made, neither against the ERP nor between lines: if the ERP rejects the job (for example because the number is already in use), the existing rules for a rejection after earlier rows were written apply unchanged (the order is left needing manual reconciliation, never retried or replayed).
+- **FR-024**: The save MUST write each line's item to the ERP as the repair item code `R* <item>`: a document item that already starts with `R*` (any case, optional space) MUST be left unchanged, so it is never prefixed twice. The same code MUST be used for the order line and the job and when reading the saved rows back to confirm them. The prefix is always applied; there is no setting to turn it off.
 
 ### Key Entities
 
 - **Reservation**: The set of numbers obtained from the ERP for one PO: one CO number and one job number per line, tied to the PO, the caller and the time. It has a state (reserved, saving, saved, partly saved, failed, needs reconciliation) and can be used for one save.
 - **Job Number**: The ERP's work order number for one CO line, reserved before the line and job are saved and used as the link between them.
-- **Line Result**: For one PO line: job number, CO line number, item, saved or failed, and any warning (such as the teardown date).
+- **Line Result**: For one PO line: job number, CO line number, item (as written to the ERP, with its `R* ` prefix), saved or failed, and any warning (such as the teardown date).
 - **Document Result**: The inference result of one IDP document (its status, extracted fields and per-field confidence), identified by the document ID. It is the only source of the PO details.
 - **PO Details**: The purchase order data taken from the document result: customer details, PO number, received date and the lines (item, quantity, serial and engine details, packing).
 - **Customer Match**: The result of resolving the PO's customer details to exactly one ERP customer.
