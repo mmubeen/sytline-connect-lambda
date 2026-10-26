@@ -279,12 +279,12 @@ def test_job_number_is_an_empty_by_default_test_parameter_that_reaches_the_funct
     assert env(template)["JOB_NUMBER"] == {"Ref": "JobNumber"}
 
 
-def test_co_number_is_an_empty_by_default_test_parameter_that_reaches_the_function(template):
+def test_dev_target_co_is_an_empty_by_default_parameter_that_reaches_the_function(template):
     import re
-    p = template["Parameters"]["CoNumber"]
-    assert p["Default"] == "" and "TEST" in p["Description"]
-    assert re.match(p["AllowedPattern"], "") and re.match(p["AllowedPattern"], "129548") and not re.match(p["AllowedPattern"], "a b")
-    assert env(template)["CO_NUMBER"] == {"Ref": "CoNumber"}
+    p = template["Parameters"]["DevTargetCo"]
+    assert p["Default"] == "" and "DEVELOPMENT" in p["Description"] and "CoNumber" not in template["Parameters"]
+    assert re.match(p["AllowedPattern"], "") and re.match(p["AllowedPattern"], "129999") and not re.match(p["AllowedPattern"], "a b")
+    assert env(template)["DEV_TARGET_CO"] == {"Ref": "DevTargetCo"} and "CO_NUMBER" not in env(template)
 
 
 # ---- feature 006 FR-016 revised: the bucket for oversized logged events (research R29) -------------------------------------
@@ -332,3 +332,14 @@ def test_the_bucket_name_is_an_output_only_when_it_exists(template):
     assert template["Outputs"]["EventCopyBucketName"] == {
         "Condition": "LogsEventsToS3", "Value": {"Ref": "EventCopyBucket"},
         "Description": template["Outputs"]["EventCopyBucketName"]["Description"]}
+
+
+def test_allowed_config_versions_is_an_empty_by_default_parameter_that_reaches_the_function(template):
+    import re
+    p = template["Parameters"]["AllowedConfigVersions"]
+    assert p["Default"] == ""
+    for ok in ("", "A", "A,B-2", "ChromAlloy-PO"):
+        assert re.match(p["AllowedPattern"], ok)
+    for bad in ("a,,b", "a b", ",a", "a,", "x" * 65):
+        assert not re.match(p["AllowedPattern"], bad)
+    assert env(template)["ALLOWED_CONFIG_VERSIONS"] == {"Ref": "AllowedConfigVersions"}

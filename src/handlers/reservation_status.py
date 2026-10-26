@@ -16,7 +16,7 @@ def _store():
 
 def _line(r):
     out = {"line": int(r["line"]), "job": str(r["job"]), "status": r["status"], "warnings": list(r.get("warnings") or [])}
-    for k in ("co_line", "item", "error"):
+    for k in ("co_line", "item", "error", "action"):
         if k in r:
             out[k] = int(r[k]) if k == "co_line" else r[k]
     return out
@@ -29,6 +29,8 @@ def _view(item, now):
            "document_id": item["document_id"], "uploaded_by": item["uploaded_by"], "state": state,
            "co_num": report["co_num"], "jobs": report["jobs"],
            "created_at": int(item["created_at"]), "updated_at": int(item["updated_at"])}
+    if item.get("dev_target"):  # a development-mode run (DEV_TARGET_CO): the order is overwritten, not created
+        out["development"] = {"target": item["dev_target"]}
     if item.get("save"):  # a save was accepted: per-line results (empty until the run records some)
         out["lines"] = [_line(r) for r in item.get("results") or []]
     if item.get("warnings"):  # order-level warnings from the save (for example: customer defaults not available)

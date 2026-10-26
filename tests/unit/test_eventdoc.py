@@ -121,3 +121,66 @@ def test_a_payload_missing_both_labels_shows_none_and_long_values_are_not_echoed
     assert out["received"] == {"source": None, "detail-type": None} and out["top_level_keys"] == ["detail"]
     out = eventdoc.parse({"source": "x" * 500, "detail-type": 5})
     assert out["received"] == {"source": "<not a short string>", "detail-type": "<not a short string>"}
+
+
+# ---- allowed configuration versions (feature 010) ------------------------------------------------------------------------
+def with_version(version, **kw):
+    return ev(extra_input={"config_version": version}, **kw)
+
+
+def test_the_sample_is_processed_when_its_version_is_allowed(monkeypatch):
+    monkeypatch.setenv("ALLOWED_CONFIG_VERSIONS", "ChromAlloy-PO")
+    assert eventdoc.parse(SAMPLE)["action"] == "process"
+    monkeypatch.setenv("ALLOWED_CONFIG_VERSIONS", "Other,ChromAlloy-PO")
+    assert eventdoc.parse(SAMPLE)["action"] == "process"
+
+
+def test_another_version_is_ignored_and_named(monkeypatch):
+    monkeypatch.setenv("ALLOWED_CONFIG_VERSIONS", "ChromAlloy-PO")
+    out = eventdoc.parse(with_version("Invoice-v2"))
+    assert out["action"] == "ignore" and "Invoice-v2" in out["reason"]
+    assert out["config_version"] == "Invoice-v2" and out["allowed"] == ["ChromAlloy-PO"]
+
+
+def test_the_match_is_exact_and_case_sensitive(monkeypatch):
+    monkeypatch.setenv("ALLOWED_CONFIG_VERSIONS", "ChromAlloy-PO")
+    assert eventdoc.parse(with_version("chromalloy-po"))["action"] == "ignore"
+    assert eventdoc.parse(with_version("ChromAlloy-PO "))["action"] == "ignore"
+
+
+def test_only_the_input_decides(monkeypatch):
+    monkeypatch.setenv("ALLOWED_CONFIG_VERSIONS", "ChromAlloy-PO")
+    event = with_version("ChromAlloy-PO")
+    event["detail"]["output"] = json.dumps({"document": {"id": "159112.pdf", "config_version": "Other"}})
+    assert eventdoc.parse(event)["action"] == "process"
+    event = with_version("Other")
+    event["detail"]["output"] = json.dumps({"document": {"id": "159112.pdf", "config_version": "ChromAlloy-PO"}})
+    assert eventdoc.parse(event)["action"] == "ignore"
+
+
+@pytest.mark.parametrize("version", [None, "", 123, ["x"], "x" * 65, "a b", "<script>"])
+def test_a_missing_or_unusable_version_is_ignored_and_not_echoed(monkeypatch, version):
+    monkeypatch.setenv("ALLOWED_CONFIG_VERSIONS", "ChromAlloy-PO")
+    event = ev() if version is None else with_version(version)
+    out = eventdoc.parse(event)
+    assert out["action"] == "ignore" and out["config_version"] is None and "no usable config_version" in out["reason"]
+    assert "script" not in json.dumps(out)
+
+
+def test_no_restriction_means_any_version_or_none_is_processed(monkeypatch):
+    monkeypatch.delenv("ALLOWED_CONFIG_VERSIONS", raising=False)
+    assert eventdoc.parse(with_version("Whatever"))["action"] == "process" and eventdoc.parse(ev())["action"] == "process"
+
+
+def test_earlier_checks_are_unchanged_by_the_restriction(monkeypatch):
+    monkeypatch.setenv("ALLOWED_CONFIG_VERSIONS", "ChromAlloy-PO")
+    assert "only SUCCEEDED" in eventdoc.parse(ev(status="FAILED"))["reason"]
+    assert "document ID" in invalid(ev(input_id=None, output_id=None))
+    assert "not valid JSON" in invalid(ev(input_id="RAW:{oops"))  # the version never rescues an invalid input
+
+
+def test_an_invalid_setting_refuses_the_event(monkeypatch):
+    monkeypatch.setenv("ALLOWED_CONFIG_VERSIONS", "a,,b")
+    with pytest.raises(IntegrationError) as exc:
+        eventdoc.parse(SAMPLE)
+    assert exc.value.err["code"] == errors.CONFIG_INVALID

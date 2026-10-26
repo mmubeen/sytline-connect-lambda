@@ -307,3 +307,111 @@ def test_a_line_without_a_due_date_uses_the_received_date_for_the_job_schedule(l
     req = {"po_number": "P", "received_date": "2026-10-19"}
     row = rowbuild.job_row("100", 1, {"item": "I", "quantity": 1, "uom": "EA", "due_date": "2026-11-01"}, "5000", req)
     assert row["JobDate"] == "2026-10-19T00:00:00-04:00" and row["JschStartDate"] == row["JschEndDate"] == "2026-11-01T00:00:00-04:00"
+
+
+# ---- development mode (feature 009): the pre-created order is overwritten ----------------------------------------------
+TARGET = "129999"
+
+
+def dev_reservation(n=1):
+    r = reservation(n)
+    r.update(co_num=TARGET, dev_target=TARGET)
+    return r
+
+
+def precreate(soap, n=1, cust="C1"):
+    """A target order as the ERP owner would have created it: a header and `n` lines, one job."""
+    soap.add_record(idos.CO_IDO, CoNum=TARGET.rjust(10), CustNum=cust.rjust(7), CustPo="OLD".rjust(22))
+    for i in range(1, n + 1):
+        row = {"co_num": TARGET.rjust(10), "co_line": str(i).rjust(4), "co_release": "0", "item": "OLD", "qty_ordered": "9"}
+        soap.add_record(idos.LINE_WRITE_IDO, **row)
+        soap.add_record(idos.LINE_IDO, CoNum=row["co_num"], CoLine=row["co_line"], CoRelease="0", Item="OLD", QtyOrdered="9")
+    return soap
+
+
+def dev_go(n=1, soap=None, req=None, lines_before=1):
+    soap = soap or FakeSoap(customers=CUST)
+    if not soap.rows.get(idos.CO_IDO):
+        precreate(soap, lines_before)
+    out = savewf.run_save(dev_reservation(n), req or save_req(n), soap, CFG)
+    return out, soap
+
+
+@pytest.fixture
+def devmode(live_writes, monkeypatch):
+    monkeypatch.setenv("DEV_TARGET_CO", TARGET)
+
+
+def test_the_header_is_updated_not_inserted_and_no_other_order_is_touched(devmode):
+    out, soap = dev_go(lines_before=0)
+    assert out["state"] == "succeeded" and out["co_action"] == "updated" and out["development"] == {"target": TARGET}
+    assert ("insert", idos.CO_IDO) not in kinds(soap) and ("update", idos.CO_IDO) in kinds(soap)
+    assert len(soap.rows[idos.CO_IDO]) == 1 and soap.rows[idos.CO_IDO][0]["CustPo"] == "PO-1".rjust(22)
+    assert not any(c == ("invoke", "NextWOSp") or c == ("invoke", "NextCoSp") for c in soap.calls)
+
+
+def test_an_existing_line_is_updated_and_a_missing_line_is_added(devmode):
+    out, soap = dev_go(n=2, lines_before=1)
+    assert out["state"] == "succeeded"
+    assert [r["action"] for r in out["results"]] == ["updated", "inserted"]
+    assert ("update", idos.LINE_WRITE_IDO) in kinds(soap) and kinds(soap).count(("insert", idos.LINE_WRITE_IDO)) == 1
+    qty = {r["CoLine"].strip(): r["QtyOrdered"] for r in soap.rows[idos.LINE_IDO]}
+    assert qty == {"1": "1", "2": "2"}  # line 1 now carries the document's quantity
+
+
+def test_surplus_lines_on_the_target_are_left_and_reported(devmode):
+    out, soap = dev_go(n=1, lines_before=3)
+    assert out["state"] == "succeeded" and out["surplus_lines"] == [2, 3]
+    assert any("left as they are" in w for w in out["warnings"])
+    assert len(soap.rows[idos.LINE_WRITE_IDO]) == 3  # nothing deleted
+
+
+def test_the_second_run_overwrites_the_first(devmode, monkeypatch):
+    monkeypatch.setenv("JOB_NUMBER", "5000")
+    out1, soap = dev_go(lines_before=0)
+    assert out1["state"] == "succeeded" and kinds(soap).count(("insert", idos.JOB_IDO)) == 1
+    req = save_req(1)
+    req["lines"][0].update(item="NEW", quantity=7)
+    out2, _ = dev_go(soap=soap, req=req)
+    assert out2["state"] == "succeeded" and kinds(soap).count(("insert", idos.JOB_IDO)) == 1  # the job was updated the second time
+    assert ("update", idos.JOB_IDO) in kinds(soap) and len(soap.rows[idos.JOB_IDO]) == 1
+    assert len(soap.rows[idos.CO_IDO]) == 1 and soap.rows[idos.LINE_IDO][0]["QtyOrdered"] == "7"
+
+
+def test_a_missing_target_writes_nothing(devmode):
+    out, soap = dev_go(soap=FakeSoap(customers=CUST))
+    soap.rows.pop(idos.CO_IDO, None)
+    out = savewf.run_save(dev_reservation(), save_req(1), soap, CFG)
+    assert out["state"] == "failed" and out["code"] == errors.DEV_TARGET_MISSING and out["step"] == "check_target"
+
+
+def test_a_target_of_another_customer_writes_nothing(devmode):
+    soap = FakeSoap(customers=CUST)
+    precreate(soap, 1, cust="OTHER")
+    out, _ = dev_go(soap=soap)
+    assert out["state"] == "failed" and out["code"] == errors.DEV_TARGET_CUSTOMER_MISMATCH and soap.writes() == []
+
+
+def test_a_rejected_first_update_changed_nothing(devmode):
+    soap = FakeSoap(customers=CUST, scenarios={("update", idos.CO_IDO, 1): "reject"})
+    out, _ = dev_go(soap=soap)
+    assert out["state"] == "failed" and out["code"] == errors.ERP_REJECTED and out["step"] == "update_co"
+
+
+def test_a_rejection_after_the_header_was_updated_needs_reconciliation(devmode):
+    soap = FakeSoap(customers=CUST, scenarios={("update", idos.LINE_WRITE_IDO, 1): "reject"})
+    out, _ = dev_go(soap=soap, lines_before=1)
+    assert out["state"] == "needs_reconciliation" and out["step"] == "update_line_1"
+    assert ("delete", idos.CO_IDO) not in soap.calls
+
+
+def test_a_target_changed_since_the_reservation_is_refused(live_writes, monkeypatch):
+    monkeypatch.setenv("DEV_TARGET_CO", "555")
+    soap = precreate(FakeSoap(customers=CUST))
+    out = savewf.run_save(dev_reservation(), save_req(1), soap, CFG)
+    assert out["state"] == "failed" and out["code"] == errors.DEV_TARGET_INVALID and soap.writes() == []
+
+
+def test_a_reservation_made_outside_development_mode_is_inserted_as_usual(live_writes):
+    out, soap = go(1)
+    assert out["state"] == "succeeded" and "development" not in out and ("insert", idos.CO_IDO) in kinds(soap)

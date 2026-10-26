@@ -506,21 +506,21 @@ def test_job_number_must_be_a_plain_identifier(run):
     assert p.returncode != 0 and "JOB_NUMBER must be empty or" in (p.stdout + p.stderr) and not deployed(calls)
 
 
-# ---- CO_NUMBER: a reused CO number for tests ----------------------------------------------------------------------------
-def test_co_number_defaults_to_empty_and_is_always_passed(run):
+# ---- DEV_TARGET_CO: development mode, a pre-created order -----------------------------------------------------------------
+def test_dev_target_co_defaults_to_empty_and_is_always_passed(run):
     p, calls = run({**BASE, **NET})
-    assert p.returncode == 0 and overrides(calls)["CoNumber"] == "" and "CO_NUMBER=" not in p.stdout
+    assert p.returncode == 0 and overrides(calls)["DevTargetCo"] == "" and "DEV_TARGET_CO=" not in p.stdout
 
 
-def test_co_number_is_passed_with_a_warning(run):
-    p, calls = run({**BASE, **NET, "CO_NUMBER": "129548"})
-    assert p.returncode == 0 and overrides(calls)["CoNumber"] == "129548"
-    assert "CO_NUMBER=129548" in p.stdout and "none is allocated" in p.stdout
+def test_dev_target_co_is_passed_with_a_warning(run):
+    p, calls = run({**BASE, **NET, "DEV_TARGET_CO": "129999"})
+    assert p.returncode == 0 and overrides(calls)["DevTargetCo"] == "129999"
+    assert "DEV_TARGET_CO=129999" in p.stdout and "OVERWRITES" in p.stdout
 
 
-def test_co_number_must_be_a_plain_identifier(run):
-    p, calls = run({**BASE, **NET, "CO_NUMBER": "a b"})
-    assert p.returncode != 0 and "CO_NUMBER must be empty or" in (p.stdout + p.stderr) and not deployed(calls)
+def test_dev_target_co_must_be_digits(run):
+    p, calls = run({**BASE, **NET, "DEV_TARGET_CO": "a b"})
+    assert p.returncode != 0 and "DEV_TARGET_CO must be empty or" in (p.stdout + p.stderr) and not deployed(calls)
 
 
 # ---- feature 006 FR-016 revised: the oversized-event bucket's retention --------------------------------------------------------
@@ -545,3 +545,22 @@ def test_logging_the_whole_event_warns_about_the_retained_bucket_and_the_days(ru
     p, calls = run({**BASE, **NET, "LOG_EVENTS": "true", "EVENT_COPY_RETENTION_DAYS": "7"})
     assert p.returncode == 0
     assert "256 KB" in p.stdout and "RETAINED" in p.stdout and "7 days" in p.stdout
+
+
+# ---- ALLOWED_CONFIG_VERSIONS (feature 010) ------------------------------------------------------------------------------
+def test_allowed_config_versions_default_to_empty_with_a_notice(run):
+    p, calls = run({**BASE, **NET})
+    assert p.returncode == 0 and overrides(calls)["AllowedConfigVersions"] == ""
+    assert "NOTICE: ALLOWED_CONFIG_VERSIONS is empty" in p.stdout
+
+
+def test_allowed_config_versions_are_passed_without_a_notice(run):
+    p, calls = run({**BASE, **NET, "ALLOWED_CONFIG_VERSIONS": "ChromAlloy-PO,Other.1"})
+    assert p.returncode == 0 and overrides(calls)["AllowedConfigVersions"] == "ChromAlloy-PO,Other.1"
+    assert "ALLOWED_CONFIG_VERSIONS is empty" not in p.stdout
+
+
+@pytest.mark.parametrize("value", ["a,,b", "a b", "x" * 65, ",a", "a,"])
+def test_a_malformed_allowed_list_is_refused_before_deploying(run, value):
+    p, calls = run({**BASE, **NET, "ALLOWED_CONFIG_VERSIONS": value})
+    assert p.returncode != 0 and "ALLOWED_CONFIG_VERSIONS must be empty or" in (p.stdout + p.stderr) and not deployed(calls)

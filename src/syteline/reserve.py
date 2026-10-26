@@ -8,7 +8,7 @@ step fails (SyteLine's own behavior), so failures report the numbers already obt
 
 import logging
 
-from . import config, errors, idp, numbers, preflight, resolver, validation
+from . import config, devmode, errors, idp, numbers, preflight, resolver, validation
 from .errors import ErpError, ErpRejected, ErpUncertain, IntegrationError, LiveWritesDisabled
 from .pipeline import MIN_REMAINING_MS
 
@@ -29,10 +29,13 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source
     cannot be recorded at all (nothing was reserved in that case).
     """
     remaining_ms = remaining_ms or (lambda: 10 ** 9)
+    dev = config.dev_target_co()  # development mode (DEV_TARGET_CO); an invalid value raises before anything is recorded
     doc = (source or idp.po_details)(request["document_id"])
     details = doc["details"]
     stored = {"request_ref": request["request_ref"], "document_id": request["document_id"],
               "line_count": len(details["lines"])}
+    if dev:
+        stored["dev_target"] = dev
     reservation, duplicate = store.create_reservation(
         stored, validation.payload_hash(request), doc["fingerprint"], request["uploaded_by"], caller_identity)
     if duplicate:
@@ -89,7 +92,14 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source
             if missing:
                 raise _Stop(errors.ERP_PROPERTIES_UNKNOWN, preflight.message(missing), "check_properties", {"missing": missing})
 
-        co_num = config.fixed_co_number()  # CO_NUMBER (a test setting): a number already consumed, reused, none allocated
+        co_num = dev  # development mode: the pre-created order is the CO number, none is allocated
+        if dev:
+            try:
+                devmode.check_target(soap, dev, customer)  # exists, and belongs to the document's customer
+            except IntegrationError as exc:
+                raise _Stop(exc.err["code"], exc.err["message"], exc.err["step"])
+            except ErpError as exc:
+                raise _Stop(errors.ERP_UNREACHABLE, f"could not check the development target: {exc}", "check_target")
         if not co_num:
             co_num = allocate("next_co", "CO", "number_co")
             consumed.append({"kind": "co", "number": co_num})
@@ -106,7 +116,10 @@ def run_reserve(request, soap, store, caller_identity, remaining_ms=None, source
             jobs.append({"line": i, "job": job, "source": source})
             record(store.add_job_number, rid, list(jobs))
         record(store.mark_reserved, rid)
-        return {"duplicate": False, "reservation": store.get(rid)}
+        out = {"duplicate": False, "reservation": store.get(rid)}
+        if dev:
+            out.update(devmode.marker(dev))
+        return out
     except _Stop as stop:
         try:
             store.mark_failed(rid, stop.code, stop.message, stop.step)

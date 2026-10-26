@@ -281,29 +281,57 @@ def test_an_empty_job_number_setting_changes_nothing(live_writes, monkeypatch):
     assert soap.calls.count(("invoke", "NextWOSp")) == 3
 
 
-# ---- CO_NUMBER: a reused CO number for tests (deploy.env) -------------------------------------------------------------
-def test_a_configured_co_number_is_used_and_none_is_allocated(live_writes, monkeypatch):
-    monkeypatch.setenv("CO_NUMBER", "129548")
-    out, soap, _ = go()
-    assert out["reservation"]["co_num"] == "129548" and out["reservation"]["state"] == rs.RESERVED
+# ---- DEV_TARGET_CO: development mode, a pre-created order (deploy.env) -------------------------------------------------
+def with_target(soap=None, cust="C1", target="129999"):
+    soap = soap or FakeSoap(customers=CUST)
+    soap.add_record(idos.CO_IDO, CoNum=target.rjust(10), CustNum=cust.rjust(7))
+    return soap
+
+
+def test_the_development_target_is_used_and_no_co_number_is_allocated(live_writes, monkeypatch):
+    monkeypatch.setenv("DEV_TARGET_CO", "129999")
+    out, soap, _ = go(soap=with_target())
+    assert out["reservation"]["co_num"] == "129999" and out["reservation"]["state"] == rs.RESERVED
+    assert out["development"] == {"target": "129999"} and out["reservation"]["dev_target"] == "129999"
     assert soap.calls.count(("invoke", "NextCoSp")) == 0 and soap.calls.count(("invoke", "NextWOSp")) == 3
 
 
-def test_with_both_settings_no_number_routine_is_called_at_all(live_writes, monkeypatch):
-    monkeypatch.setenv("CO_NUMBER", "129548")
+def test_with_a_job_number_as_well_no_number_routine_is_called_at_all(live_writes, monkeypatch):
+    monkeypatch.setenv("DEV_TARGET_CO", "129999")
     monkeypatch.setenv("JOB_NUMBER", "TEST-001")
-    out, soap, _ = go()
+    out, soap, _ = go(soap=with_target())
     assert out["reservation"]["state"] == rs.RESERVED and not [c for c in soap.calls if c[0] == "invoke"]
 
 
-def test_live_writes_off_still_reserves_nothing_with_a_configured_co_number(monkeypatch):
-    monkeypatch.setenv("CO_NUMBER", "129548")
-    out, soap, _ = go()
+def test_live_writes_off_still_reserves_nothing_in_development_mode(monkeypatch):
+    monkeypatch.setenv("DEV_TARGET_CO", "129999")
+    out, soap, _ = go(soap=with_target())
     assert out["failure"]["code"] == errors.LIVE_WRITES_DISABLED and soap.writes() == []
 
 
-def test_a_reused_co_number_is_not_reported_as_consumed(live_writes, monkeypatch):
-    monkeypatch.setenv("CO_NUMBER", "129548")
-    soap = FakeSoap(customers=CUST, scenarios={("invoke", "NextWOSp", 2): "reject"})
+def test_a_missing_target_is_refused_and_nothing_is_consumed(live_writes, monkeypatch):
+    monkeypatch.setenv("DEV_TARGET_CO", "129999")
+    out, soap, _ = go()
+    assert out["failure"] == {"code": errors.DEV_TARGET_MISSING, "message": out["failure"]["message"], "step": "check_target"}
+    assert "129999" in out["failure"]["message"] and "consumed_unused" not in out and soap.writes() == []
+
+
+def test_a_target_of_another_customer_is_refused(live_writes, monkeypatch):
+    monkeypatch.setenv("DEV_TARGET_CO", "129999")
+    out, soap, _ = go(soap=with_target(cust="OTHER"))
+    assert out["failure"]["code"] == errors.DEV_TARGET_CUSTOMER_MISMATCH
+    assert "OTHER" in out["failure"]["message"] and "C1" in out["failure"]["message"] and soap.writes() == []
+
+
+def test_a_bad_setting_is_an_error_not_a_silent_fall_back(live_writes, monkeypatch):
+    monkeypatch.setenv("DEV_TARGET_CO", "12 9")
+    with pytest.raises(IntegrationError) as exc:
+        go()
+    assert exc.value.err["code"] == errors.DEV_TARGET_INVALID
+
+
+def test_the_reused_target_is_not_reported_as_consumed(live_writes, monkeypatch):
+    monkeypatch.setenv("DEV_TARGET_CO", "129999")
+    soap = with_target(FakeSoap(customers=CUST, scenarios={("invoke", "NextWOSp", 2): "reject"}))
     out, _, _ = go(soap=soap)
     assert out["consumed_unused"] == [{"kind": "job", "line": 1, "number": "5000"}]

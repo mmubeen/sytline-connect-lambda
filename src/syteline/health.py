@@ -209,8 +209,13 @@ def run_health(event, context=None):
         ok = ok and db_ok
         if not cfgmod.sql_encrypt():  # the explicit option is in use: say so, loudly
             warnings.append(UNENCRYPTED_WARNING)
+    try:
+        allowed_versions = cfgmod.allowed_config_versions()
+    except errors.IntegrationError:
+        allowed_versions = []
+        warnings.append("ALLOWED_CONFIG_VERSIONS is invalid")
     out = {"ok": ok, "dry_run": dry_run, "host": host, "config": cfg["SYTELINE_CONFIG"], "stages": results,
-           "routes": routes.describe()}
+           "routes": routes.describe(), "allowed_config_versions": allowed_versions}
     if warnings:
         out["warnings"] = warnings
     if diagnose:

@@ -52,6 +52,8 @@ class ReservationStore:
                 "fingerprint": fingerprint, "document_id": request["document_id"], "line_count": request["line_count"],
                 "uploaded_by": uploaded_by, "caller_identity": caller_identity, "state": RESERVING,
                 "job_numbers": [], "attempts": 0, "created_at": now, "updated_at": now}
+        if request.get("dev_target"):
+            item["dev_target"] = request["dev_target"]
         index = {"pk": f"{REF_PK}{ref}", "request_ref": ref, "reservation_id": rid, "payload_hash": payload_hash}
         marker = {"pk": f"{DOC_PK}{request['document_id']}", "document_id": request["document_id"],
                   "reservation_id": rid, "created_at": now}
