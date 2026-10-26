@@ -415,3 +415,11 @@ def test_a_target_changed_since_the_reservation_is_refused(live_writes, monkeypa
 def test_a_reservation_made_outside_development_mode_is_inserted_as_usual(live_writes):
     out, soap = go(1)
     assert out["state"] == "succeeded" and "development" not in out and ("insert", idos.CO_IDO) in kinds(soap)
+
+
+def test_a_target_without_a_customer_is_overwritten_and_the_customer_is_set(devmode):
+    soap = FakeSoap(customers=CUST)
+    precreate(soap, 1, cust="")
+    out, _ = dev_go(soap=soap)
+    assert out["state"] == "succeeded" and any("no customer yet" in w for w in out["warnings"])
+    assert soap.rows[idos.CO_IDO][0]["CustNum"].strip() == "C1"

@@ -204,7 +204,9 @@ class SaveRun(Upload):
                                          "check_target"))
             if self.dev:  # the target must exist and be the document's customer's, checked again right before the first write
                 try:
-                    devmode.check_target(self.soap, self.dev, self.customer)
+                    note = devmode.check_target(self.soap, self.dev, self.customer)
+                    if note:
+                        self.warnings.append(note)
                 except IntegrationError as exc:
                     raise _Stop(self._failed(exc.err["code"], exc.err["message"], "check_target"))
                 except ErpError as exc:
