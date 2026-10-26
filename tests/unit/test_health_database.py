@@ -288,3 +288,16 @@ def test_an_unreadable_secret_says_why_the_database_was_not_probed(env):
     env.setattr(cfgmod, "load_config", boom)
     out = health.run_health({"action": "health", "diagnose": True})
     assert out["diagnostics"]["database_skipped"] == health.SECRET_DB_SKIP and DB_CFG["SQL_SERVER"] not in seen
+
+
+def test_the_health_answer_lists_the_allowed_config_versions(env):
+    env.delenv("ALLOWED_CONFIG_VERSIONS", raising=False)
+    assert health.run_health({"action": "health"})["allowed_config_versions"] == []
+    env.setenv("ALLOWED_CONFIG_VERSIONS", "ChromAlloy-PO, Other")
+    assert health.run_health({"action": "health"})["allowed_config_versions"] == ["ChromAlloy-PO", "Other"]
+
+
+def test_an_invalid_allowed_list_is_a_warning_in_the_health_answer_not_an_error(env):
+    env.setenv("ALLOWED_CONFIG_VERSIONS", "a,,b")
+    out = health.run_health({"action": "health"})
+    assert out["allowed_config_versions"] == [] and "ALLOWED_CONFIG_VERSIONS is invalid" in out["warnings"]

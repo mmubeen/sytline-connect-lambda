@@ -45,6 +45,15 @@ A line item of the document may carry its own job number. Map it with `IDP_FIELD
 
 `JOB_NUMBER=TEST-001` (up to 20 letters, digits, `-`, `_`) makes **every line of every reservation** use that job number: no `NextWOSp` call, `"source": "configured"` in the response, and it wins over a job number the document carries. A PO with several lines gets the same number on each line and the ERP rejects the second job, so use it with single-line documents. Leave it empty (the default) outside a test; `deploy.sh` prints a warning while it is set.
 
+### `ALLOWED_CONFIG_VERSIONS` in `deploy.env` (which document configurations are processed)
+
+`ALLOWED_CONFIG_VERSIONS=ChromAlloy-PO` (comma-separated; each item 1 to 64 letters, digits, `.`, `_`, `-`) restricts the function to documents processed with those IDP configuration versions. The version is `document.config_version` inside the JSON text of `detail.input` (the event's `detail.output` is not consulted). The match is exact and case-sensitive.
+
+- An event with any other version, or none, or one that is empty, not text, too long or has odd characters, is **ignored** before the document is read, a customer matched or a number reserved: `{"outcome": "ignored", "reason": "config_version 'Invoice-v2' is not in the allowed set", "config_version": "Invoice-v2", "allowed": ["ChromAlloy-PO"]}`. Nothing is recorded in the job tracker. The log line carries the version found and the allowed set and no other event content (an unusable version is shown as `null`, never echoed).
+- Empty (the default): every configuration is processed, as before; `deploy.sh` prints a notice.
+- The check comes after "is it a finished execution" and "does it name a valid document", and before everything else. Direct reserve and save requests (which name a document ID, not an event) and development mode are not filtered.
+- A malformed list is refused by `deploy.sh` and by the template; if one still reaches the function the event is refused (`CONFIG_INVALID`), never processed. The health answer lists `allowed_config_versions`.
+
 ### `DEV_TARGET_CO` in `deploy.env` (development mode)
 
 `DEV_TARGET_CO=129999` (1 to 10 digits; replaces the old `CO_NUMBER`) lets you work in the production ERP without creating anything: you create **one test order in the ERP first**, for the customer your test document resolves to, and name it here. Then:
@@ -61,7 +70,7 @@ If the ERP refuses an update part-way, the run ends `needs_reconciliation` as fo
 
 | `outcome` | Meaning | Anything reserved or written? |
 |---|---|---|
-| `ignored` | not a finished-processing event. When the payload is not a Step Functions status change at all, the answer lists `received` (its `source` and `detail-type`), `expected` and the payload's `top_level_keys` (keys only, never values) so you can see what was sent | no, nothing contacted |
+| `ignored` | not a finished-processing event, or (when `ALLOWED_CONFIG_VERSIONS` is set) a document processed with a configuration version that is not allowed. When the payload is not a Step Functions status change at all, the answer lists `received` (its `source` and `detail-type`), `expected` and the payload's `top_level_keys` (keys only, never values) so you can see what was sent | no, nothing contacted |
 | `refused` | `errors[0].code` says why (`EVENT_INVALID`, `DOCUMENT_NOT_FOUND`, `DOCUMENT_NOT_READY`, `DOCUMENT_INCOMPLETE`, `DOCUMENT_NEEDS_REVIEW`, `IDP_UNAVAILABLE`, `DEFAULTS_NOT_CONFIGURED`, `SECRET_STORE_UNREACHABLE`, `STORE_UNAVAILABLE`) | no |
 | `read_only` | usable result, but live writes are off, the customer was not matched, or the ERP was unreachable before the first number | no number consumed; a later delivery may try again |
 | `reserved` | numbers reserved, the save could not be handed to the worker | numbers; save it through the API |

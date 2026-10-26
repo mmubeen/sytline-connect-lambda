@@ -66,6 +66,23 @@ def dev_target_co():
     return value
 
 
+_CONFIG_VERSION = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+def allowed_config_versions():
+    """ALLOWED_CONFIG_VERSIONS (deploy.env): the IDP configuration versions to process, comma-separated; empty = every one.
+    A malformed list raises (CONFIG_INVALID); it never silently allows everything."""
+    raw = os.environ.get("ALLOWED_CONFIG_VERSIONS", "").strip()
+    if not raw:
+        return []
+    items = [i.strip() for i in raw.split(",")]
+    if not all(_CONFIG_VERSION.fullmatch(i) for i in items):
+        from .errors import CONFIG_INVALID, IntegrationError
+        raise IntegrationError(CONFIG_INVALID, "ALLOWED_CONFIG_VERSIONS is not a comma-separated list of 1 to 64 letters, "
+                                               "digits, . _ - items", step="config")
+    return items
+
+
 def live_writes_enabled():
     """True only when SYTELINE_LIVE_WRITES is explicitly on. Default: off (FR-016)."""
     return truthy(os.environ.get("SYTELINE_LIVE_WRITES", "false"))

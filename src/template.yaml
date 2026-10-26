@@ -77,6 +77,15 @@ Parameters:
     Description: >-
       Days an oversized event's stored copy is kept (only used while LogEvents is "true"; the copies hold document and order content).
 
+  AllowedConfigVersions:
+    Type: String
+    Default: ""
+    AllowedPattern: "^([A-Za-z0-9._-]{1,64}(,[A-Za-z0-9._-]{1,64})*)?$"
+    Description: >-
+      The IDP configuration versions (document.config_version in the finished-processing event) this function processes,
+      comma-separated, for example ChromAlloy-PO. An event with any other version is ignored before anything is read or
+      reserved. Empty (default): every configuration is processed.
+
   DevTargetCo:
     Type: String
     Default: ""
@@ -383,6 +392,7 @@ Resources:
           EVENT_COPY_BUCKET: !If [LogsEventsToS3, !Ref EventCopyBucket, ""]
           JOB_NUMBER: !Ref JobNumber
           DEV_TARGET_CO: !Ref DevTargetCo
+          ALLOWED_CONFIG_VERSIONS: !Ref AllowedConfigVersions
           SYTELINE_NEXT_CO_IDO: !Ref NextCoIdo
           SYTELINE_NEXT_JOB_IDO: !Ref NextJobIdo
           SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo

@@ -545,3 +545,22 @@ def test_logging_the_whole_event_warns_about_the_retained_bucket_and_the_days(ru
     p, calls = run({**BASE, **NET, "LOG_EVENTS": "true", "EVENT_COPY_RETENTION_DAYS": "7"})
     assert p.returncode == 0
     assert "256 KB" in p.stdout and "RETAINED" in p.stdout and "7 days" in p.stdout
+
+
+# ---- ALLOWED_CONFIG_VERSIONS (feature 010) ------------------------------------------------------------------------------
+def test_allowed_config_versions_default_to_empty_with_a_notice(run):
+    p, calls = run({**BASE, **NET})
+    assert p.returncode == 0 and overrides(calls)["AllowedConfigVersions"] == ""
+    assert "NOTICE: ALLOWED_CONFIG_VERSIONS is empty" in p.stdout
+
+
+def test_allowed_config_versions_are_passed_without_a_notice(run):
+    p, calls = run({**BASE, **NET, "ALLOWED_CONFIG_VERSIONS": "ChromAlloy-PO,Other.1"})
+    assert p.returncode == 0 and overrides(calls)["AllowedConfigVersions"] == "ChromAlloy-PO,Other.1"
+    assert "ALLOWED_CONFIG_VERSIONS is empty" not in p.stdout
+
+
+@pytest.mark.parametrize("value", ["a,,b", "a b", "x" * 65, ",a", "a,"])
+def test_a_malformed_allowed_list_is_refused_before_deploying(run, value):
+    p, calls = run({**BASE, **NET, "ALLOWED_CONFIG_VERSIONS": value})
+    assert p.returncode != 0 and "ALLOWED_CONFIG_VERSIONS must be empty or" in (p.stdout + p.stderr) and not deployed(calls)

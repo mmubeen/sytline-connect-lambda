@@ -109,8 +109,8 @@ def process(payload, context, debug=False):
         _log(started, "refused", code=exc.err["code"])
         return _refused(exc)
     if parsed["action"] == "ignore":
-        _log(started, "ignored", reason=parsed["reason"])
-        extra = {k: parsed[k] for k in ("received", "expected", "top_level_keys") if k in parsed}
+        extra = {k: parsed[k] for k in ("received", "expected", "top_level_keys", "config_version", "allowed") if k in parsed}
+        _log(started, "ignored", reason=parsed["reason"], **{k: extra[k] for k in ("config_version", "allowed") if k in extra})
         return _out("ignored", reason=parsed["reason"], **extra)
     document_id = parsed["document_id"]
 

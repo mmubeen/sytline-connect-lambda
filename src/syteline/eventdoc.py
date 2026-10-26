@@ -11,7 +11,7 @@ import datetime
 import json
 import re
 
-from . import errors
+from . import config, errors
 from .errors import IntegrationError
 
 SOURCE = "aws.states"
@@ -43,6 +43,16 @@ def _document_id(detail, name):
     doc = (_object(detail.get(name), name) or {}).get("document")
     doc_id = doc.get("id") if isinstance(doc, dict) else None
     return doc_id if isinstance(doc_id, str) and doc_id else None
+
+
+_VERSION = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def _config_version(detail):
+    """document.config_version of detail.input when it is a short safe text, else None (never echoed otherwise)."""
+    doc = (_object(detail.get("input"), "input") or {}).get("document")
+    version = doc.get("config_version") if isinstance(doc, dict) else None
+    return version if isinstance(version, str) and _VERSION.match(version) else None
 
 
 def _event_date(event, today=None):
@@ -109,6 +119,13 @@ def parse(event, today=None):
         raise _invalid("neither detail.input nor detail.output holds a document ID (document.id)")
     if ".." in document_id or not DOCUMENT_ID.match(document_id):
         raise _invalid("the document ID is not a valid document ID (1 to 256 letters, digits, . _ - /)")
+    allowed = config.allowed_config_versions()  # an invalid setting raises: the event is refused, never processed
+    if allowed:
+        version = _config_version(detail)
+        if version not in allowed:
+            reason = (f"config_version {version!r} is not in the allowed set" if version
+                      else "the event has no usable config_version")
+            return {"action": "ignore", "reason": reason, "config_version": version, "allowed": allowed}
     execution = str(detail.get("name") or detail.get("executionArn") or "")[:MAX_EXECUTION]
     return {"action": "process", "document_id": document_id, "execution": execution,
             "event_date": _event_date(event, today)}

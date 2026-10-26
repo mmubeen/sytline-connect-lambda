@@ -120,3 +120,25 @@ def test_the_background_work_runs_on_this_same_function_unless_another_is_named(
     assert config.worker_function_name() == "stack-fn"
     monkeypatch.setenv("WORKER_FUNCTION_NAME", "other-fn")
     assert config.worker_function_name() == "other-fn"
+
+
+# ---- allowed configuration versions (feature 010) ------------------------------------------------------------------------
+@pytest.mark.parametrize("value,expected", [(None, []), ("", []), ("  ", []), ("ChromAlloy-PO", ["ChromAlloy-PO"]),
+                                            (" A , B.1 ,c_2", ["A", "B.1", "c_2"])])
+def test_the_allowed_versions_are_a_trimmed_list_or_empty(monkeypatch, value, expected):
+    if value is None:
+        monkeypatch.delenv("ALLOWED_CONFIG_VERSIONS", raising=False)
+    else:
+        monkeypatch.setenv("ALLOWED_CONFIG_VERSIONS", value)
+    assert config.allowed_config_versions() == expected
+
+
+@pytest.mark.parametrize("value", ["a,,b", "bad value", "x" * 65, "a,", ",a", "a;b"])
+def test_a_malformed_list_raises_and_never_allows_everything(monkeypatch, value):
+    from syteline import errors
+    from syteline.errors import IntegrationError
+
+    monkeypatch.setenv("ALLOWED_CONFIG_VERSIONS", value)
+    with pytest.raises(IntegrationError) as exc:
+        config.allowed_config_versions()
+    assert exc.value.err["code"] == errors.CONFIG_INVALID

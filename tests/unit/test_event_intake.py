@@ -373,3 +373,30 @@ def test_a_missing_target_is_reported_and_releases_the_claim(live, monkeypatch):
     out = live.run()
     assert out["outcome"] == "read_only" and out["errors"][0]["code"] == "DEV_TARGET_MISSING"
     assert live.lam.invocations == [] and live.events.get(DOC) is None
+
+
+# ---- allowed configuration versions (feature 010) ------------------------------------------------------------------------
+def test_a_version_that_is_not_allowed_is_ignored_and_nothing_is_touched(world, monkeypatch, live_writes, caplog):
+    import logging
+
+    monkeypatch.setenv("ALLOWED_CONFIG_VERSIONS", "ChromAlloy-PO")
+    with caplog.at_level(logging.INFO):
+        out = world.run(ev(extra_input={"config_version": "Invoice-v2"}))
+    assert out["outcome"] == "ignored" and out["config_version"] == "Invoice-v2" and out["allowed"] == ["ChromAlloy-PO"]
+    assert world.untouched()
+    line = [r.message for r in caplog.records if '"ignored"' in r.message][0]
+    assert "Invoice-v2" in line and "ChromAlloy-PO" in line
+    for text in ("inputbucket", "executionArn", "us-gov-east-1", "arn:aws"):
+        assert text not in line
+
+
+def test_an_allowed_version_is_processed_as_before(live, monkeypatch):
+    monkeypatch.setenv("ALLOWED_CONFIG_VERSIONS", "ChromAlloy-PO,Other")
+    out = live.run(ev(extra_input={"config_version": "ChromAlloy-PO"}))
+    assert out["outcome"] == "save_accepted"
+
+
+def test_an_invalid_list_refuses_the_event_and_touches_nothing(world, monkeypatch, live_writes):
+    monkeypatch.setenv("ALLOWED_CONFIG_VERSIONS", "a,,b")
+    out = world.run()
+    assert out["outcome"] == "refused" and out["errors"][0]["code"] == "CONFIG_INVALID" and world.untouched()
