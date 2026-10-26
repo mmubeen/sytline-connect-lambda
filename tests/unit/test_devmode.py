@@ -82,3 +82,11 @@ def test_every_log_line_of_a_development_run_names_the_target(monkeypatch, caplo
     with caplog.at_level(logging.INFO):
         _common.log_event("save", time.monotonic(), outcome="saved")
     assert "dev_target" not in caplog.text
+
+
+def test_a_target_with_no_customer_yet_is_allowed_with_a_warning():
+    soap = FakeSoap()
+    soap.add_record(idos.CO_IDO, CoNum="129556".rjust(10), CustNum="")
+    note = devmode.check_target(soap, "129556", CUSTOMER)
+    assert "no customer yet" in note and "C1" in note
+    assert devmode.check_target(soap_with(), "129999", CUSTOMER) is None

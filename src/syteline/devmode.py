@@ -26,14 +26,19 @@ def marker(target_co):
 
 
 def check_target(soap, target_co, customer):
-    """Refuse, before anything is written, a target that does not exist or belongs to another customer. ERP errors propagate."""
+    """Refuse, before anything is written, a target that does not exist or belongs to another customer. ERP errors propagate.
+
+    A target with NO customer yet (a header created in the ERP before a customer was chosen) cannot be a real customer's order,
+    so it is allowed; the save sets the customer. Returns a warning text in that case, else None."""
     rows = soap.read_back(idos.CO_IDO, ["CoNum", "CustNum"], rowbuild.co_filter(target_co))
     if len(rows) != 1:
         raise IntegrationError(errors.DEV_TARGET_MISSING,
                                f"development target order {target_co} was not found in the ERP; it must be created there first",
                                step="check_target")
-    have = str(rows[0].get("CustNum", "")).strip()
+    have = str(rows[0].get("CustNum") or "").strip()
     want = str(customer["cust_num"]).strip()
+    if not have:
+        return f"development target order {target_co} has no customer yet; the save sets it to {want}"
     if have != want:
         raise IntegrationError(errors.DEV_TARGET_CUSTOMER_MISMATCH,
                                f"development target order {target_co} belongs to customer {have or '(none)'}, "
