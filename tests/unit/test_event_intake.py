@@ -331,3 +331,45 @@ def test_a_supplied_job_number_below_its_threshold_is_refused_for_review_and_res
     out = live.run()
     assert out["outcome"] == "refused" and out["errors"][0]["code"] == errors.DOCUMENT_NEEDS_REVIEW
     assert "lines[1].job_number" in json.dumps(out) and live.soap.calls.count(("invoke", "NextCoSp")) == 0
+
+
+# ---- development mode (feature 009): the tracker never blocks a run ------------------------------------------------------
+@pytest.fixture
+def dev(live, monkeypatch):
+    monkeypatch.setenv("DEV_TARGET_CO", "129999")
+    live.soap.add_record("SLCos", CoNum="129999".rjust(10), CustNum=CUST[0]["cust_num"].rjust(7))
+    return live
+
+
+def test_the_same_document_is_processed_again_in_development_mode(dev):
+    first = dev.run()
+    assert first["outcome"] == "save_accepted" and first["co_num"] == "129999" and first["development"] == {"target": "129999"}
+    assert ("invoke", "NextCoSp") not in dev.soap.calls
+    again = dev.run()  # the earlier reservation and claim do not block this run
+    assert again["outcome"] == "save_accepted" and again["reservation_id"] != first["reservation_id"]
+    assert len(dev.lam.invocations) == 2
+    assert dev.events.get(DOC)["dev_target"] == "129999" and dev.store.reservation_for_document(DOC)["dev_target"] == "129999"
+
+
+def test_a_claim_left_by_an_earlier_run_does_not_block_development_mode(dev):
+    assert dev.events.claim(DOC, "an-earlier-execution")
+    assert dev.run()["outcome"] == "save_accepted"
+
+
+def test_the_same_document_is_still_refused_the_second_time_when_the_mode_is_off(live):
+    live.run()
+    assert live.run()["outcome"] == "already_processed"
+
+
+def test_a_bad_development_setting_is_refused_before_anything_is_reserved(world, monkeypatch, live_writes):
+    monkeypatch.setenv("DEV_TARGET_CO", "12x")
+    out = world.run()
+    assert out["outcome"] == "refused" and out["errors"][0]["code"] == "DEV_TARGET_INVALID"
+    assert world.soap.calls == [] and world.table.items == {} and world.lam.invocations == []
+
+
+def test_a_missing_target_is_reported_and_releases_the_claim(live, monkeypatch):
+    monkeypatch.setenv("DEV_TARGET_CO", "129999")
+    out = live.run()
+    assert out["outcome"] == "read_only" and out["errors"][0]["code"] == "DEV_TARGET_MISSING"
+    assert live.lam.invocations == [] and live.events.get(DOC) is None

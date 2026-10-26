@@ -77,14 +77,14 @@ Parameters:
     Description: >-
       Days an oversized event's stored copy is kept (only used while LogEvents is "true"; the copies hold document and order content).
 
-  CoNumber:
+  DevTargetCo:
     Type: String
     Default: ""
-    AllowedPattern: "^[A-Za-z0-9_-]{0,10}$"
+    AllowedPattern: "^[0-9]{0,10}$"
     Description: >-
-      TEST setting. Empty (default): the CO number is allocated by the ERP. A value: every reservation uses this CO number and
-      none is allocated, so tests reuse a number that was already consumed. Use a number that was consumed and never created
-      (if that order exists, the ERP rejects the header). Leave empty outside a test.
+      DEVELOPMENT mode. Empty (default): off. A customer order number that was created in the ERP beforehand: every reservation
+      uses it (no CO number is allocated) and every save OVERWRITES that order's header and lines instead of creating them; the
+      order must exist and belong to the document's customer. The job tracker never blocks a run. Leave empty outside development.
 
   JobNumber:
     Type: String
@@ -382,7 +382,7 @@ Resources:
           LOG_EVENTS: !Ref LogEvents
           EVENT_COPY_BUCKET: !If [LogsEventsToS3, !Ref EventCopyBucket, ""]
           JOB_NUMBER: !Ref JobNumber
-          CO_NUMBER: !Ref CoNumber
+          DEV_TARGET_CO: !Ref DevTargetCo
           SYTELINE_NEXT_CO_IDO: !Ref NextCoIdo
           SYTELINE_NEXT_JOB_IDO: !Ref NextJobIdo
           SYTELINE_CUSTOMER_IDO: !Ref CustomerIdo

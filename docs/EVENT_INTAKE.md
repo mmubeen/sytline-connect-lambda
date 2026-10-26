@@ -45,9 +45,17 @@ A line item of the document may carry its own job number. Map it with `IDP_FIELD
 
 `JOB_NUMBER=TEST-001` (up to 20 letters, digits, `-`, `_`) makes **every line of every reservation** use that job number: no `NextWOSp` call, `"source": "configured"` in the response, and it wins over a job number the document carries. A PO with several lines gets the same number on each line and the ERP rejects the second job, so use it with single-line documents. Leave it empty (the default) outside a test; `deploy.sh` prints a warning while it is set.
 
-### `CO_NUMBER` in `deploy.env` (test only)
+### `DEV_TARGET_CO` in `deploy.env` (development mode)
 
-`CO_NUMBER=129548` makes every reservation use that CO number and allocate none (no `NextCoSp` call). Use it to reuse a number that a failed test already consumed and never created, so repeated tests do not burn CO numbers. If an order with that number exists, the ERP rejects the header. With `JOB_NUMBER` as well, no number routine is called at all. Leave it empty outside a test; `deploy.sh` warns while it is set.
+`DEV_TARGET_CO=129999` (1 to 10 digits; replaces the old `CO_NUMBER`) lets you work in the production ERP without creating anything: you create **one test order in the ERP first**, for the customer your test document resolves to, and name it here. Then:
+
+- every reservation uses that order's number and allocates none (no `NextCoSp`); with `JOB_NUMBER` as well no number routine is called at all. The response carries `"development": {"target": "129999"}`;
+- every save **overwrites** the order: the header and the lines are updated (a line the order lacks is added; a line it has that the document does not is left alone and listed as `surplus_lines` with a warning); the job is updated when `JOB_NUMBER` is set and that job exists, otherwise created. Nothing is deleted. Line results say `action: updated` or `inserted`; the save reports `co_action: updated`;
+- the job tracker never blocks a run: a document that was already processed is processed again (the tracker still records each run, with `dev_target`), so you can send the same document as often as you like;
+- before anything is reserved or written the order must exist (`DEV_TARGET_MISSING`) and belong to the document's customer (`DEV_TARGET_CUSTOMER_MISMATCH`, naming both); a value that is not 1 to 10 digits is refused (`DEV_TARGET_INVALID`) rather than ignored;
+- every log line, tracker item, response and status of a run names the target; `deploy.sh` prints a warning while it is set.
+
+If the ERP refuses an update part-way, the run ends `needs_reconciliation` as for any partial write. The ERP's acceptance of updates to the order, line and job rows has not been confirmed against the real ERP yet; the first run's message shows any property or key it does not accept. Leave the setting empty (the default) outside development; with it empty nothing in this section applies.
 
 ## Outcomes
 

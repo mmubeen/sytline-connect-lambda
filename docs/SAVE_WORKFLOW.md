@@ -183,3 +183,7 @@ Each name below is requested alone in a one-row read; the answer lists `exists` 
 ## The property pre-check
 
 Before a reservation takes any number (and before a save writes the order header), the function asks the ERP, in single-property one-row reads, whether it has every property the save will write on `SLCos`, `CCT_Coitems` and `CCTJobs`. If any is refused, the reservation fails with `ERP_PROPERTIES_UNKNOWN` (step `check_properties`) and a message listing **every** missing name per IDO; nothing is reserved or written, so no number is burned and no order header without lines is left behind. Names that passed are remembered for the life of the container. The teardown date is not checked (a refused one is only a warning). Fix the names in `src/syteline/idos.py` (use `probe_properties` to find them) and send the document again. `SYTELINE_CHECK_PROPERTIES=false` on the function switches the check off.
+
+## Development mode (`DEV_TARGET_CO`)
+
+With `DEV_TARGET_CO` set the save does not insert the order: step `check_target` confirms the pre-created order exists and belongs to the document's customer; then `update_co` overwrites the header, each line is updated (`update_line_N`) or inserted when missing (`create_line_N`), and the job is updated (`update_job_N`) when `JOB_NUMBER` is set and the job exists, else created. A rejected first update means nothing changed (`failed`); a later one is `needs_reconciliation`. See [EVENT_INTAKE.md](EVENT_INTAKE.md#dev_target_co-in-deployenv-development-mode).

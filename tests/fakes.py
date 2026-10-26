@@ -131,6 +131,10 @@ class FakeSoap:
             raise ErpRejected(f"{ido} row not found for update")
         for r in rows:
             r.update(values)
+        if ido == idos.LINE_WRITE_IDO:  # the standard SLCoitems answers reads with the PascalCase names
+            for r in self.rows.get(idos.LINE_IDO, []):
+                if (str(r.get("CoNum")), str(r.get("CoLine"))) == (str(key.get("co_num")), str(key.get("co_line"))):
+                    r.update(_LINE_READ.get_all(values))
         if action == "timeout_after":
             raise ErpUncertain("timeout after update")
         return dict(rows[0])

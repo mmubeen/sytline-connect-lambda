@@ -15,6 +15,10 @@ def response(status, body):
 
 def log_event(kind, started, **fields):
     """One structured line per request: type, record identifiers, outcome, duration (FR-011). No secrets."""
+    from syteline import devmode  # late: keeps the module import light
+
+    if devmode.active():
+        fields.setdefault("dev_target", devmode.active())
     log.info(json.dumps({"type": kind, "ms": int((time.monotonic() - started) * 1000), **fields}, default=str))
 
 

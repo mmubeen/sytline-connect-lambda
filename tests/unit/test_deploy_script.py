@@ -506,21 +506,21 @@ def test_job_number_must_be_a_plain_identifier(run):
     assert p.returncode != 0 and "JOB_NUMBER must be empty or" in (p.stdout + p.stderr) and not deployed(calls)
 
 
-# ---- CO_NUMBER: a reused CO number for tests ----------------------------------------------------------------------------
-def test_co_number_defaults_to_empty_and_is_always_passed(run):
+# ---- DEV_TARGET_CO: development mode, a pre-created order -----------------------------------------------------------------
+def test_dev_target_co_defaults_to_empty_and_is_always_passed(run):
     p, calls = run({**BASE, **NET})
-    assert p.returncode == 0 and overrides(calls)["CoNumber"] == "" and "CO_NUMBER=" not in p.stdout
+    assert p.returncode == 0 and overrides(calls)["DevTargetCo"] == "" and "DEV_TARGET_CO=" not in p.stdout
 
 
-def test_co_number_is_passed_with_a_warning(run):
-    p, calls = run({**BASE, **NET, "CO_NUMBER": "129548"})
-    assert p.returncode == 0 and overrides(calls)["CoNumber"] == "129548"
-    assert "CO_NUMBER=129548" in p.stdout and "none is allocated" in p.stdout
+def test_dev_target_co_is_passed_with_a_warning(run):
+    p, calls = run({**BASE, **NET, "DEV_TARGET_CO": "129999"})
+    assert p.returncode == 0 and overrides(calls)["DevTargetCo"] == "129999"
+    assert "DEV_TARGET_CO=129999" in p.stdout and "OVERWRITES" in p.stdout
 
 
-def test_co_number_must_be_a_plain_identifier(run):
-    p, calls = run({**BASE, **NET, "CO_NUMBER": "a b"})
-    assert p.returncode != 0 and "CO_NUMBER must be empty or" in (p.stdout + p.stderr) and not deployed(calls)
+def test_dev_target_co_must_be_digits(run):
+    p, calls = run({**BASE, **NET, "DEV_TARGET_CO": "a b"})
+    assert p.returncode != 0 and "DEV_TARGET_CO must be empty or" in (p.stdout + p.stderr) and not deployed(calls)
 
 
 # ---- feature 006 FR-016 revised: the oversized-event bucket's retention --------------------------------------------------------

@@ -45,6 +45,12 @@ class EventStore:
             return self.claim(document_id, execution, _retry=False)
         return False
 
+    def claim_dev(self, document_id, execution, dev_target):
+        """Development mode: take the document unconditionally (an earlier claim does not block a run); the item is rewritten."""
+        now = self._now()
+        self._t.transact_put([({"pk": f"{PK}{document_id}", "document_id": document_id, "execution": execution,
+                                "state": PROCESSING, "claimed_at": now, "updated_at": now, "dev_target": dev_target}, None)])
+
     def release(self, document_id):
         """Give the claim back: nothing was reserved, so a later delivery may try again."""
         self._t.delete_item(Key={"pk": f"{PK}{document_id}"})

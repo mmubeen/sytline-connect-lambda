@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 
 def truthy(v):
     return str(v).lower() in ("1", "true", "yes")
@@ -55,9 +56,14 @@ def fixed_job_number():
     return os.environ.get("JOB_NUMBER", "").strip()
 
 
-def fixed_co_number():
-    """CO_NUMBER (deploy.env): a TEST setting. When set, every reservation uses this CO number and none is allocated."""
-    return os.environ.get("CO_NUMBER", "").strip()
+def dev_target_co():
+    """DEV_TARGET_CO (deploy.env): development mode. A pre-created customer order every reservation uses (none is allocated) and
+    every save overwrites; empty = off. A value that is not 1-10 digits is an error, never a silent fall back to normal mode."""
+    value = os.environ.get("DEV_TARGET_CO", "").strip()
+    if value and not re.fullmatch(r"[0-9]{1,10}", value):
+        from .errors import DEV_TARGET_INVALID, IntegrationError
+        raise IntegrationError(DEV_TARGET_INVALID, "DEV_TARGET_CO must be empty or 1 to 10 digits", step="config")
+    return value
 
 
 def live_writes_enabled():

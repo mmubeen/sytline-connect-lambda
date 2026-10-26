@@ -12,7 +12,7 @@ import hashlib
 import time
 import uuid
 
-from syteline import config, errors, eventdoc, eventstore, idp, savestart
+from syteline import config, devmode, errors, eventdoc, eventstore, idp, savestart
 from syteline.client import SoapIdoClient
 from syteline.errors import IntegrationError, SecretStoreUnavailable
 from syteline.reservations import ReservationStore, effective_state, numbers_report
@@ -58,6 +58,8 @@ def _remaining(context):
 
 def _out(outcome, document_id=None, summary=None, **extra):
     body = {"outcome": outcome}
+    if devmode.active():
+        body.update(devmode.marker(devmode.active()))
     if document_id:
         body["document_id"] = document_id
     body.update(extra)
@@ -120,6 +122,12 @@ def process(payload, context, debug=False):
         return _refused(exc, document_id, debug=debug)
 
     try:
+        dev = config.dev_target_co()  # development mode: an invalid setting is refused before anything is read or reserved
+    except IntegrationError as exc:
+        _log(started, "refused", parsed, summary, code=exc.err["code"])
+        return _refused(exc, document_id, summary, debug)
+
+    try:
         doc = idp.po_details(document_id, read=read)
     except IntegrationError as exc:  # not usable (unreviewed low field, missing field, ...): nothing is reserved
         _log(started, "refused", parsed, summary, code=exc.err["code"])
@@ -144,11 +152,15 @@ def process(payload, context, debug=False):
         _log(started, "refused", parsed, summary, code=errors.STORE_UNAVAILABLE)
         return _refused(IntegrationError(errors.STORE_UNAVAILABLE, "could not reach the reservation store",
                                          step="record"), document_id, summary)
-    if first is not None and _final(first):
+    if first is not None and _final(first) and not dev:  # development mode: an earlier run never blocks this one
         _log(started, "already_processed", parsed, summary, reservation_id=first["reservation_id"])
         return _out("already_processed", document_id, summary, first_outcome=_numbers(first))
     try:
-        claimed = events.claim(document_id, parsed["execution"])
+        if dev:
+            events.claim_dev(document_id, parsed["execution"], dev)  # takes the document over, whatever was recorded
+            claimed = True
+        else:
+            claimed = events.claim(document_id, parsed["execution"])
     except Exception:
         _log(started, "refused", parsed, summary, code=errors.STORE_UNAVAILABLE)
         return _refused(IntegrationError(errors.STORE_UNAVAILABLE, "could not record the claim", step="record"),

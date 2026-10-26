@@ -267,6 +267,10 @@ class ErpMock:
             else:
                 stored = self._best_match(ido, values)
                 stored.update(values)
+                if ido == "CCT_Coitems":  # keep the standard SLCoitems read in step
+                    for r in self._rows.get("SLCoitems", []):
+                        if (str(r.get("CoNum")), str(r.get("CoLine"))) == (str(stored.get("co_num")), str(stored.get("co_line"))):
+                            r.update({LINE_READ[k]: v for k, v in values.items() if k in LINE_READ})
             out.append(_row_xml(stored))
         return _dataset_xml(ido, "".join(out))
 
