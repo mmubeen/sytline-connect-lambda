@@ -165,7 +165,7 @@ class SoapIdoClient:
         """
         if not config.live_writes_enabled():
             raise LiveWritesDisabled("live ERP writes are disabled (SYTELINE_LIVE_WRITES)")
-        key = {"_ItemId": self._item_id(ido, key), **key}  # the row's own identifier: without it an update changes nothing, silently
+        key = {"_ItemId": self._item_id(ido, key, values), **key}  # the row's own identifier: without it an update changes nothing, silently
         raw = self._call("save", _dataset(ido, "Update", {**key, **values}, key), *SAVE_TAIL, write=True)
         err = row_error(raw)
         if err:
@@ -173,10 +173,12 @@ class SoapIdoClient:
         rows = parse_rows(raw)
         return rows[0] if rows else {**key, **values}
 
-    def _item_id(self, ido, key):
-        """The `_ItemId` of the one row `key` names (a read). ErpRejected when there is no such row or the service gives no id."""
+    def _item_id(self, ido, key, values=()):
+        """The `_ItemId` of the one row `key` names (a read). ErpRejected when there is no such row or the service gives no id.
+        The read asks for the properties the update will change as well: a joined IDO (CCTJobs: job + job_sch) can only be updated
+        in the tables whose properties were loaded."""
         flt = " AND ".join(f"{k} = {v}" if isinstance(v, int) else f"{k} = {idos.quote(v)}" for k, v in key.items())
-        rows = self.load(ido, ["_ItemId", *key], flt, record_cap=1)
+        rows = self.load(ido, ["_ItemId", *key, *(v for v in values if v not in key)], flt, record_cap=1)
         item_id = str((rows[0].get("_ItemId") if rows else "") or "").strip()
         if not item_id:
             raise ErpRejected(f"cannot update {ido}: no row with {flt} (or the service returned no _ItemId)")

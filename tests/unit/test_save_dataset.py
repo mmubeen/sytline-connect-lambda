@@ -51,7 +51,7 @@ def test_a_client_update_sends_the_row_identifier_in_both_rows(live_writes):
             pass
 
         def load(self, ido, props, flt="", record_cap=0):
-            assert props[0] == "_ItemId" and flt == "co_num = '1' AND co_line = 2"
+            assert props == ["_ItemId", "co_num", "co_line", "item"] and flt == "co_num = '1' AND co_line = 2"  # the changed properties are loaded too
             return [{"_ItemId": "ID-1"}]
 
         def _call(self, op, *args, **kw):
