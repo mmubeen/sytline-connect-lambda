@@ -19,8 +19,8 @@ def test_the_width_boundary():
     assert rowbuild.item_too_long([{"item": "A"}, {"item": "A" * 28}, {"item": "R* " + "A" * 28}]) == [2, 3]
 
 
-def test_the_rows_hold_the_padded_repair_code_only_when_asked():
-    assert rowbuild.co_line("100", 1, LN, "5000", repair=True)["item"] == "R* PW1234".rjust(30)
-    assert rowbuild.job_row("100", 1, LN, "5000", {"po_number": "P"}, repair=True)["Item"] == "R* PW1234".rjust(30)
+def test_the_rows_hold_the_unpadded_repair_code_only_when_asked():
+    assert rowbuild.co_line("100", 1, LN, "5000", repair=True)["item"] == "R* PW1234"
+    assert rowbuild.job_row("100", 1, LN, "5000", {"po_number": "P"}, repair=True)["Item"] == "R* PW1234"
     assert rowbuild.co_line("100", 1, LN, "5000")["item"] == "PW1234".rjust(30)  # the one-step upload is unchanged
     assert rowbuild.job_row("100", 1, LN, "5000", {"po_number": "P"})["Item"] == "PW1234".rjust(30)

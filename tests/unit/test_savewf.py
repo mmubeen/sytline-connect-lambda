@@ -48,7 +48,7 @@ def test_happy_path_order_links_and_per_line_results(live_writes):
         "Stat": "P", "Whse": "MAIN", "TaxCode1": "R", "FrtTaxCode1": "N", "MscTaxCode1": "N", "OrigSite": "CCT"}
     assert "DateReceived" not in head
     line1 = soap.rows["CCT_Coitems"][0]  # lines are written to CCT_Coitems with lowercase names
-    assert line1["co_num"] == "       100" and line1["co_line"] == "   1" and line1["item"] == "R* I0".rjust(30)
+    assert line1["co_num"] == "       100" and line1["co_line"] == "   1" and line1["item"] == "R* I0"
     assert line1["ref_num"] == "      5000" and line1["ref_type"] == "J" and line1["ref_line_suf"] == "0" and line1["u_m"] == "EA"
     assert (line1["qty_ordered"], line1["qty_ordered_conv"], line1["stat"], line1["ship_site"], line1["whse"]) == ("1", "1", "P", "CCT", "MAIN")
     assert "Teardown" not in line1 and "teardown" not in line1
