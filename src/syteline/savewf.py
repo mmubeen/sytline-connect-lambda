@@ -102,6 +102,11 @@ class SaveRun(Upload):
             i, job = entry["line"], entry["job"]
             desc = self._description(i, ln)
             row = rowbuild.co_line(self.co_num, i, ln, job, whse, repair=True, description=desc)
+            jrow = rowbuild.job_row(self.co_num, i, ln, job, req, whse, repair=True, description=desc)
+            job_there = bool(config.fixed_job_number() and self._read(JOB_IDO, ["Job"], rowbuild.job_filter(job), f"read_job_{i}"))
+            jkey = {k: jrow[k] for k in ("Job", "Suffix")}
+            if job_there:  # first: the ERP refuses a line whose item differs from the item of the job it references
+                self._update(JOB_IDO, jkey, {k: v for k, v in jrow.items() if k not in jkey}, "job", job, f"update_job_{i}")
             if i in existing:
                 lkey = {k: row[k] for k in ("co_num", "co_line", "co_release")}
                 self._update(idos.LINE_WRITE_IDO, lkey, {k: v for k, v in row.items() if k not in lkey}, "line",
@@ -112,11 +117,7 @@ class SaveRun(Upload):
                 self.results[i - 1]["action"] = "inserted"
             if "teardown" in ln:
                 self._teardown(i, ln["teardown"])
-            jrow = rowbuild.job_row(self.co_num, i, ln, job, req, whse, repair=True, description=desc)
-            if config.fixed_job_number() and self._read(JOB_IDO, ["Job"], rowbuild.job_filter(job), f"read_job_{i}"):
-                jkey = {k: jrow[k] for k in ("Job", "Suffix")}
-                self._update(JOB_IDO, jkey, {k: v for k, v in jrow.items() if k not in jkey}, "job", job, f"update_job_{i}")
-            else:
+            if not job_there:
                 self._insert(JOB_IDO, jrow, "job", job, f"create_job_{i}")
             self._written.add(i)
             self.results[i - 1]["co_line"] = i

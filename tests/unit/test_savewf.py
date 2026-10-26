@@ -376,6 +376,8 @@ def test_the_second_run_overwrites_the_first(devmode, monkeypatch):
     assert out2["state"] == "succeeded" and kinds(soap).count(("insert", idos.JOB_IDO)) == 1  # the job was updated the second time
     assert ("update", idos.JOB_IDO) in kinds(soap) and len(soap.rows[idos.JOB_IDO]) == 1
     assert len(soap.rows[idos.CO_IDO]) == 1 and soap.rows[idos.LINE_IDO][0]["QtyOrdered"] == "7"
+    second = kinds(soap)[-4:]  # an existing job is updated before the line is written (the ERP checks the line's item against the job's)
+    assert second.index(("update", idos.JOB_IDO)) < second.index(("update", idos.LINE_WRITE_IDO))
 
 
 def test_a_missing_target_writes_nothing(devmode):
