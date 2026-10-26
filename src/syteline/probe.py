@@ -92,7 +92,7 @@ def probe_item(soap, event):
     """{"action": "probe_item", "item": "3810727-6"[, "co_num": "129556"]}: how the ERP holds one item, read-only.
 
     Tries the item master (SLItemcusts: the lookup the save uses) under the exact repair code, the 30-wide padded code and a LIKE on the
-    part number, and with "co_num" also the Item and Description of that order's lines (SLCoitems), so the stored form can be compared with
+    part number, and with "co_num" also the Item and Description of that order's lines (SLCoitems, and the write table CCT_Coitems), so the stored form can be compared with
     what the save writes. Each read is reported as rows (capped, values cut at 120 characters) or the ERP's own refusal. Nothing is written.
     """
     item, co_num = event.get("item"), event.get("co_num")
@@ -110,6 +110,10 @@ def probe_item(soap, event):
                "item_master": {name: _read(soap, itemdesc.ITEM_DESC_IDO, props, flt) for name, flt in reads}}
         if co_num is not None:
             out["order_lines"] = _read(soap, idos.LINE_IDO, ["CoLine", "Item", "Description"], rowbuild.co_filter(co_num))
+            pad = rowbuild.rjust(co_num, rowbuild.CO_NUM_WIDTH)
+            out["written_lines"] = {  # the table the save writes (lowercase names), where a line is visible even if SLCoitems hides it
+                "padded": _read(soap, idos.LINE_WRITE_IDO, ["co_line", "item", "description", "ref_num"], f"co_num = {idos.quote(pad)}"),
+                "like": _read(soap, idos.LINE_WRITE_IDO, ["co_line", "item", "description", "ref_num"], f"co_num LIKE {idos.quote('%' + str(co_num))}")}
     except (ErpUnreachable, ErpUncertain) as exc:
         return failure("probe_item", errors.error(errors.ERP_UNREACHABLE, str(exc)[:240]))
     return out

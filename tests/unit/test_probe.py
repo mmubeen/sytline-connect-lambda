@@ -96,7 +96,7 @@ def test_probe_item_reads_the_item_master_three_ways_and_the_order_lines_without
     im = out["item_master"]
     assert im["exact"]["rows"] == [] and im["padded"]["filter"] == "Item = '" + "R* 3810727-6".rjust(30) + "'"
     assert im["like"]["rows"][0]["ItmDescription"] == "MAT_OUT 3810727-6"
-    assert "error" in out["order_lines"] and all(c[3] == 3 for c in soap.calls)
+    assert "error" in out["order_lines"] and set(out["written_lines"]) == {"padded", "like"} and all(c[3] == 3 for c in soap.calls)
 
 
 def test_probe_item_refuses_bad_input_and_is_reachable_from_the_handler(monkeypatch):
