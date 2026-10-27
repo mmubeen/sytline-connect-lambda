@@ -33,8 +33,16 @@ DEFAULT_MAP = {
     "line.engine_sn": "engine_sn",
     "line.serial_num": "serial_num",
     "line.packing": "packing",
+    "note.customer_requests": "customer_requests",            # optional text sections, attached to the order as notes (feature 011)
+    "note.regulatory_compliance": "regulatory_compliance",
+    "note.shipping_information": "shipping_information",
+    "note.billing_information": "billing_information",
+    "note.work_to_be_performed": "work_to_be_performed",
     "line.job": "job_number",               # optional: a job number the document already carries for the line (FR-006e)
 }
+NOTE_TITLES = {"note.customer_requests": "Customer Requirements", "note.regulatory_compliance": "Regulatory Compliance",
+               "note.shipping_information": "Shipping Information", "note.billing_information": "Billing Information",
+               "note.work_to_be_performed": "Work To Be Performed"}
 REQUIRED = ("customer.name", "po_number", "lines")
 REQUIRED_LINE = ("line.item", "line.quantity", "line.uom")
 MAX_LINES = 25
@@ -179,4 +187,11 @@ def map_fields(fields, mapping=None):
                     line[name] = out
             lines.append(line)
     details["lines"] = lines
+    notes = []  # optional: a section that is absent or unreadable simply has no note
+    for key, title in NOTE_TITLES.items():
+        text = _text(_get(fields, m[key]))
+        if text:
+            notes.append({"title": title, "text": text})
+    if notes:
+        details["notes"] = notes
     return details, missing, used

@@ -110,6 +110,8 @@ class FakeSoap:
         if action == "unreachable":
             raise ErpUnreachable("connect failed")
         row = self.add_record(ido, **values)
+        if ido == idos.SPECIFIC_NOTE_IDO:  # a stored note is handed its token (refresh after save)
+            row["SpecificNoteToken"] = str(next(self._token))
         if ido == idos.LINE_WRITE_IDO:  # the line written to CCT_Coitems is read back through the standard SLCoitems
             self.add_record(idos.LINE_IDO, **_LINE_READ.get_all(values))
         if action == "timeout_after":

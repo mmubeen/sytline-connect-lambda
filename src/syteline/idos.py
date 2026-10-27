@@ -17,6 +17,10 @@ UDF_IDO = "UserDefinedFields"   # holds a line's teardown date (UDFDT1), keyed b
 JOB_IDO = "CCTJobs"
 NOTE_IDO = "SpecificNotes"
 OBJECT_NOTE_IDO = "ObjectNotes"
+SPECIFIC_NOTE_IDO = NOTE_IDO
+_DEFAULT_OBJECT_NOTE_LINK_IDO = "SLObjectNotes"  # the ERP owner's name for the note-to-record link (feature 011); UNCONFIRMED, see probe_properties
+NOTE_HEADER_CO, NOTE_HEADER_COITEM, NOTE_HEADER_JOB = 31, 37, 115  # NoteHeaderToken by record type (only the order is used)
+NOTE_TYPE = 0
 
 # UNCONFIRMED: which IDO exposes each routine as a callable method, and the customer collection
 _DEFAULT_CUSTOMER_IDO = "SLCustAddrs"
@@ -67,6 +71,10 @@ def next_co():
 
 def next_job():
     return (os.environ.get("SYTELINE_NEXT_JOB_IDO") or _DEFAULT_NEXT_JOB_IDO, NEXT_JOB_METHOD)
+
+
+def object_note_link_ido():
+    return os.environ.get("SYTELINE_OBJECT_NOTE_IDO") or _DEFAULT_OBJECT_NOTE_LINK_IDO
 
 
 def create_note():

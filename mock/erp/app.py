@@ -272,6 +272,9 @@ class ErpMock:
             values = {etree.QName(c).localname: (c.text or "") for c in el}
             if change == "inserted":
                 stored = self._add(ido, values)
+                if ido == "SpecificNotes":  # a stored note is handed its token
+                    stored.setdefault("SpecificNoteToken", str(self._counters["note"]))
+                    self._counters["note"] += 1
                 if ido == "CCT_Coitems":  # lines are written to CCT_Coitems (lowercase names) and read through SLCoitems
                     self._add("SLCoitems", {LINE_READ[k]: v for k, v in values.items() if k in LINE_READ})
             else:

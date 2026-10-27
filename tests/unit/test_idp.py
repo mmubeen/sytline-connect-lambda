@@ -312,3 +312,14 @@ def test_the_fingerprint_covers_the_supplied_job_numbers(fake):
     assert base == validation.fingerprint({"name": "ACME"}, "PO-1", 2)
     fake.add(DOC, po_fields(0, lines=[plain[0], dict(plain[1], job_number="J2")]))
     assert idp.po_details(DOC)["fingerprint"] == validation.fingerprint({"name": "ACME"}, "PO-1", 2, {2: "J2"}) != base
+
+
+def test_the_note_sections_are_part_of_the_details_only_when_they_have_text(fake):
+    fake.add(DOC, po_fields(1, customer_requests="  Verify work. ", billing_information="E-mail invoices.", shipping_information="   ",
+                            erp_notes_summary="not attached"))
+    out = idp.po_details(DOC)
+    assert out["details"]["notes"] == [{"title": "Customer Requirements", "text": "Verify work."},
+                                       {"title": "Billing Information", "text": "E-mail invoices."}]
+    assert out["fingerprint"] == validation.fingerprint(out["details"]["customer"], "PO-1", 1)  # notes do not change it
+    fake2 = fake.add(DOC, po_fields(1))
+    assert "notes" not in idp.po_details(DOC)["details"]

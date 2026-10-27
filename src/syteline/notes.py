@@ -9,7 +9,9 @@ ASSUMPTIONS (confirm with discovery task T013): which IDO exposes the method (id
 property names; verified only against fakes.
 """
 
-from . import errors, idos
+import logging
+
+from . import config, errors, idos, rowbuild
 from .errors import (ErpRejected, ErpUncertain, ErpUnreachable, LiveWritesDisabled, error, failure)
 
 # record_type -> (IDO that holds the row, key property, ObjectName used by the note routines)
@@ -77,3 +79,103 @@ def get_notes(soap, record_type, record_key, since=None):
                         "internal": str(link.get("NhNoteFlag", "")) in ("1", "True", "true"),
                         "created_at": str(n.get("CreateDate", "")), "created_by": n.get("CreatedBy", "")})
     return {"ok": True, "action": "get_notes", "notes": out}
+
+
+# -- the document's notes on the customer order (feature 011) ----------------------------------------------------------------
+log = logging.getLogger(__name__)
+
+
+def _token_of(row):
+    token = str((row or {}).get("SpecificNoteToken", "") or "").strip()
+    return token if token and token != "0" else ""
+
+
+def _existing(soap, pointer):
+    """{title: (token, content)} of the notes already tied to the order (link rows with the order's header token, then their notes)."""
+    links = soap.load(idos.object_note_link_ido(), ["SpecificNoteToken"],
+                      f"RefRowPointer = {idos.quote(pointer)} AND NoteHeaderToken = {idos.NOTE_HEADER_CO}")
+    found = {}
+    for link in links:
+        token = _token_of(link)
+        if not token:
+            continue
+        cond = f"SpecificNoteToken = {token}" if token.isdigit() else idos.filter_eq("SpecificNoteToken", token)
+        for n in soap.load(idos.SPECIFIC_NOTE_IDO, ["SpecificNoteToken", "NoteDesc", "NoteContent"], cond, record_cap=1):
+            found.setdefault(str(n.get("NoteDesc", "")).strip(), (token, str(n.get("NoteContent", ""))))
+    return found
+
+
+def attach_order_notes(soap, co_num, sections, replace=False, time_left=None):
+    """Attach the document's text sections to the order `co_num`, one note each (feature 011).
+
+    The ERP owner's path: the order's RowPointer (SLCos), a SpecificNotes row (NoteDesc = title, NoteContent = text), its
+    SpecificNoteToken, then the link row (SpecificNoteToken, NoteHeaderToken 31, RefRowPointer, NoteType 0). A title the order already
+    has is skipped; with `replace` (development mode) its text is updated instead. A refused note is reported and the next is still
+    tried; an unknown outcome or an unreachable ERP stops the rest, and nothing is retried. NEVER raises, never reports note text.
+
+    Returns {"attempted", "attached": [title], "not_attached": [{"title", "reason", "uncertain"}], "skipped_existing", "replaced"}.
+    """
+    report = {"attempted": False, "attached": [], "not_attached": [], "skipped_existing": [], "replaced": []}
+    sections = [s for s in sections or [] if str(s.get("text", "")).strip()]
+    if not sections:
+        return report
+    if not config.live_writes_enabled():
+        report["not_attached"] = [{"title": s["title"], "reason": "live ERP writes are disabled", "uncertain": False} for s in sections]
+        return report
+    report["attempted"] = True
+
+    def stop_rest(index, reason, uncertain):
+        for k, s in enumerate(sections[index:]):
+            report["not_attached"].append({"title": s["title"], "uncertain": uncertain and k == 0,
+                                           "reason": reason if k == 0 else "not attempted: " + reason})
+
+    try:
+        rows = soap.load(idos.CO_IDO, ["RowPointer"], rowbuild.co_filter(co_num), record_cap=1)
+        pointer = str((rows[0].get("RowPointer") if rows else "") or "").strip()
+        if not pointer:
+            stop_rest(0, f"order {co_num} has no RowPointer to attach notes to", False)
+            return report
+        existing = _existing(soap, pointer)
+    except (ErpRejected, ErpUncertain, ErpUnreachable) as exc:
+        stop_rest(0, f"could not read the order's notes: {str(exc)[:200]}", False)
+        return report
+    for index, sec in enumerate(sections):
+        title, text = sec["title"], str(sec["text"]).strip()
+        if time_left is not None and time_left() < 5000:
+            stop_rest(index, "not enough Lambda time left", False)
+            return report
+        try:
+            if title in existing:
+                if not replace:
+                    report["skipped_existing"].append(title)
+                    continue
+                token = existing[title][0]
+                key = {"SpecificNoteToken": int(token) if token.isdigit() else token}
+                soap.update(idos.SPECIFIC_NOTE_IDO, key, {"NoteContent": text})
+                report["replaced"].append(title)
+                continue
+            stored = soap.insert(idos.SPECIFIC_NOTE_IDO, {"NoteDesc": title, "NoteContent": text})
+            token = _token_of(stored)
+            if not token:  # the answer carried no token: find the note just written, by title and text
+                found = soap.load(idos.SPECIFIC_NOTE_IDO, ["SpecificNoteToken"],
+                                  f"NoteDesc = {idos.quote(title)} AND NoteContent = {idos.quote(text)}", record_cap=1)
+                token = _token_of(found[0] if found else None)
+            if not token:
+                report["not_attached"].append({"title": title, "uncertain": True,
+                                               "reason": "the note was written but its token could not be found, so it was not linked"})
+                continue
+            soap.insert(idos.object_note_link_ido(), {"SpecificNoteToken": token, "NoteHeaderToken": idos.NOTE_HEADER_CO,
+                                                      "RefRowPointer": pointer, "NoteType": idos.NOTE_TYPE})
+            report["attached"].append(title)
+        except ErpRejected as exc:
+            report["not_attached"].append({"title": title, "uncertain": False, "reason": f"ERP refused: {str(exc)[:200]}"})
+        except ErpUncertain as exc:
+            stop_rest(index, f"outcome unknown: {str(exc)[:200]}", True)
+            return report
+        except ErpUnreachable as exc:
+            stop_rest(index, f"ERP unreachable: {str(exc)[:200]}", False)
+            return report
+        except LiveWritesDisabled:
+            stop_rest(index, "live ERP writes are disabled", False)
+            return report
+    return report

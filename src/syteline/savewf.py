@@ -10,7 +10,7 @@ feature 001): stop at the first problem, record a row as possibly written BEFORE
 never retry. Outcome states: saved | partly_saved | failed | needs_reconciliation (research.md R7, R8).
 """
 
-from . import config, defaults, devmode, errors, idos, itemdesc, preflight, rowbuild
+from . import config, defaults, devmode, errors, idos, itemdesc, notes, preflight, rowbuild
 from .errors import ErpError, ErpRejected, ErpUncertain, ErpUnreachable, IntegrationError, LiveWritesDisabled
 from .pipeline import CO_IDO, JOB_IDO, LINE_IDO, Upload, _Stop
 
@@ -30,6 +30,7 @@ class SaveRun(Upload):
         self.warnings = []     # order-level warnings (for example: customer defaults not available)
         self.dev = ""          # the development target (DEV_TARGET_CO) while development mode is on: rows are overwritten
         self.surplus = []      # lines the target has that the document does not
+        self.notes = None      # the report of the order notes (feature 011), None until they were attempted
 
     # -- bookkeeping -----------------------------------------------------------------------
     def _mark(self, kind, key):
@@ -39,6 +40,8 @@ class SaveRun(Upload):
 
     def _outcome(self, base):
         out = dict(base, results=[dict(r) for r in self.results], co_num=self.co_num, warnings=list(self.warnings))
+        if self.notes is not None:
+            out["notes"] = self.notes
         if self.dev:
             out.update(devmode.marker(self.dev), co_action="updated")
             if self.surplus:
@@ -259,9 +262,25 @@ class SaveRun(Upload):
                 bad = "; ".join(f"line {r['line']}: {w}" for r in self.results for w in r["warnings"]
                                 if w.startswith("read-back")) or "read-back could not be completed"
                 raise _Stop(self._park(errors.READBACK_MISMATCH, bad, "read_back"))
+            self._notes()
             return self._outcome({"state": "succeeded", "customer_match": self.customer})
         except _Stop as stop:
             return self._outcome(self._settle(stop.outcome))
+
+    def _notes(self):
+        """The document's text sections as notes on the order, after the order is saved and read back. Never changes the outcome:
+        what could not be attached is a warning and in the report (feature 011)."""
+        sections = self.req.get("notes") or []
+        if not sections:
+            return
+        try:
+            self.notes = notes.attach_order_notes(self.soap, self.co_num, sections, replace=bool(self.dev), time_left=self.remaining_ms)
+        except Exception as exc:  # defensive: the order is saved whatever happens here
+            self.notes = {"attempted": True, "attached": [], "skipped_existing": [], "replaced": [],
+                          "not_attached": [{"title": s["title"], "uncertain": True, "reason": f"unexpected error: {type(exc).__name__}"}
+                                           for s in sections]}
+        for n in self.notes["not_attached"]:
+            self.warnings.append(f'note "{n["title"]}" was not attached: {n["reason"]}')
 
     def _settle(self, outcome):
         """After a stop: read back what was written (best effort) and classify (research.md R7)."""

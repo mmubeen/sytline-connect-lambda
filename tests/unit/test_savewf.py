@@ -502,3 +502,49 @@ def test_development_mode_updates_carry_the_description_too(devmode):
     out, _ = dev_go(soap=soap, lines_before=1)
     assert out["state"] == "succeeded"
     assert soap.rows["CCT_Coitems"][0]["description"] == "Turbine blade"
+
+
+# ---- the order notes (feature 011) --------------------------------------------------------------------------------------------
+NOTES = [{"title": t, "text": f"text of {t}"} for t in ("Customer Requirements", "Regulatory Compliance", "Shipping Information",
+                                                         "Billing Information", "Work To Be Performed")]
+
+
+def test_the_five_sections_become_five_notes_on_the_order_only(live_writes):
+    out, soap = go(2, req=save_req(2, notes=NOTES))
+    assert out["state"] == "succeeded" and out["notes"]["attached"] == [n["title"] for n in NOTES]
+    assert len(soap.rows["SpecificNotes"]) == 5 and len(soap.rows["SLObjectNotes"]) == 5
+    order_pointer = soap.rows[idos.CO_IDO][0]["RowPointer"]
+    assert {r["RefRowPointer"] for r in soap.rows["SLObjectNotes"]} == {order_pointer}  # none on a line or a job
+    assert not [w for w in out["warnings"] if "note" in w]
+
+
+def test_no_sections_means_no_notes_key_and_no_note_calls(live_writes):
+    out, soap = go(1)
+    assert "notes" not in out and "SpecificNotes" not in soap.rows
+
+
+def test_a_refused_note_leaves_the_order_saved_and_is_a_warning(live_writes):
+    soap = FakeSoap(customers=CUST, scenarios={("insert", "SpecificNotes", 2): "reject"})
+    out, _ = go(1, soap=soap, req=save_req(1, notes=NOTES))
+    assert out["state"] == "succeeded" and out["results"][0]["status"] == "saved"
+    assert [n["title"] for n in out["notes"]["not_attached"]] == ["Regulatory Compliance"] and len(out["notes"]["attached"]) == 4
+    assert any('note "Regulatory Compliance" was not attached' in w for w in out["warnings"])
+    assert "text of Regulatory Compliance" not in str(out["warnings"])
+
+
+def test_an_unknown_note_outcome_does_not_change_the_order_state(live_writes):
+    soap = FakeSoap(customers=CUST, scenarios={("insert", "SpecificNotes", 1): "timeout_after"})
+    out, _ = go(1, soap=soap, req=save_req(1, notes=NOTES))
+    assert out["state"] == "succeeded" and out["notes"]["not_attached"][0]["uncertain"] is True
+    assert soap.writes().count(("insert", "SpecificNotes")) == 1  # never retried
+
+
+def test_development_runs_leave_one_copy_of_each_note(devmode, monkeypatch):
+    monkeypatch.setenv("JOB_NUMBER", "5000")  # the same job is reused, as in the other development re-run test
+    soap = None
+    for run in range(3):
+        notes_run = [dict(n, text=f"{n['text']} v{run}") for n in NOTES]
+        out, soap = dev_go(soap=soap, req=save_req(1, notes=notes_run))
+        assert out["state"] == "succeeded"
+    assert len(soap.rows["SpecificNotes"]) == 5 and len(soap.rows["SLObjectNotes"]) == 5
+    assert {r["NoteContent"].rsplit(" ", 1)[1] for r in soap.rows["SpecificNotes"]} == {"v2"} and len(out["notes"]["replaced"]) == 5
