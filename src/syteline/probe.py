@@ -6,8 +6,9 @@ With "list": true it instead returns the property names the IDO declares (read f
 """
 
 import re
+from datetime import date, timedelta
 
-from . import errors, idos, itemdesc, rowbuild
+from . import errors, idos, idp_fields, itemdesc, notes, rowbuild
 from .errors import ErpRejected, ErpUncertain, ErpUnreachable, failure
 
 MAX_PROPERTIES = 60
@@ -120,3 +121,53 @@ def probe_item(soap, event):
     except (ErpUnreachable, ErpUncertain) as exc:
         return failure("probe_item", errors.error(errors.ERP_UNREACHABLE, str(exc)[:240]))
     return out
+
+
+def probe_notes(soap, event):
+    """{"action": "probe_notes", "co_num": "129566"}: which notes are attached to the order, read-only (feature 011).
+
+    Reads the order's RowPointer (SLCos), its link rows (the note link IDO, header token 31) and each linked note (SpecificNotes), and
+    reports per note the token, title, creation date and the LENGTH of its text, never the text. It also lists recent notes (today and
+    yesterday) that carry one of the five section titles but are not linked to this order, and which of the five titles the order lacks.
+    Nothing is written.
+    """
+    co_num = event.get("co_num")
+    if not re.match(r"^\d{1,10}$", str(co_num or "")):
+        return failure("probe_notes", errors.error(errors.VALIDATION, "give `co_num` (digits, up to 10)", step="co_num"))
+    titles = list(idp_fields.NOTE_TITLES.values()) if isinstance(idp_fields.NOTE_TITLES, dict) else list(idp_fields.NOTE_TITLES)
+    try:
+        rows = soap.load(idos.CO_IDO, ["RowPointer"], rowbuild.co_filter(co_num), record_cap=1)
+        pointer = str((rows[0].get("RowPointer") if rows else "") or "").strip()
+        if not pointer:
+            return failure("probe_notes", errors.error(errors.VALIDATION, f"order {co_num} was not found", step="order"))
+        links = soap.load(idos.object_note_link_ido(), ["SpecificNoteToken", "NoteHeaderToken", "NoteType"],
+                          f"RefRowPointer = {idos.quote(pointer)}", record_cap=50)
+        attached, linked = [], set()
+        for link in links:
+            token = notes._token_of(link)
+            entry = {"token": token, "header_token": str(link.get("NoteHeaderToken", "")), "note_type": str(link.get("NoteType", ""))}
+            if token:
+                linked.add(token)
+                cond = f"SpecificNoteToken = {token}" if token.isdigit() else idos.filter_eq("SpecificNoteToken", token)
+                found = soap.load(idos.SPECIFIC_NOTE_IDO, ["SpecificNoteToken", "NoteDesc", "NoteContent", "CreateDate"], cond, record_cap=1)
+                if found:
+                    entry.update(title=str(found[0].get("NoteDesc", "")).strip(), created=str(found[0].get("CreateDate", ""))[:30],
+                                 text_length=len(str(found[0].get("NoteContent", "")).strip()))
+                else:
+                    entry["note"] = "no SpecificNotes row for this token"
+            attached.append(entry)
+        since = idos.quote((date.today() - timedelta(days=1)).isoformat())
+        unlinked = []
+        for title in titles:
+            for r in soap.load(idos.SPECIFIC_NOTE_IDO, ["SpecificNoteToken", "NoteDesc", "CreateDate"],
+                               f"NoteDesc = {idos.quote(title)} AND CreateDate >= {since}", record_cap=20):
+                token = notes._token_of(r)
+                if token and token not in linked:
+                    unlinked.append({"token": token, "title": title, "created": str(r.get("CreateDate", ""))[:30]})
+    except ErpRejected as exc:
+        return failure("probe_notes", errors.error(errors.ERP_REJECTED, str(exc)[:240]))
+    except (ErpUnreachable, ErpUncertain) as exc:
+        return failure("probe_notes", errors.error(errors.ERP_UNREACHABLE, str(exc)[:240]))
+    have = {e.get("title") for e in attached}
+    return {"ok": True, "action": "probe_notes", "co_num": str(co_num), "link_ido": idos.object_note_link_ido(), "attached": attached,
+            "missing_titles": [t for t in titles if t not in have], "unlinked_recent": unlinked}

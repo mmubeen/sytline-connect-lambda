@@ -180,6 +180,8 @@ To list the names an IDO declares instead of guessing (names only, from the sche
 
 `probe_item` is a read-only look at how the ERP holds one item: `{"action": "probe_item", "item": "3810727-6", "co_num": "129556"}` (`co_num` is optional). It reads the item master (`SLItemcusts`) for `R* <item>` exactly, padded to 30 characters and with a `LIKE` on the part number, and with `co_num` the `Item` and `Description` of that order's lines. Each read returns up to 3 rows or the ERP's own refusal; nothing is written. Use it when a line saves with a blank item or description.
 
+`probe_notes` is a read-only check that the notes were attached: `{"action": "probe_notes", "co_num": "129566"}`. It reads the order's `RowPointer`, its link rows (`SLObjectNotes`) and each linked note (`SpecificNotes`), and returns per note the token, header token, note type, title, creation date and the **length** of the text (never the text). `missing_titles` lists which of the five section titles the order has no note for, and `unlinked_recent` lists notes with a section title written today or yesterday that no link row ties to this order (for example one left by a failed run). Nothing is written. Run it after a dev save, and again after the repeat run to confirm nothing was duplicated.
+
 Each name below is requested alone in a one-row read; the answer lists `exists` and `missing` (with the service's message) and never a value. `CCT_Coitems`, `CCTJobs` and `SLCos` have a default list of the names the save uses plus likely alternatives. Nothing is written, so live writes need not be on.
 
 ## The property pre-check

@@ -2,7 +2,7 @@
 SyteLine integration Lambda: the ONE function of the deployment (specs/007). What runs is decided by the request:
 
   * an explicit `action`: health | add_note | get_notes | document_event | probe_properties (a read-only check of which
-    property names an IDO accepts) | probe_item (a read-only look at how the ERP holds one item), and the internal work_upload | work_save | sweep
+    property names an IDO accepts) | probe_item (a read-only look at how the ERP holds one item) | probe_notes (a read-only list of the notes attached to an order), and the internal work_upload | work_save | sweep
     (started by this function itself or by the schedule);
   * otherwise an API Gateway request: its route picks the handler (handlers/routing.py), e.g. POST /confirmed-orders;
   * otherwise the default action, `document_event`: the IDP processing-complete event (specs/006). A payload that is not
@@ -87,6 +87,16 @@ def _probe_item(event):
     return probe.probe_item(soap, event)
 
 
+def _probe_notes(event):
+    from syteline import probe
+
+    try:
+        soap = _make_client()
+    except SecretStoreUnavailable as exc:
+        return failure("probe_notes", errors.error(errors.SECRET_STORE_UNREACHABLE, str(exc)))
+    return probe.probe_notes(soap, event)
+
+
 def _document_event(raw, defaulted, context):
     """The event intake (specs/006). `raw` is the IDP event, or an object holding it under `event`."""
     from syteline import eventdoc
@@ -146,6 +156,8 @@ def lambda_handler(event, context):
             result = _probe_properties(event)
         elif action == "probe_item":
             result = _probe_item(event)
+        elif action == "probe_notes":
+            result = _probe_notes(event)
         elif action in WORK_ACTIONS:
             result = _background(action, event, ctx)
         elif action in ACTIONS:

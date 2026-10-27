@@ -1,5 +1,5 @@
 import lambda_function
-from syteline import errors, probe
+from syteline import errors, idos, probe
 from syteline.errors import ErpRejected, ErpUnreachable
 
 
@@ -112,3 +112,30 @@ def test_the_note_idos_have_default_candidate_names_for_the_one_by_one_probe():
     for ido in ("SLObjectNotes", "ObjectNotes"):
         assert {"NoteHeaderToken", "RefRowPointer"} <= set(probe.DEFAULTS[ido])
     assert {"NoteDesc", "NoteContent"} <= set(probe.DEFAULTS["SpecificNotes"]) and "NoteType" in probe.DEFAULTS["SLObjectNotes"]
+
+
+# ---- probe_notes: the notes attached to an order ---------------------------------------------------------------------------
+def test_probe_notes_lists_the_attached_notes_by_title_and_length_never_the_text():
+    from fakes import FakeSoap
+
+    s = FakeSoap()
+    s.add_record("SLCos", CoNum="    129566", RowPointer="RP-1")
+    s.add_record("SpecificNotes", SpecificNoteToken="7", NoteDesc="Customer Requirements", NoteContent="secret text", CreateDate="9999-01-01")
+    s.add_record("SpecificNotes", SpecificNoteToken="8", NoteDesc="Billing Information", NoteContent="orphan", CreateDate="9999-01-01")
+    s.add_record(idos.object_note_link_ido(), SpecificNoteToken="7", NoteHeaderToken=31, RefRowPointer="RP-1", NoteType=0)
+    out = probe.probe_notes(s, {"co_num": "129566"})
+    assert out["ok"] and out["attached"] == [{"token": "7", "header_token": "31", "note_type": "0", "title": "Customer Requirements",
+                                               "created": "9999-01-01", "text_length": 11}]
+    assert "secret text" not in str(out) and "Customer Requirements" not in out["missing_titles"] and len(out["missing_titles"]) == 4
+    assert [u["token"] for u in out["unlinked_recent"]] == ["8"] and s.writes() == []
+
+
+def test_probe_notes_refuses_bad_input_and_an_unknown_order_and_is_reachable_from_the_handler(monkeypatch):
+    from fakes import FakeSoap
+
+    assert probe.probe_notes(FakeSoap(), {"co_num": "1; drop"})["ok"] is False
+    assert probe.probe_notes(FakeSoap(), {"co_num": "5"})["ok"] is False
+    s = FakeSoap()
+    s.add_record("SLCos", CoNum="         5", RowPointer="RP")
+    monkeypatch.setattr(lambda_function, "_client_factory", lambda: s)
+    assert lambda_function.lambda_handler({"action": "probe_notes", "co_num": "5"}, None)["ok"]
