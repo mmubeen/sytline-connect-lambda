@@ -108,5 +108,7 @@ def test_probe_item_refuses_bad_input_and_is_reachable_from_the_handler(monkeypa
 
 def test_the_note_idos_have_default_candidate_names_for_the_one_by_one_probe():
     for ido in ("SpecificNotes", "SLObjectNotes", "ObjectNotes"):
-        assert {"SpecificNoteToken", "RefRowPointer"} & set(probe.DEFAULTS[ido]) and "NoteHeaderToken" in probe.DEFAULTS[ido]
+        assert "SpecificNoteToken" in probe.DEFAULTS[ido]
+    for ido in ("SLObjectNotes", "ObjectNotes"):
+        assert {"NoteHeaderToken", "RefRowPointer"} <= set(probe.DEFAULTS[ido])
     assert {"NoteDesc", "NoteContent"} <= set(probe.DEFAULTS["SpecificNotes"]) and "NoteType" in probe.DEFAULTS["SLObjectNotes"]
