@@ -10,6 +10,7 @@ property names; verified only against fakes.
 """
 
 import logging
+from datetime import date, timedelta
 
 from . import config, errors, idos, rowbuild
 from .errors import (ErpRejected, ErpUncertain, ErpUnreachable, LiveWritesDisabled, error, failure)
@@ -105,6 +106,17 @@ def _existing(soap, pointer):
     return found
 
 
+def _find_written(soap, title, text):
+    """The token of the note just written: today's and yesterday's notes with this title (a day's margin covers the server's time zone),
+    the newest whose text equals `text` (compared here, as NoteContent is ntext and the ERP refuses `=` on it)."""
+    since = (date.today() - timedelta(days=1)).isoformat()
+    rows = soap.load(idos.SPECIFIC_NOTE_IDO, ["SpecificNoteToken", "NoteContent"],
+                     f"NoteDesc = {idos.quote(title)} AND CreateDate >= {idos.quote(since)}")
+    same = [_token_of(r) for r in rows if str(r.get("NoteContent", "")).strip() == text]
+    same = [t for t in same if t]
+    return max(same, key=lambda t: (len(t), t)) if same else ""
+
+
 def attach_order_notes(soap, co_num, sections, replace=False, time_left=None):
     """Attach the document's text sections to the order `co_num`, one note each (feature 011).
 
@@ -156,10 +168,8 @@ def attach_order_notes(soap, co_num, sections, replace=False, time_left=None):
                 continue
             stored = soap.insert(idos.SPECIFIC_NOTE_IDO, {"NoteDesc": title, "NoteContent": text})
             token = _token_of(stored)
-            if not token:  # the answer carried no token: find the note just written, by title and text
-                found = soap.load(idos.SPECIFIC_NOTE_IDO, ["SpecificNoteToken"],
-                                  f"NoteDesc = {idos.quote(title)} AND NoteContent = {idos.quote(text)}", record_cap=1)
-                token = _token_of(found[0] if found else None)
+            if not token:  # the answer carried no token: find the note just written (NoteContent is ntext, so it cannot be filtered on)
+                token = _find_written(soap, title, text)
             if not token:
                 report["not_attached"].append({"title": title, "uncertain": True,
                                                "reason": "the note was written but its token could not be found, so it was not linked"})

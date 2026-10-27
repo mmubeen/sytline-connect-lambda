@@ -103,11 +103,17 @@ def test_blank_sections_and_no_sections_write_nothing(live_writes):
 
 def test_a_note_without_a_token_in_the_answer_is_found_by_its_text(live_writes):
     class NoToken(FakeSoap):
+        filters = []
+
+        def load(self, ido, properties, filter_="", record_cap=0):
+            self.filters.append(filter_)
+            return super().load(ido, properties, filter_, record_cap)
+
         def insert(self, ido, values):
             row = super().insert(ido, values)
             if ido == "SpecificNotes":
                 row.pop("SpecificNoteToken", None)
-                self.rows[ido][-1]["SpecificNoteToken"] = "77"  # stored, but not in the answer
+                self.rows[ido][-1].update(SpecificNoteToken="77", CreateDate="9999-01-01")  # stored, but not in the answer
                 return {k: v for k, v in row.items() if k != "SpecificNoteToken"}
             return row
 
@@ -115,6 +121,7 @@ def test_a_note_without_a_token_in_the_answer_is_found_by_its_text(live_writes):
     s.add_record("SLCos", CoNum="       100")
     out = notes.attach_order_notes(s, "100", SECTIONS[:1])
     assert out["attached"] == ["Customer Requirements"] and s.rows[LINK][0]["SpecificNoteToken"] == "77"
+    assert not any("NoteContent =" in f for f in s.filters)  # ntext: the ERP refuses "=" on it
 
 
 def test_live_writes_off_attempts_nothing(monkeypatch):
