@@ -21,6 +21,9 @@ DEFAULTS = {
                   "RefLineSuf", "RefRelease", "CustNum", "Whse"],
     "CCTJobs": ["Job", "OrdType", "Whse", "Item", "QtyReleased", "OrdNum", "OrdLine", "OrdRelease", "RootJob", "uf_eng_sn",
                 "uf_sn", "Packing", "CoNum", "CoLine"],
+    "SpecificNotes": ["SpecificNoteToken", "NoteDesc", "NoteContent", "CreateDate", "CreatedBy", "NoteHeaderToken", "RefRowPointer"],
+    "SLObjectNotes": ["SpecificNoteToken", "NoteHeaderToken", "RefRowPointer", "NoteType", "NhNoteFlag", "ObjectName"],
+    "ObjectNotes": ["SpecificNoteToken", "NoteHeaderToken", "RefRowPointer", "NoteType", "NhNoteFlag", "ObjectName"],
     "SLCos": ["CoNum", "CustNum", "CustSeq", "OrderDate", "Stat", "CustPo", "TermsCode", "ShipCode", "DateReceived", "Datefld"],
 }
 

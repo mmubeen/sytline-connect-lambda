@@ -104,3 +104,9 @@ def test_probe_item_refuses_bad_input_and_is_reachable_from_the_handler(monkeypa
     assert probe.probe_item(ItemSoap(), {"item": "A", "co_num": "1; drop"})["ok"] is False
     monkeypatch.setattr(lambda_function, "_client_factory", lambda: ItemSoap())
     assert lambda_function.lambda_handler({"action": "probe_item", "item": "3810727-6"}, None)["ok"]
+
+
+def test_the_note_idos_have_default_candidate_names_for_the_one_by_one_probe():
+    for ido in ("SpecificNotes", "SLObjectNotes", "ObjectNotes"):
+        assert {"SpecificNoteToken", "RefRowPointer"} & set(probe.DEFAULTS[ido]) and "NoteHeaderToken" in probe.DEFAULTS[ido]
+    assert {"NoteDesc", "NoteContent"} <= set(probe.DEFAULTS["SpecificNotes"]) and "NoteType" in probe.DEFAULTS["SLObjectNotes"]
