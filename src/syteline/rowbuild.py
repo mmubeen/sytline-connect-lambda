@@ -10,7 +10,7 @@ What the demo shows and this module follows:
   * the teardown date is a UserDefinedFields row for the line's RowPointer (TableName coitem, UDFDT1), not a property of the line;
   * dates are ISO datetimes with the Eastern offset.
 The save (not the one-step upload) writes the item as the repair item code ("R* " prefix, repair_item, `repair=True`), NOT padded: the item master holds
-"R* 3810727-6" unpadded (probe_item: the padded form matches no item), so a padded value is an unknown item and the ERP blanks the line's item and description; and the description read from the item master (itemdesc, `description=`). Not done here (the demo does them, not yet asked for): UOM / due period from the customer contract, and a default teardown date of the received date plus 7 days.
+"R* 3810727-6" unpadded (probe_item: the padded form matches no item), so a padded value is an unknown item and the ERP blanks the line's item and description; and the description read from the item master (itemdesc, `description=`). The line's due date is computed by `duedate` (contract, else company default) and arrives in `ln["due_date"]`. Not done here (the demo does them, not yet asked for): UOM from the customer contract, and a default teardown date of the received date plus 7 days.
 """
 
 import re

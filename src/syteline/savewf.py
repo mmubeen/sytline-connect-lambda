@@ -10,7 +10,7 @@ feature 001): stop at the first problem, record a row as possibly written BEFORE
 never retry. Outcome states: saved | partly_saved | failed | needs_reconciliation (research.md R7, R8).
 """
 
-from . import config, defaults, devmode, errors, idos, itemdesc, notes, preflight, rowbuild
+from . import config, defaults, devmode, duedate, errors, idos, itemdesc, notes, preflight, rowbuild
 from .errors import ErpError, ErpRejected, ErpUncertain, ErpUnreachable, IntegrationError, LiveWritesDisabled
 from .pipeline import CO_IDO, JOB_IDO, LINE_IDO, Upload, _Stop
 
@@ -30,6 +30,7 @@ class SaveRun(Upload):
         self.warnings = []     # order-level warnings (for example: customer defaults not available)
         self.dev = ""          # the development target (DEV_TARGET_CO) while development mode is on: rows are overwritten
         self.surplus = []      # lines the target has that the document does not
+        self._due_cache = {}   # due periods already read in this save (feature 012)
         self.notes = None      # the report of the order notes (feature 011), None until they were attempted
 
     # -- bookkeeping -----------------------------------------------------------------------
@@ -81,6 +82,24 @@ class SaveRun(Upload):
                 f'no description found in the item master for "{code}" (the line was saved with a blank description)')
         return text or ""
 
+    def _due(self, i, ln, req):
+        """The line as it is written: its due date is the received date plus the contract's (else the company default) due period, and
+        a due date read from the document is dropped (feature 012). Reads only; a lookup problem is a warning on the line, never a failure."""
+        code = rowbuild.repair_item(ln["item"])
+        days, source = duedate.period(self.soap, self.customer.get("cust_num"), code, self._due_cache)
+        when = duedate.due_date(rowbuild._received(req), days) if days else None
+        eff = {k: v for k, v in ln.items() if k != "due_date"}
+        if when:
+            eff["due_date"] = when
+        elif days:
+            source = duedate.NONE
+            self.results[i - 1]["warnings"].append("no due date: the received date is not a valid date (the line was saved without one)")
+        else:
+            self.results[i - 1]["warnings"].append(
+                f'no due date: no due period in the customer contract for "{code}" or the company default (the line was saved without one)')
+        self.results[i - 1].update(due_date=when, due_source=source)
+        return eff
+
     def _read(self, ido, props, filter_, step):
         """A read made during an overwrite: a failure stops the run (nothing written yet: failed; otherwise: to reconcile)."""
         try:
@@ -104,6 +123,7 @@ class SaveRun(Upload):
         for entry, ln in zip(self.jobs, req["lines"]):
             i, job = entry["line"], entry["job"]
             desc = self._description(i, ln)
+            ln = self._due(i, ln, req)
             row = rowbuild.co_line(self.co_num, i, ln, job, whse, repair=True, description=desc)
             jrow = rowbuild.job_row(self.co_num, i, ln, job, req, whse, repair=True, description=desc)
             job_there = bool(config.fixed_job_number() and self._read(JOB_IDO, ["Job"], rowbuild.job_filter(job), f"read_job_{i}"))
@@ -250,6 +270,7 @@ class SaveRun(Upload):
                 for entry, ln in zip(self.jobs, req["lines"]):
                     i, job = entry["line"], entry["job"]
                     desc = self._description(i, ln)
+                    ln = self._due(i, ln, req)
                     self._insert(idos.LINE_WRITE_IDO, rowbuild.co_line(self.co_num, i, ln, job, whse, repair=True, description=desc), "line",
                                  f"{self.co_num}/{i}", f"create_line_{i}")
                     if "teardown" in ln:

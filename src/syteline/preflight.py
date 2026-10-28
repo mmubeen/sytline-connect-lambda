@@ -29,7 +29,7 @@ def needed(lines):
     found = {"terms_code": "T", "ship_code": "S"}
     line_props, job_props = [], []
     for ln in lines:
-        full = {**sample, **{k: v for k, v in ln.items() if k in ("due_date", "engine_sn", "serial_num", "packing") and v}}
+        full = {**sample, "due_date": "2026-01-01", **{k: v for k, v in ln.items() if k in ("engine_sn", "serial_num", "packing") and v}}  # due_date: always computed (feature 012)
         for src, dst in ((rowbuild.co_line("1", 1, full, "1", description=""), line_props), (rowbuild.job_row("1", 1, full, "1", req, description=""), job_props)):
             dst += [k for k in src if k not in dst]
     udf = any(ln.get("teardown") for ln in lines)

@@ -139,3 +139,7 @@ def test_probe_notes_refuses_bad_input_and_an_unknown_order_and_is_reachable_fro
     s.add_record("SLCos", CoNum="         5", RowPointer="RP")
     monkeypatch.setattr(lambda_function, "_client_factory", lambda: s)
     assert lambda_function.lambda_handler({"action": "probe_notes", "co_num": "5"}, None)["ok"]
+
+
+def test_the_due_period_idos_have_default_names_for_the_probe():
+    assert {"CustNum", "Item", "DuePeriod"} <= set(probe.DEFAULTS["SLItemcusts"]) and "DuePeriod" in probe.DEFAULTS["SLCoparms"]

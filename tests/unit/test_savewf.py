@@ -39,8 +39,8 @@ def test_happy_path_order_links_and_per_line_results(live_writes):
                            ("insert", "CCTJobs"), ("insert", "CCT_Coitems"), ("insert", "CCTJobs")]
     assert not any(c == ("invoke", "NextWOSp") or c == ("invoke", "NextCoSp") for c in soap.calls)  # FR-005
     assert out["results"] == [
-        {"line": 1, "job": "5000", "item": "R* I0", "status": "saved", "warnings": [], "co_line": 1},
-        {"line": 2, "job": "5001", "item": "R* I1", "status": "saved", "warnings": [], "co_line": 2}]
+        {"line": 1, "job": "5000", "item": "R* I0", "status": "saved", "warnings": [], "co_line": 1, "due_date": "2026-11-02T00:00:00-05:00", "due_source": "default"},
+        {"line": 2, "job": "5001", "item": "R* I1", "status": "saved", "warnings": [], "co_line": 2, "due_date": "2026-11-02T00:00:00-05:00", "due_source": "default"}]
     head = soap.rows["SLCos"][0]
     assert head["CoNum"] == "       100" and head["CustNum"] == "     C1" and head["CustSeq"] == "   0"  # padded to the ERP's widths
     assert head["CustPo"] == "PO-1".rjust(22) and head["OrderDate"] == "2026-10-19T00:00:00-04:00"  # the received date, Eastern
@@ -61,7 +61,8 @@ def test_happy_path_order_links_and_per_line_results(live_writes):
     assert job1["RootJob"] == "      5000" and "CoNum" not in job1 and "CoLine" not in job1  # the link back is OrdNum / OrdLine
     assert (job1["Type"], job1["Stat"], job1["OrdType"], job1["Suffix"], job1["RootSuf"], job1["OrdRelease"]) == ("J", "F", "O", 0, 0, 0)
     assert (job1["uf_eng_sn"], job1["uf_sn"], job1["uf_app"]) == ("E1", "S1", "CDBD")  # Box -> CDBD, Crate -> YES
-    assert job1["JobDate"] == "2026-10-19T00:00:00-04:00" == job1["JschStartDate"] == job1["JschEndDate"] and job1["Whse"] == "MAIN"
+    assert job1["JobDate"] == "2026-10-19T00:00:00-04:00" and job1["Whse"] == "MAIN"
+    assert job1["JschStartDate"] == job1["JschEndDate"] == line1["due_date"] == "2026-11-02T00:00:00-05:00"  # received + the company default 14 days
     assert soap.rows["CCTJobs"][1]["Job"] == "      5001" and soap.rows["CCTJobs"][1]["QtyReleased"] == "2"
 
 
@@ -493,7 +494,7 @@ def test_the_description_is_looked_up_once_per_line_and_is_not_compared_at_read_
     soap = FakeSoap(customers=CUST, corrupt={("SLCoitems", "Description"): "other"})
     out, _ = go(2, soap=soap)
     assert out["state"] == "succeeded"
-    assert [c for c in soap.calls if c == ("load", "SLItemcusts")] == [("load", "SLItemcusts")] * 2
+    assert [c for c in soap.calls if c == ("load", "SLItemcusts")] == [("load", "SLItemcusts")] * 4  # per line: the contract and the description
 
 
 def test_development_mode_updates_carry_the_description_too(devmode):
@@ -548,3 +549,75 @@ def test_development_runs_leave_one_copy_of_each_note(devmode, monkeypatch):
         assert out["state"] == "succeeded"
     assert len(soap.rows["SpecificNotes"]) == 5 and len(soap.rows["SLObjectNotes"]) == 5
     assert {r["NoteContent"].rsplit(" ", 1)[1] for r in soap.rows["SpecificNotes"]} == {"v2"} and len(out["notes"]["replaced"]) == 5
+
+
+# ---- the due date from the contract (feature 012) ----------------------------------------------------------------------------
+def due_soap(company=14, **contract):
+    s = FakeSoap(customers=CUST, company_due=company)
+    if contract:
+        s.add_record("SLItemcusts", CustNum="     C1", Item="R* I0", ItmDescription="Blade", **contract)
+    return s
+
+
+def test_the_contract_period_dates_the_line_and_the_default_dates_the_others(live_writes):
+    out, soap = go(2, soap=due_soap(DuePeriod="30"), req=save_req(2, received_date="2026-10-19"))
+    assert out["state"] == "succeeded"
+    assert [(r["due_source"], r["due_date"]) for r in out["results"]] == [("contract", "2026-11-18T00:00:00-05:00"), ("default", "2026-11-02T00:00:00-05:00")]
+    assert [r["due_date"] for r in soap.rows["CCT_Coitems"]] == [r["due_date"] for r in out["results"]]
+    assert all(r["warnings"] == [] for r in out["results"])
+
+
+def test_a_due_date_from_the_document_is_not_written(live_writes):
+    req = save_req(1, received_date="2026-10-19")
+    req["lines"][0]["due_date"] = "2030-01-01"
+    out, soap = go(1, soap=due_soap(DuePeriod="30"), req=req)
+    assert soap.rows["CCT_Coitems"][0]["due_date"] == "2026-11-18T00:00:00-05:00" and "2030" not in str(soap.rows["CCTJobs"])
+
+
+def test_the_job_starts_and_ends_on_the_lines_due_date(live_writes):
+    out, soap = go(1, soap=due_soap(DuePeriod="30"), req=save_req(1, received_date="2026-10-19"))
+    job = soap.rows["CCTJobs"][0]
+    assert job["JschStartDate"] == job["JschEndDate"] == "2026-11-18T00:00:00-05:00" and job["JobDate"] == "2026-10-19T00:00:00-04:00"
+
+
+def test_no_period_anywhere_saves_without_a_due_date_and_warns(live_writes):
+    req = save_req(1, received_date="2026-10-19")
+    req["lines"][0]["due_date"] = "2030-01-01"  # the document's date is not used as a fallback
+    out, soap = go(1, soap=due_soap(company=None), req=req)
+    assert out["state"] == "succeeded" and out["results"][0]["due_source"] == "none" and out["results"][0]["due_date"] is None
+    assert "due_date" not in soap.rows["CCT_Coitems"][0] and soap.rows["CCTJobs"][0]["JschStartDate"] == soap.rows["CCTJobs"][0]["JobDate"]
+    assert out["results"][0]["warnings"][0].startswith("no due date: no due period")
+
+
+def test_an_invalid_received_date_warns_and_leaves_the_line_undated(live_writes):
+    out, soap = go(1, soap=due_soap(), req=save_req(1, received_date="soon"))
+    assert out["state"] == "succeeded" and out["results"][0]["due_source"] == "none"
+    assert "received date is not a valid date" in out["results"][0]["warnings"][0] and "due_date" not in soap.rows["CCT_Coitems"][0]
+
+
+def test_refused_lookups_never_fail_the_save(live_writes):
+    from syteline.errors import ErpRejected
+
+    class Refuse(FakeSoap):
+        def load(self, ido, properties, filter_="", record_cap=0):
+            if "DuePeriod" in properties:
+                raise ErpRejected("no grant")
+            return super().load(ido, properties, filter_, record_cap)
+
+        read_back = load
+
+    out, soap = go(2, soap=Refuse(customers=CUST), req=save_req(2, received_date="2026-10-19"))
+    assert out["state"] == "succeeded" and [r["due_source"] for r in out["results"]] == ["none", "none"]
+    assert all(r["warnings"] and r["status"] == "saved" for r in out["results"]) and soap.count("CCTJobs") == 2
+
+
+def test_the_lookups_are_reads_only(live_writes):
+    _, soap = go(2, soap=due_soap(DuePeriod="30"))
+    assert not [c for c in soap.writes() if c[1] in ("SLItemcusts", "SLCoparms")]
+
+
+def test_development_mode_updates_carry_the_computed_due_date(devmode):
+    soap = due_soap(DuePeriod="30")
+    out, _ = dev_go(soap=soap, lines_before=1)
+    assert out["state"] == "succeeded" and soap.rows["CCT_Coitems"][0]["due_date"].startswith("20")
+    assert out["results"][0]["due_source"] == "contract"

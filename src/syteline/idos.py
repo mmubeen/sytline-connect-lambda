@@ -12,6 +12,7 @@ import os
 # Confirmed by docs/COJobCreationIDOs.xlsx or the instruction sheet
 CO_IDO = "SLCos"
 LINE_IDO = "SLCoitems"          # the standard line IDO (PascalCase, in the workbook): lines are READ back through it
+COPARMS_IDO, DUE_PERIOD_PROP = "SLCoparms", "DuePeriod"  # the company-wide default due period (feature 012); UNCONFIRMED names (the demo's)
 LINE_WRITE_IDO = "CCT_Coitems"  # lines are WRITTEN here (lowercase column-style names, as the PO OCR demo does); see rowbuild.py
 UDF_IDO = "UserDefinedFields"   # holds a line's teardown date (UDFDT1), keyed by the line's RowPointer
 JOB_IDO = "CCTJobs"

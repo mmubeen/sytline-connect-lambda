@@ -16,6 +16,8 @@ _NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 # The names the save writes or reads (idos.py), plus likely alternatives for the ones the service has refused.
 DEFAULTS = {
+    "SLItemcusts": ["CustNum", "Item", "DuePeriod", "UM", "ItmDescription"],
+    "SLCoparms": ["DuePeriod", "ParmKey"],
     "CCT_Coitems": ["CoNum", "CoLine", "CoRelease", "Item", "UM", "QtyOrdered", "DueDate", "Price", "RefType", "RefNum",
                     "RefLineSuf", "RefRelease", "Teardown", "CustNum", "Whse", "CoCoNum", "OrdNum", "CoNumber", "Co_Num"],
     "SLCoitems": ["CoNum", "CoLine", "CoRelease", "Item", "UM", "QtyOrdered", "DueDate", "Price", "RefType", "RefNum",

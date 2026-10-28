@@ -16,7 +16,7 @@ def _store():
 
 def _line(r):
     out = {"line": int(r["line"]), "job": str(r["job"]), "status": r["status"], "warnings": list(r.get("warnings") or [])}
-    for k in ("co_line", "item", "error", "action"):
+    for k in ("co_line", "item", "error", "action", "due_date", "due_source"):
         if k in r:
             out[k] = int(r[k]) if k == "co_line" else r[k]
     return out

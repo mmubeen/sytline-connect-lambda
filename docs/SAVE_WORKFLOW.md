@@ -162,7 +162,8 @@ They follow the PO OCR demo (`Intern-Demo/.../COMPLETE_OCR`, `sytline/syteline/f
 - **SLCos has no received-date property**: the demo writes the received date as `OrderDate`.
 - **Dates** are ISO datetimes at midnight with the Eastern offset, for example `2026-10-19T00:00:00-04:00`.
 - **A job always links to its order**: `OrdType` is `O`; the configured order type is no longer written (`SYTELINE_DEFAULT_ORDTYPE` is not required any more).
-- **Not done yet** (the demo does them): the unit of measure and due period from the customer contract, a default teardown date of the received date plus 7 days. A price is not written by the demo or here.
+- **The due date** (feature 012) is computed as the demo does: the received date plus a due period in days. The period is the customer contract's for the line's repair item (`SLItemcusts`, `CustNum` padded to 7 + `Item`, property `DuePeriod`), else the company default (`SLCoparms.DuePeriod`), else none; only a positive whole number counts. The result is written to the line's `due_date` and is the job's `JschStartDate`/`JschEndDate`; a `due_date` read from the document is never written. A line with no period (or an unusable received date) is saved without a due date and its `warnings` gets `no due date: ...`. Each line result carries `due_date` and `due_source` (`contract`, `default` or `none`). The lookups are reads only, made once per customer/item pair, and a refused one only costs the date. The property names are the demo's and unconfirmed: check them with `probe_properties` on `SLItemcusts` and `SLCoparms`.
+- **Not done yet** (the demo does them): the unit of measure from the customer contract, a default teardown date of the received date plus 7 days. A price is not written by the demo or here.
 
 ## Finding the right property names (read-only)
 

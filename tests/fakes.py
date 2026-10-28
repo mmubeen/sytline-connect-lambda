@@ -64,9 +64,11 @@ class FakeSoap:
     """
 
     def __init__(self, scenarios=None, read_fail=False, corrupt=None, customers=None, enforce_live_gate=True,
-                 readback_fail=False, item_master=True):
+                 readback_fail=False, item_master=True, company_due=14):
         self.item_master = item_master  # True: the item master answers any item with "Description of <item>" unless a row is stored
         self.rows = {}
+        if company_due:  # the company-wide default due period (feature 012); None: the ERP has none
+            self.rows[idos.COPARMS_IDO] = [{"DuePeriod": str(company_due), "RowPointer": "rp-parms"}]
         self.scenarios = dict(scenarios or {})
         self.read_fail = read_fail
         self.readback_fail = readback_fail  # fail every read except the customer lookup
